@@ -3,6 +3,8 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Core/Core.csproj"/>
     <Compile Include="../../src/Game/Client/ColonyView.cs" Link="Client/ColonyView.cs"/>
+    <Compile Include="../../src/Game/Client/EntityStateCodec.cs" Link="Client/EntityStateCodec.cs"/>
+    <Compile Include="../../src/Game/Client/ColonyViewExtensions.cs" Link="Client/ColonyViewExtensions.cs"/>
     <Compile Include="../../src/Game/Client/ColonyMotion.cs" Link="Client/ColonyMotion.cs"/>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0"/>
     <PackageReference Include="xunit" Version="2.9.3"/>

@@ -26,6 +26,8 @@ namespace Queyang.Game
                     options.Add(new Setting("door/" + door.CurrentState + "/" + door.RequestedState + "/" + value, label,
                         () => door.QueueStateChange(value)));
                 }
+                var access = building.GetComponent<AccessControl>();
+                if (access != null) AddDoorPermissions(options, access);
             }
             var generator = building.GetComponent<ManualGenerator>();
             if (generator != null)
@@ -41,6 +43,27 @@ namespace Queyang.Game
             if (current.priority_class != PriorityScreen.PriorityClass.basic) return;
             AddRange(options, "priority", "建筑优先级", "", current.priority_value, 1, 9, 1, v =>
                 priority.SetMasterPriority(new PrioritySetting(PriorityScreen.PriorityClass.basic, (int)v)));
+        }
+
+        static void AddDoorPermissions(List<Setting> options, AccessControl access)
+        {
+            foreach (var dupe in Components.LiveMinionIdentities.Items)
+            {
+                if (dupe == null || Grid.WorldIdx[Grid.PosToCell(dupe)] != Grid.WorldIdx[Grid.PosToCell(access)]) continue;
+                var person = dupe.assignableProxy.Get();
+                if (person == null) continue;
+                int id = person.GetComponent<KPrefabID>().InstanceID;
+                var old = access.GetSetPermission(person);
+                foreach (var next in new[] { AccessControl.Permission.Both, AccessControl.Permission.GoLeft,
+                    AccessControl.Permission.GoRight, AccessControl.Permission.Neither })
+                {
+                    if (old == next) continue;
+                    string label = next == AccessControl.Permission.Both ? "双向" : next == AccessControl.Permission.GoLeft ? "向左" :
+                        next == AccessControl.Permission.GoRight ? "向右" : "禁止";
+                    options.Add(new Setting($"access/{id}/{old}/{next}", dupe.GetProperName() + " · " + label,
+                        () => access.SetPermission(person, next)));
+                }
+            }
         }
 
         static void AddRange(List<Setting> options, string id, string title, string unit, float current,

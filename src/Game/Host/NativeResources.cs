@@ -26,13 +26,13 @@ namespace Queyang.Game
             internal KBatchedAnimController Anim;
         }
 
-        static ObjectLayerListItem First(int cell)
+        internal static ObjectLayerListItem First(int cell)
         {
             var first = Grid.Objects[cell, (int)ObjectLayer.Pickupables];
             return first == null ? null : first.GetComponent<Pickupable>()?.objectLayerListItem;
         }
 
-        static bool IsOre(Pickupable pickup)
+        internal static bool IsOre(Pickupable pickup)
         {
             if (pickup == null || pickup.storage != null || pickup.KPrefabID == null) return false;
             var e = pickup.PrimaryElement?.Element;
@@ -41,8 +41,10 @@ namespace Queyang.Game
             return e != null && e.IsSolid && pickup.KPrefabID.PrefabTag == e.tag;
         }
 
-        internal static void Capture(ColonyView view, WorldContainer world)
+        internal static void Capture(ColonyView view, WorldContainer world, int sample=-1)
         {
+            int sequence=sample<0 ? Mathf.FloorToInt(Time.unscaledTime) : sample;
+            view.EntityPayload = NativeEntitySampler.Capture(view, world,sequence);
             var piles = new List<ColonyPile>();
             int cells = view.Cells.Length;
             for (int i = 0; i < cells; i++)
@@ -61,7 +63,7 @@ namespace Queyang.Game
                         SubX = (byte)Mathf.RoundToInt(255 * Mathf.Clamp01(pos.x - x)),
                         SubY = (byte)Mathf.RoundToInt(255 * Mathf.Clamp01(pos.y - y)),
                         Animation = anim == null ? 0 : anim.currentAnim.HashValue,
-                        Material = new MaterialSample { Element = (int)p.ElementID, Mass = p.Mass, Temperature = p.Temperature } });
+                        Material = NativeMaterialReadings.Capture(p) });
                 }
                 view.PileCoverage[i >> 3] |= (byte)(1 << (i & 7));
             }
@@ -69,7 +71,7 @@ namespace Queyang.Game
             // A dense dump can exceed an entire network frame. Each page remains authoritative
             // for its ID interval, including objects just removed, even when all stacks share a cell.
             int pilePageCount = Math.Max(1, (piles.Count + ColonyView.MaxPiles - 1) / ColonyView.MaxPiles);
-            int pilePage = Mathf.FloorToInt(Time.unscaledTime) % pilePageCount;
+            int pilePage = sequence % pilePageCount;
             int firstPile = pilePage * ColonyView.MaxPiles, pileCount = Math.Min(ColonyView.MaxPiles, piles.Count - firstPile);
             view.PileFrom = pilePage == 0 ? 0 : piles[firstPile - 1].SaveId + 1;
             view.PileThrough = pilePage == pilePageCount - 1 ? int.MaxValue : piles[firstPile + pileCount - 1].SaveId;
@@ -91,7 +93,7 @@ namespace Queyang.Game
                 hostStocks.Sort((a, b) => a.Tag.CompareTo(b.Tag));
             }
             int pages = Math.Max(1, (hostStocks.Count + ColonyView.MaxStocks - 1) / ColonyView.MaxStocks);
-            int page = Mathf.FloorToInt(Time.unscaledTime) % pages, from = page * ColonyView.MaxStocks;
+            int page = sequence % pages, from = page * ColonyView.MaxStocks;
             int count = Math.Min(ColonyView.MaxStocks, hostStocks.Count - from);
             view.CompleteStock = pages == 1;
             view.StockFrom = from == 0 ? int.MinValue : hostStocks[from - 1].Tag + 1;
@@ -101,6 +103,8 @@ namespace Queyang.Game
 
         internal static void Apply(ColonyView view, WorldContainer world, Transform parent)
         {
+            if (view.EntityPayload != null && view.EntityPayload.Length > 0)
+                NativeEntityDisplay.Apply(view, world, parent);
             observed.Clear();
             foreach (var p in view.Piles)
             {
@@ -118,6 +122,7 @@ namespace Queyang.Game
                     {
                         SetVisible(pickup, true);
                         NativeWorldMirror.ApplyPrimary(pickup.PrimaryElement, p.Material);
+                        if (view.HasEnvironment) NativeMaterialReadings.Apply(pickup.PrimaryElement, p.Material);
                         Play(pickup.GetComponent<KBatchedAnimController>(), p.Animation);
                         Remove(p.SaveId);
                         continue;
@@ -135,6 +140,7 @@ namespace Queyang.Game
                 visual.Anim.transform.position = new Vector3(x + p.SubX / 255f, y + p.SubY / 255f, pos.z);
                 visual.Cell = cell;
                 NativeWorldMirror.ApplyPrimary(visual.Primary, p.Material);
+                if (view.HasEnvironment) NativeMaterialReadings.Apply(visual.Primary, p.Material);
                 Play(visual.Anim, p.Animation);
             }
             for (int i = 0; i < view.Cells.Length; i++)
@@ -201,7 +207,9 @@ namespace Queyang.Game
             if (!(visible ? hidden.Remove(pickup) : hidden.Add(pickup))) return;
             pickup.GetComponent<KBatchedAnimController>()?.SetVisiblity(visible);
             var selectable = pickup.GetComponent<KSelectable>();
-            if (selectable != null) selectable.IsSelectable = visible;
+            if (selectable == null) return;
+            if (!visible && selectable.IsSelected && SelectTool.Instance != null) SelectTool.Instance.Select(null);
+            selectable.IsSelectable = visible;
         }
 
         static void Remove(int id)
@@ -269,6 +277,7 @@ namespace Queyang.Game
 
         internal static void Reset()
         {
+            NativeEntityDisplay.Reset();
             foreach (var p in proxies.Values) if (p.Primary != null) NativeWorldMirror.DestroySelectableProxy(p.Primary.gameObject);
             proxies.Clear(); hidden.Clear(); knownTags.Clear(); guestInventory = null; stockWorld = null;
             hostStocks.Clear(); nextStockSample = nextHudRefresh = 0;

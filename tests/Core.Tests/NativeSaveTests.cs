@@ -85,6 +85,21 @@ public sealed class NativeSaveTests
     }
 
     [Fact]
+    public void NativeReadyRequiresAppliedViewportBeforeFirstCommandCanMutateAuthority()
+    {
+        using var j=new Join(12); j.AwaitFile();
+        j.Client.NativeWorldReady(); j.Step();
+        Assert.True(j.Client.Live);
+        var applied=j.Up.Dequeue();
+        Assert.Equal(Message.Applied,Kind(applied));
+        j.Client.Command("dig",2,3);
+        j.Host.Receive(j.Peer,j.Up.Dequeue()); j.Step();
+        Assert.Contains("View not ready",j.Client.Status); Assert.Equal(0,j.Calls);
+        j.Host.Receive(j.Peer,applied);
+        j.Client.Command("dig",2,3); j.Step(); Assert.Equal(1,j.Calls);
+    }
+
+    [Fact]
     public void PeripheralTileSpansTwoPacketsWithoutInterruptingInput()
     {
         using var j = new Join(19);
@@ -101,6 +116,37 @@ public sealed class NativeSaveTests
         j.Client.Command("dig",5,6);
         j.Step();
         Assert.Equal(j.LiveView,delivered); Assert.Same(center,j.Client.View); Assert.Equal(1,j.Calls);
+    }
+
+    [Fact]
+    public void ProjectionCallbacksKeepOverlappingTilesInCaptureOrderWithinOnePoll()
+    {
+        using var j = new Join(10);
+        j.AwaitFile(); j.Client.NativeWorldReady(); j.Step(); j.Step();
+        var applied = new List<byte>();
+        j.Client.ViewReceived += bytes => applied.Add(bytes[0]);
+        j.Client.PeripheralReceived += bytes => applied.Add(bytes[0]);
+        j.Time+=0.3; j.LiveView=new byte[]{2}; j.Host.Tick();
+        Assert.True(j.Client.RequestPeripheral(0,0)); j.Host.Receive(j.Peer,j.Up.Dequeue());
+        j.LiveView=new byte[]{3}; j.Host.Tick();
+        while (j.Down.TryDequeue(out var frame)) j.Client.Receive(frame);
+        Assert.Equal(new byte[]{2,3},applied);
+        Assert.Equal(new byte[]{2},j.Client.View);
+    }
+
+    [Fact]
+    public void LatePeripheralReplyCannotOverwriteNewCameraSubscription()
+    {
+        using var j = new Join(10);
+        j.AwaitFile(); j.Client.NativeWorldReady(); j.Step(); j.Step();
+        int deliveries=0; j.Client.PeripheralReceived += _ => deliveries++;
+        Assert.True(j.Client.RequestPeripheral(10,20));
+        j.Host.Receive(j.Peer,j.Up.Dequeue()); j.Host.Tick();
+        j.Client.Subscribe(32,48);
+        while (j.Down.TryDequeue(out var frame)) j.Client.Receive(frame);
+        Assert.Equal(0,deliveries);
+        j.Step(); j.Step(); j.Time+=0.3;
+        Assert.True(j.Client.RequestPeripheral(32,48)); j.Step(); Assert.Equal(1,deliveries);
     }
 
     [Fact]
@@ -164,6 +210,18 @@ public sealed class NativeSaveTests
         Assert.Throws<InvalidDataException>(() => j.Host.Receive(j.Peer,impossible));
         j.Time+=31; j.Host.Tick();
         Assert.False(j.LastSource.CanRead); Assert.Equal(1,j.Drops);
+    }
+
+    [Fact]
+    public void CumulativeWindowsTolerateDuplicateAndOlderProgressWithoutExtendingReadAhead()
+    {
+        using var j=new Join(24*Wire.ChunkSize);
+        j.Step();
+        var first=j.Up.Dequeue(); var second=j.Up.Dequeue();
+        j.Host.Receive(j.Peer,second); j.Host.Receive(j.Peer,first); j.Host.Receive(j.Peer,second);
+        j.Host.Tick(); j.Host.Tick();
+        Assert.Equal(16*Wire.ChunkSize,j.LastSource.Position);
+        j.AwaitFile(); Assert.Equal(j.Colony,File.ReadAllBytes(j.Published));
     }
 
     [Fact]

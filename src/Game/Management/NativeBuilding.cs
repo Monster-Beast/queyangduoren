@@ -13,10 +13,11 @@ namespace Queyang.Game
         static readonly FieldInfo ButtonIndex = AccessTools.DeclaredField(typeof(BuildingEnabledButton), "ToggleIdx");
         static BuildingEnabledButton selectedButton;
         static bool switchKnown, enabled, queued;
-        static void ResetBuilding() { selectedButton = null; switchKnown = false; SelectSettings(null); }
+        static void ResetBuilding() { selectedButton = null; switchKnown = false; inspectedId = 0; buildingReadout = null; visibleInfoPanel = null; SelectSettings(null); }
         static void PollBuilding()
         {
             var selected = SelectTool.Instance == null ? null : Selection.GetValue(SelectTool.Instance) as KSelectable;
+            PollBuildingReadings(selected);
             if (selected != null)
             {
                 var proxy = selected.GetComponent<NativeProxySettings>();

@@ -57,9 +57,12 @@ namespace Queyang.Integration
                     string[] lines = events.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
                     var buttonObject = (GameObject)AccessTools.Field(typeof(ConfirmDialogScreen), "confirmButton").GetValue(dialog);
                     var buttons = dialog.GetComponentsInChildren<KButton>().Where(b => b.gameObject.activeInHierarchy).ToArray();
-                    bool installs = title == STRINGS.UI.FRONTEND.MOD_DIALOGS.MOD_EVENTS.TITLE.text && lines.Length > 0 &&
-                        lines.All(s => s.StartsWith(installed, StringComparison.Ordinal) && s.Length > installed.Length);
-                    string difference = "\n" + STRINGS.UI.FRONTEND.MOD_EVENTS.EXPECTED_DISABLED + ": " + fixture + "\n";
+                    string installedDetail = STRINGS.UI.FRONTEND.MOD_EVENTS.TOOLTIPS.INSTALLED.text;
+                    bool installs = title == STRINGS.UI.FRONTEND.MOD_DIALOGS.MOD_EVENTS.TITLE.text &&
+                        lines.Any(s => s.StartsWith(installed, StringComparison.Ordinal) && s.Length > installed.Length) &&
+                        lines.All(s => s == installedDetail || (s.StartsWith(installed, StringComparison.Ordinal) && s.Length > installed.Length));
+                    string difference = "\n" + STRINGS.UI.FRONTEND.MOD_EVENTS.EXPECTED_DISABLED + ": " + fixture + "\n" +
+                        STRINGS.UI.FRONTEND.MOD_EVENTS.TOOLTIPS.EXPECTED_DISABLED.text + "\n";
                     bool enabledFixture = loadedVanillaHost && title == STRINGS.UI.FRONTEND.MOD_DIALOGS.SAVE_GAME_MODS_DIFFER.TITLE.text &&
                         normalized == string.Format(STRINGS.UI.FRONTEND.MOD_DIALOGS.SAVE_GAME_MODS_DIFFER.MESSAGE.text, difference).Trim();
                     if ((!installs && !enabledFixture) || buttons.Length != 1 || buttons[0] != buttonObject.GetComponent<KButton>())

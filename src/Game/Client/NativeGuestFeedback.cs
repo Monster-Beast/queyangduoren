@@ -130,12 +130,12 @@ namespace Queyang.Game
                 if (!NativeGuestScene.Ready || __1?.onClick == null || __0 == null) return;
                 var source = __1.onClick.Method.DeclaringType;
                 if (source == typeof(BuildingEnabledButton) || source == typeof(Navigator) ||
-                    __0.GetComponent<NativeProxySettings>() != null) return;
+                    source == typeof(NativeProxySettings) || source?.DeclaringType == typeof(NativeProxySettings)) return;
                 string action = ContextAction(source, __1.onClick.Method.Name);
                 if (action != null)
                 {
                     var target = __0;
-                    __1.onClick = () => NativeToolCommands.Enqueue(action, Grid.PosToCell(target.transform.position));
+                    __1.onClick = () => NativeToolCommands.EnqueueSelected(action, target);
                     return;
                 }
                 __1.tooltipText = __1.text + " · 此操作由房主执行";
@@ -172,7 +172,7 @@ namespace Queyang.Game
                 if (!NativeGuestScene.Ready) return true;
                 if (__0.priority_class != PriorityScreen.PriorityClass.basic || ___selected == null)
                     return Refuse("此优先级");
-                NativeToolCommands.Enqueue("priority" + __0.priority_value, Grid.PosToCell(___selected.transform.position));
+                NativeToolCommands.EnqueueSelected("priority" + __0.priority_value, ___selected);
                 return false;
             }
         }

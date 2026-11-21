@@ -52,6 +52,8 @@ namespace Queyang.Game
                 case "wire": prefab = WireConfig.ID; manager = game.electricalConduitSystem; break;
                 case "gaspipe": prefab = GasConduitConfig.ID; manager = game.gasConduitSystem; break;
                 case "liquidpipe": prefab = LiquidConduitConfig.ID; manager = game.liquidConduitSystem; break;
+                case "rail": prefab = SolidConduitConfig.ID; manager = game.solidConduitSystem; break;
+                case "logicwire": prefab = LogicWireConfig.ID; manager = game.logicCircuitSystem; break;
                 default: return "ERROR Unsupported network";
             }
             var def = Assets.GetBuildingDef(prefab);

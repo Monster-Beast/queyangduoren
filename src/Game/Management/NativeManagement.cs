@@ -35,8 +35,20 @@ namespace Queyang.Game
         static string Key(Schedule s) => s == null ? "none" : Digest(s.name ?? "");
         static Schedule FindSchedule(string key)
         {
+            if (key.Length>1 && key[0]=='i')
+            {
+                int id=Number(key.Substring(1));
+                if (id<1) return null;
+                if (CoopSession.IsNativeClient) return guestSchedules.TryGetValue(id,out var local) ? local : null;
+                return ScheduleManager.Instance.GetSchedules().FirstOrDefault(s=>StableId(s)==id);
+            }
             var candidates = ScheduleManager.Instance.GetSchedules().Where(s => Key(s) == key).Take(2).ToArray();
             return candidates.Length == 1 ? candidates[0] : null;
+        }
+        static string LocalScheduleKey(Schedule s)
+        {
+            foreach (var pair in guestSchedules) if (pair.Value==s) return "i"+pair.Key;
+            return null;
         }
         static int Id(Component component) => component.GetComponent<KPrefabID>().InstanceID;
         static MinionIdentity FindDupe(int id) => Components.LiveMinionIdentities.Items.FirstOrDefault(d => d != null && Id(d) == id);
@@ -44,7 +56,8 @@ namespace Queyang.Game
         static void Send(string route, int x = 0, int y = 0)
         {
             if (!NativeGuestScene.Ready || !CoopSession.IsNativeClient || CoopSession.NativeView == null) return;
-            if (route == "research" || route.StartsWith("schedule/", StringComparison.Ordinal) ||
+            if (route == "research" || route == "overview" || route.StartsWith("schedules/", StringComparison.Ordinal) || route.StartsWith("schedule/", StringComparison.Ordinal) ||
+                route.StartsWith("vitals/", StringComparison.Ordinal) || route.StartsWith("profile/", StringComparison.Ordinal) ||
                 route.StartsWith("proxy/", StringComparison.Ordinal) ||
                 route.StartsWith("dupe/", StringComparison.Ordinal) || route.StartsWith("building/", StringComparison.Ordinal) ||
                 route.StartsWith("settings/", StringComparison.Ordinal))
@@ -65,14 +78,21 @@ namespace Queyang.Game
             nextPoll = Time.unscaledTime + .7f;
             var menu = ManagementMenu.Instance;
             var researchScreen = CurrentResearchScreen;
-            if (researchScreen != null && researchScreen.isActiveAndEnabled && researchScreen.IsScreenActive())
+            if ((researchScreen != null && researchScreen.isActiveAndEnabled && researchScreen.IsScreenActive()) ||
+                PlanScreen.Instance?.ActiveCategoryToggleInfo != null)
                 Send("research");
             bool schedules = menu?.scheduleScreen != null && menu.scheduleScreen.isActiveAndEnabled && menu.scheduleScreen.gameObject.activeInHierarchy;
             bool priorities = menu?.jobsScreen != null && menu.jobsScreen.isActiveAndEnabled && menu.jobsScreen.gameObject.activeInHierarchy;
+            if (schedules || priorities) Send("schedules/" + nextSchedulePage);
+            if (OverviewOpen && PauseScreen.Instance != null && PauseScreen.Instance.IsActive()) Send("overview");
             if (schedules)
             {
                 var list = ScheduleManager.Instance.GetSchedules();
-                if (list.Count > 0) Send("schedule/" + Key(list[(scheduleCursor++ & int.MaxValue) % list.Count]));
+                if (list.Count > 0)
+                {
+                    string key=LocalScheduleKey(list[(scheduleCursor++ & int.MaxValue) % list.Count]);
+                    if (key!=null) Send("schedule/"+key);
+                }
             }
             if (schedules || priorities)
             {
@@ -84,6 +104,8 @@ namespace Queyang.Game
                 }
             }
             PollBuilding();
+            PollVitals();
+            PollProfile();
         }
         internal static void Reset()
         {
@@ -91,6 +113,9 @@ namespace Queyang.Game
             listening = applying = false;
             observed.Clear(); pendingEdits.Clear(); lastResearch = null; nextPoll = nextEdit = 0; scheduleCursor = dupeCursor = 0;
             ResetBuilding();
+            ResetColony();
+            ResetVitals();
+            ResetProfile();
         }
 
         internal static bool TryExecute(string action, int x, int y, out string result)
@@ -102,6 +127,18 @@ namespace Queyang.Game
             var p = action.Split('/');
             switch (p[1])
             {
+                case "overview":
+                    if (p.Length == 2) result = ColonyOverview();
+                    break;
+                case "schedules":
+                    if (p.Length == 3) result = SchedulePage(Number(p[2]));
+                    break;
+                case "vitals":
+                    if (p.Length == 3) result = ReadHostVitals(Number(p[2]));
+                    break;
+                case "profile":
+                    if (p.Length == 3) result = ReadHostProfile(Number(p[2]));
+                    break;
                 case "proxy":
                 case "setproxy":
                     result = HostWorld.ProxyOptions(action, x, y);
@@ -133,6 +170,7 @@ namespace Queyang.Game
                 case "priority":
                     result = DupeRequest(p);
                     break;
+                case "readings":
                 case "building":
                 case "switch":
                 case "settings":
@@ -158,7 +196,7 @@ namespace Queyang.Game
             if (p[1] == "assign")
             {
                 var next = FindSchedule(p[4]);
-                if (current == null || Key(current) != p[3] || next == null) return Conflict;
+                if (current == null || FindSchedule(p[3]) != current || next == null) return Conflict;
                 if (current != next) { current.Unassign(person); next.Assign(person); current = next; }
             }
             if (p[1] == "priority")
@@ -169,7 +207,7 @@ namespace Queyang.Game
                     consumer.GetPersonalPriority(job) != Number(p[4])) return Conflict;
                 consumer.SetPersonalPriority(job, n);
             }
-            return Prefix + "d/" + p[2] + "/" + Key(current) + "/" + string.Concat(jobs.Select(j => consumer.GetPersonalPriority(j).ToString(CultureInfo.InvariantCulture)));
+            return Prefix + "d/" + p[2] + "/" + (current==null ? "none" : "i"+StableId(current)) + "/" + string.Concat(jobs.Select(j => consumer.GetPersonalPriority(j).ToString(CultureInfo.InvariantCulture)));
         }
         static void Receive(string value)
         {
@@ -183,7 +221,12 @@ namespace Queyang.Game
             applying = true;
             try
             {
-                if (p[1] == "r" && p.Length == 3) ApplyResearch(p[2]);
+                if (p[1] == "g") ReceiveReadings(p);
+                else if (p[1] == "sl" && p.Length == 4) ApplySchedulePage(p[2],p[3]);
+                else if (p[1] == "ov" && p.Length == 3 && OverviewOpen) ApplyOverview(p[2]);
+                else if (p[1] == "r" && p.Length == 3) ApplyResearch(p[2]);
+                else if (p[1] == "v" && p.Length == 4) ApplyVitals(Number(p[2]), p[3]);
+                else if (p[1] == "pf" && p.Length == 4) ApplyProfile(Number(p[2]), p[3]);
                 else if (p[1] == "b") ApplyBuilding(p);
                 else if (p[1] == "f") ApplySettings(p);
                 else if (p[1] == "s" && p.Length == 4)
@@ -223,7 +266,7 @@ namespace Queyang.Game
             static bool Prefix(Schedule __instance, int __0, ScheduleGroup __1)
             {
                 if (!Guard) return true;
-                var key = Key(__instance);
+                var key = LocalScheduleKey(__instance);
                 var blocks = __instance.GetBlocks();
                 if (__1 != null && observed.Contains("s/" + key) && __0 >= 0 && __0 < blocks.Count)
                     Send("block/" + key + "/" + __0 + "/" + blocks[__0].GroupId + "/" + __1.Id);
@@ -236,8 +279,10 @@ namespace Queyang.Game
             static bool Prefix(Schedule __0, Schedulable __1)
             {
                 if (!Guard) return true;
-                if (__1 != null && __0 != null && observed.Contains("d/" + Id(__1)))
-                    Send("assign/" + Id(__1) + "/" + Key(__1.GetSchedule()) + "/" + Key(__0));
+                var current=__1==null ? null : LocalScheduleKey(__1.GetSchedule());
+                var next=LocalScheduleKey(__0);
+                if (current!=null && next!=null && observed.Contains("d/" + Id(__1)))
+                    Send("assign/" + Id(__1) + "/" + current + "/" + next);
                 return false;
             }
         }

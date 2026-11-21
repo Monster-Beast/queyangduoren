@@ -9,6 +9,8 @@ namespace Queyang.Game
     {
         public int Element;
         public float Mass, Temperature;
+        public int Germs;
+        public byte GermType;
     }
 
     public struct ColonyPile
@@ -43,6 +45,13 @@ namespace Queyang.Game
         public MaterialSample GasPipe, LiquidPipe, Structure;
         public float WattsUsed, WattsGenerated, WattsSafe, WattsNeeded;
         public int LogicValue;
+        public int Germs, Lux, RailItem;
+        public int RoomType, RoomAnchor, RoomSize;
+        public byte OrderPriority;
+        public bool MopOrdered;
+        public byte GermType, RailConnections;
+        public float Decor, RailMass;
+        public bool RailPresent;
     }
 
     public struct ColonyDupe
@@ -57,7 +66,7 @@ namespace Queyang.Game
     }
 
     // A display-only sample. Rows start at the bottom, matching ONI's grid.
-    public sealed class ColonyView
+    public sealed partial class ColonyView
     {
         public const int Width = 24, Height = 16;
         public const ushort NativeVersion = 5;
@@ -84,9 +93,9 @@ namespace Queyang.Game
         public ColonyCell[] Cells = new ColonyCell[Width * Height];
         public ColonyDupe[] Dupes = Array.Empty<ColonyDupe>();
 
-        public byte[] Encode() => Encode(Native ? 50 : MaxNameBytes);
+        public byte[] Encode() => Encode(Native ? 50 : MaxNameBytes, false);
 
-        private byte[] Encode(int nameBytes)
+        private byte[] Encode(int nameBytes, bool pageEnvironment)
         {
             if (Cells == null || Cells.Length != Width * Height || Dupes == null || Dupes.Length > 64)
                 throw new InvalidDataException("Invalid viewport size.");
@@ -107,7 +116,11 @@ namespace Queyang.Game
             {
                 if (Detailed && !Native) throw new InvalidDataException("Detailed view requires native state.");
                 if (HasResources && !Detailed) throw new InvalidDataException("Resource state requires detailed view.");
-                w.Write(HasResources ? (ushort)7 : Detailed ? (ushort)6 : Native ? NativeVersion : (ushort)4);
+                bool extended = HasEnvironment || EntityPayload != null;
+                if (extended && !HasResources) throw new InvalidDataException("Extended state requires native resource state.");
+                w.Write(extended ? (ushort)8 : HasResources ? (ushort)7 : Detailed ? (ushort)6 : Native ? NativeVersion : (ushort)4);
+                bool orders = extended && Array.Exists(Cells, c => c.MopOrdered || c.OrderPriority != 0);
+                if (extended) w.Write((byte)((HasEnvironment ? 1 : 0) | (EntityPayload != null ? 2 : 0) | (orders ? 4 : 0)));
                 w.Write(X); w.Write(Y);
                 w.Write(Cycle); w.Write(CycleFraction); w.Write(Paused); w.Write(Speed);
                 w.Write((ushort)names.Count);
@@ -161,9 +174,20 @@ namespace Queyang.Game
                 // Keep ordinary localized names intact. The synthetic worst case has 896
                 // unique names plus all four utilities and a building in every cell.
                 if (HasResources) WriteResources(w);
+                if (extended) WriteExtensions(w, pageEnvironment);
+                if (orders) WriteOrders(w);
+                if (extended && stream.Length > MaxViewport)
+                {
+                    // Keep all readings and stock labels when a dense full tile compresses well.
+                    var compact = CompressViewport(stream);
+                    if (compact != null) return compact;
+                    // Incompressible worst case: retain all entity bytes, rotate environmental coverage.
+                    if (!pageEnvironment) return Encode(4, true);
+                    if (nameBytes > 2) return Encode(2, true);
+                }
                 int shortNames = HasResources ? 14 : 24;
-                if (stream.Length > 65520 && Detailed && nameBytes > shortNames) return Encode(shortNames);
-                if (stream.Length > 65520) throw new InvalidDataException("Viewport exceeds the frame limit.");
+                if (stream.Length > MaxViewport && Detailed && nameBytes > shortNames) return Encode(shortNames, false);
+                if (stream.Length > MaxViewport) throw new InvalidDataException("Viewport exceeds the frame limit.");
                 return stream.ToArray();
             }
         }
@@ -172,6 +196,7 @@ namespace Queyang.Game
         {
             name = name ?? string.Empty;
             if (ids.ContainsKey(name)) return;
+            if (nameBytes == 2 && name.Length != 0 && name[0] >= 0x800) { ids.Add(name, 0); return; }
             var encoder = Encoding.UTF8.GetEncoder();
             var buffer = new byte[nameBytes];
             // Convert truncates at a complete UTF-8 character, even for non-BMP names.
@@ -183,15 +208,20 @@ namespace Queyang.Game
             names.Add(buffer);
         }
 
-        public static ColonyView Decode(byte[] payload)
+        public static ColonyView Decode(byte[] payload) => Decode(payload, false);
+
+        private static ColonyView Decode(byte[] payload, bool inflated)
         {
-            if (payload == null || payload.Length > 65520)
+            if (payload == null || payload.Length > (inflated ? MaxInflated : MaxViewport))
                 throw new InvalidDataException("Invalid viewport payload size.");
             using (var stream = new MemoryStream(payload, false))
             using (var r = new BinaryReader(stream))
             {
                 ushort version = r.ReadUInt16();
-                if (version < 4 || version > 7) throw new InvalidDataException("Unknown viewport version.");
+                if (version < 4 || version > 8 || (inflated && version != 8)) throw new InvalidDataException("Unknown viewport version.");
+                byte extensions = version == 8 ? r.ReadByte() : (byte)0;
+                if (extensions == 128 && !inflated) return InflateViewport(r);
+                if (version == 8 && ((extensions & 3) == 0 || (extensions & ~7) != 0)) throw new InvalidDataException("Invalid viewport extensions.");
                 var v = new ColonyView { Native = version >= 5, Detailed = version >= 6, HasResources = version >= 7,
                     X = r.ReadInt32(), Y = r.ReadInt32() };
                 if (v.X < 0 || v.Y < 0 || v.X > int.MaxValue - Width || v.Y > int.MaxValue - Height)
@@ -271,6 +301,8 @@ namespace Queyang.Game
                 }
                 ValidateDupes(v.Dupes);
                 if (v.HasResources) v.ReadResources(r);
+                if (version == 8) v.ReadExtensions(r, extensions);
+                if ((extensions & 4) != 0) v.ReadOrders(r);
                 if (stream.Position != stream.Length) throw new InvalidDataException("Trailing viewport bytes.");
                 return v;
             }

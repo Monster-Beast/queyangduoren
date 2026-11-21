@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Globalization;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -30,7 +31,7 @@ namespace Queyang.Integration
         {
             DirectoryPath=dir; this.log=log;
             Directory.CreateDirectory(dir);
-            foreach (var name in new[] {"baseline.sav","first.view","order.view","done.view","dig.txt","ladder-menu.bin"})
+            foreach (var name in new[] {"baseline.sav","first.view","order.view","done.view","dig.txt","ladder-menu.bin","dupe-vitals.bin"})
                 if (File.Exists(Path.Combine(dir,name))) throw new IOException("Recording already contains " + name);
         }
 
@@ -88,6 +89,11 @@ namespace Queyang.Integration
             string queue = Row(firstMenu, "指派拆除建筑");
             string queued = request(queue, ladderX, ladderY);
             string cancel = Row(queued, "取消拆除建筑");
+            string stale = request(queue, ladderX, ladderY);
+            if (!stale.StartsWith("ERROR Setting changed",StringComparison.Ordinal) ||
+                Row(request(query,ladderX,ladderY),"取消拆除建筑") != cancel)
+                throw new InvalidDataException("Repeated stale ladder setting changed authoritative state");
+            WriteNew("ladder-stale.txt",Encoding.UTF8.GetBytes(stale));
             string cancelled = request(cancel, ladderX, ladderY);
             if (Row(cancelled,"指派拆除建筑") != queue) throw new InvalidDataException("Ladder menu did not revert");
             using (var s = new MemoryStream())
@@ -98,6 +104,75 @@ namespace Queyang.Integration
                 WriteNew("ladder-menu.bin", s.ToArray());
             }
             log("NATIVE_RECORD_LADDER_MENU_AND_CANCEL");
+            int saveId = view.Cells[(ladderY-view.Y)*ColonyView.Width+ladderX-view.X].BuildingSaveId;
+            var readings = request("nm/readings/" + saveId, ladderX, ladderY);
+            if (!readings.StartsWith("NM1/g/" + saveId + "/", StringComparison.Ordinal))
+                throw new InvalidDataException("Host failed to inspect the finished ladder");
+            WriteNew("ladder-state.txt", Encoding.UTF8.GetBytes(readings));
+            RecordVitals(request);
+            using (var s=new MemoryStream())
+            using (var w=new BinaryWriter(s))
+            {
+                void Record(string queryName,string expected)
+                {
+                    string value=request(queryName,0,0);
+                    if (!value.StartsWith(expected,StringComparison.Ordinal)) throw new InvalidDataException("Missing host data for "+queryName);
+                    Wire.Text(w,queryName); Wire.Text(w,value,8192);
+                }
+                Record("nm/overview","NM1/ov/");
+                Record("nm/research","NM1/r/");
+                int pages=1;
+                for (int i=0;i<pages;i++)
+                {
+                    string name="nm/schedules/"+i, value=request(name,0,0);
+                    var fields=value.Split('/');
+                    if (fields.Length!=4 || fields[1]!="sl") throw new InvalidDataException("Missing schedule catalogue");
+                    using (var r=new BinaryReader(new MemoryStream(Convert.FromBase64String(fields[3].Replace('_','/')))))
+                    {
+                        int total=r.ReadUInt16();
+                        if (total<1 || total>2048 || r.ReadUInt16()!=i) throw new InvalidDataException("Invalid schedule catalogue page");
+                        pages=(total+1)/2;
+                    }
+                    Wire.Text(w,name); Wire.Text(w,value,8192);
+                }
+                WriteNew("global-management.bin",s.ToArray());
+                log("NATIVE_RECORD_GLOBAL_MANAGEMENT pages="+pages);
+            }
+        }
+
+        void RecordVitals(Func<string,int,int,string> request)
+        {
+            var initial = ColonyView.Decode(File.ReadAllBytes(Path.Combine(DirectoryPath,"first.view")));
+            string best = null;
+            int chosen = -1;
+            // Prefer an occupied duplicant so the screenshot can show an actual work target.
+            foreach (var dupe in initial.Dupes.Take(4))
+            {
+                string prefix = "NM1/v/" + dupe.SaveId + "/";
+                string value = request("nm/vitals/" + dupe.SaveId,0,0);
+                if (!value.StartsWith(prefix,StringComparison.Ordinal) || value == prefix + "-") continue;
+                string payload = value.Substring(prefix.Length);
+                using (var r = new BinaryReader(new MemoryStream(Convert.FromBase64String(payload.Replace('_','/')))))
+                {
+                    if (r.ReadByte() != 1) throw new InvalidDataException("Unknown recorded vitals");
+                    Wire.Text(r,256); Wire.Text(r,256);
+                    bool occupied = r.ReadBoolean();
+                    if (best == null || occupied) { best = value; chosen = dupe.SaveId; }
+                    if (occupied) break;
+                }
+            }
+            if (best == null) throw new InvalidDataException("No authoritative duplicant details");
+            string profile = request("nm/profile/" + chosen,0,0);
+            if (!profile.StartsWith("NM1/pf/" + chosen + "/",StringComparison.Ordinal) || profile.EndsWith("/-",StringComparison.Ordinal))
+                throw new InvalidDataException("No authoritative skill and consumables profile");
+            using (var s = new MemoryStream())
+            using (var w = new BinaryWriter(s))
+            {
+                w.Write(chosen); Wire.Text(w,best,8192);
+                Wire.Text(w,profile,8192);
+                WriteNew("dupe-vitals.bin",s.ToArray());
+            }
+            log("NATIVE_RECORDED_DUPLICANT_DETAILS id=" + chosen);
         }
 
         static string Row(string menu, string label)
@@ -131,7 +206,16 @@ namespace Queyang.Integration
         private bool ordered,completed;
         private int menuX,menuY,menuStep;
         private bool menuRead;
+        private int joins;
+        private readonly string vitalsQuery, vitalsReply, profileQuery, profileReply;
         private string[] operations;
+        private string buildingReadings;
+        private readonly byte[] printedView;
+        private readonly string printedVitals, printedProfile;
+        private readonly int printedId;
+        private bool showingPrinted;
+        private readonly string staleLadder;
+        private readonly Dictionary<string,string> management=new Dictionary<string,string>();
         private double orderFirstSentAt=double.NaN;
 
         internal NativeReplay(string dir, Action<string> log, Func<double> now)
@@ -152,6 +236,45 @@ namespace Queyang.Integration
                 (NativeRecording.CellFlags(done,digX,digY)&11)!=1)
                 throw new InvalidDataException("Tape lacks initial terrain, order marker, or finished excavation.");
             string menuPath=Path.Combine(dir,"ladder-menu.bin");
+            string globalPath=Path.Combine(dir,"global-management.bin");
+            if (File.Exists(globalPath)) using (var r=new BinaryReader(File.OpenRead(globalPath)))
+                while (r.BaseStream.Position<r.BaseStream.Length)
+                {
+                    if (management.Count>=1026) throw new InvalidDataException("Too many management pages");
+                    management.Add(Wire.Text(r),Wire.Text(r,8192));
+                }
+            string printedPath=Path.Combine(dir,"printed.bin");
+            if (File.Exists(printedPath))
+            {
+                printedView=ReadView(dir,"printed.view");
+                using (var reader=new BinaryReader(File.OpenRead(printedPath)))
+                {
+                    printedId=reader.ReadInt32(); printedVitals=Wire.Text(reader,8192); printedProfile=Wire.Text(reader,8192);
+                    Wire.End(reader);
+                }
+                if (!ColonyView.Decode(printedView).Dupes.Any(d=>d.SaveId==printedId) || ColonyView.Decode(first).Dupes.Any(d=>d.SaveId==printedId))
+                    throw new InvalidDataException("Invalid post-baseline duplicant");
+            }
+            string readingPath = Path.Combine(dir,"ladder-state.txt");
+            string stalePath = Path.Combine(dir,"ladder-stale.txt");
+            if (File.Exists(stalePath)) staleLadder = File.ReadAllText(stalePath);
+            if (File.Exists(readingPath)) buildingReadings = File.ReadAllText(readingPath);
+            string detailsPath = Path.Combine(dir,"dupe-vitals.bin");
+            if (File.Exists(detailsPath)) using (var r = new BinaryReader(File.OpenRead(detailsPath)))
+            {
+                int id = r.ReadInt32();
+                vitalsQuery = "nm/vitals/" + id;
+                vitalsReply = Wire.Text(r,8192);
+                if (id < 1 || !vitalsReply.StartsWith("NM1/v/" + id + "/", StringComparison.Ordinal))
+                    throw new InvalidDataException("Recorded duplicant identifier does not match the response");
+                if (r.BaseStream.Position < r.BaseStream.Length)
+                {
+                    profileQuery = "nm/profile/" + id;
+                    profileReply = Wire.Text(r,8192);
+                    if (!profileReply.StartsWith("NM1/pf/" + id + "/",StringComparison.Ordinal)) throw new InvalidDataException("Invalid recorded profile");
+                }
+                Wire.End(r);
+            }
             if (File.Exists(menuPath))
             {
                 using(var r=new BinaryReader(File.OpenRead(menuPath)))
@@ -174,15 +297,32 @@ namespace Queyang.Integration
 
         internal Stream OpenSave()
         {
+            showingPrinted=false;
             ordered=false; completed=false; menuStep=0; menuRead=false; orderFirstSentAt=double.NaN;
             log("NATIVE_REPLAY_BASELINE");
+            log("NATIVE_REPLAY_JOIN " + (++joins));
             return File.OpenRead(save);
         }
 
         internal string Command(string action,int x,int y)
         {
+            if (management.TryGetValue(action,out var value)) return value;
+            if (action=="nm/overview" || action=="nm/research" || action.StartsWith("nm/schedules/",StringComparison.Ordinal))
+                return "NM1/unrecorded";
+            if (printedView!=null && completed && action=="fixture/printed")
+            { showingPrinted=true; return "OK post-baseline recorded view"; }
+            if (showingPrinted && action=="nm/vitals/"+printedId) return printedVitals;
+            if (showingPrinted && action=="nm/profile/"+printedId) return printedProfile;
+            if (action == vitalsQuery) return vitalsReply;
+            if (action == profileQuery) return profileReply;
+            // Tapes produced before these optional selected-object replies have no such observations.
+            if (action.StartsWith("nm/vitals/",StringComparison.Ordinal)) return "NM1/v/" + action.Substring(10) + "/-";
+            if (action.StartsWith("nm/profile/",StringComparison.Ordinal)) return "NM1/pf/" + action.Substring(11) + "/-";
             if (operations!=null && completed && x==menuX && y==menuY)
             {
+                if (menuStep == 1 && action==operations[2] && staleLadder != null) return staleLadder;
+                if (buildingReadings != null && action == "nm/readings/" + buildingReadings.Split('/')[2])
+                    return buildingReadings;
                 if (action==operations[0])
                 {
                     if (!menuRead) { log("NATIVE_REPLAY_LADDER_MENU_OPEN"); menuRead=true; }
@@ -205,6 +345,7 @@ namespace Queyang.Integration
 
         internal byte[] Capture(int x,int y)
         {
+            if (showingPrinted) return printedView;
             if (!ordered) return first;
             if (double.IsNaN(orderFirstSentAt))
             {
@@ -216,7 +357,7 @@ namespace Queyang.Integration
             return done;
         }
 
-        internal static int Run(Action<string> log)
+        internal static int Run(Action<string> log, int duration)
         {
             var clock=Stopwatch.StartNew();
             double Now() => clock.Elapsed.TotalSeconds;
@@ -227,7 +368,7 @@ namespace Queyang.Integration
                 tape.Capture,tape.Command,Now,tape.OpenSave))
             {
                 wire.Host(false); log("NATIVE_REPLAY_READY");
-                while (Now()<300) { wire.Poll(); host.Tick(); Thread.Sleep(4); }
+                while (Now()<duration) { wire.Poll(); host.Tick(); Thread.Sleep(4); }
             }
             return 0;
         }

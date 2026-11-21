@@ -11,6 +11,14 @@ namespace Queyang.Integration
     // Uses the actual copied colony. No substitute implementations of native schedules/research/filters.
     internal static class HostFeatureChecks
     {
+        internal static MaterialCompetition BeginMaterialCompetition(Action<string> record)
+        {
+            var root = Environment.GetEnvironmentVariable("QY_SMOKE_ROOT");
+            if (string.IsNullOrEmpty(root) || !string.Equals(root, Util.GetKleiRootPath(), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Material competition requires an isolated game profile.");
+            return new MaterialCompetition(record);
+        }
+
         public static void Run(Action<string> record)
         {
             var root = Environment.GetEnvironmentVariable("QY_SMOKE_ROOT");
@@ -22,6 +30,8 @@ namespace Queyang.Integration
             Check(record, "personal-priority", DupePriority);
             Check(record, "building", () => BuildingSettings(record));
             Check(record, "viewport", () => ViewportCost(record));
+            Check(record, "entities", () => EntityReadChecks.Run(record));
+            Check(record, "environment", () => EnvironmentReadback(record));
             if (Environment.GetEnvironmentVariable("QY_SMOKE_PERSISTENCE") == "1")
                 Check(record, "native-save", () => HostPersistenceSave.Run(record));
             record("FEATURE_CHECKS_DONE");
@@ -37,6 +47,26 @@ namespace Queyang.Integration
         private static void Require(bool ok, string failure)
         {
             if (!ok) throw new InvalidOperationException(failure);
+        }
+
+        private static void EnvironmentReadback(Action<string> record)
+        {
+            var view = ColonyView.Decode(HostWorld.Capture(-1, -1));
+            int compared = 0, lights = 0, decorated = 0, infected = 0;
+            for (int i = 0; i < view.Cells.Length; ++i)
+            {
+                if (!view.CoversEnvironment(i)) continue;
+                var sample = view.Cells[i];
+                int cell = Grid.XYToCell(view.X + i % ColonyView.Width, view.Y + i / ColonyView.Width);
+                Require(sample.Germs == Grid.DiseaseCount[cell] && (sample.Germs == 0 || sample.GermType == Grid.DiseaseIdx[cell]), "Wrong grid disease reading");
+                Require(sample.Lux == Grid.LightIntensity[cell] && sample.Decor == Grid.Decor[cell], "Wrong grid light or decor");
+                if (sample.Germs > 0) infected++;
+                if (sample.Lux > 0) lights++;
+                if (sample.Decor != 0) decorated++;
+                compared++;
+            }
+            Require(compared > 0, "Host did not send v8 environment");
+            record($"FEATURE DETAIL environment cells={compared} illuminated={lights} decorated={decorated} infected={infected}");
         }
 
         private static List<KeyValuePair<string, string>> Menu(string route)

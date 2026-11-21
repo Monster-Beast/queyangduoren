@@ -21,7 +21,6 @@ namespace Queyang.Game
         internal static bool CapturingJoinSave { get; private set; }
         static string closedReplica;
         static bool nativeClient, sceneAnnounced;
-        static byte[] appliedNativeView;
         internal static ColonyView NativeView { get; private set; }
         public static bool IsNativeClient => client != null && nativeClient;
         static double joinTime, lastIncoming, nextPing;
@@ -66,7 +65,7 @@ namespace Queyang.Game
                 colony = global::Game.Instance;
                 link = Open();
                 metrics = new SessionMetrics("host",Time());
-                host = new RoomHost(version, Send, link.Drop, HostWorld.Capture, HostWorld.Execute, Time, CaptureNativeSave);
+                host = new RoomHost(version, Send, link.Drop, HostWorld.Capture, HostWorld.Execute, Time, CaptureNativeSave,HostWorld.CapturePage);
                 host.NativeCaptureFailed += error => UnityEngine.Debug.LogWarning("[QueyangCoop] Failed to capture colony: " + error.Message);
                 link.Host(steam);
                 notice = "Hosting";
@@ -136,6 +135,11 @@ namespace Queyang.Game
                 client = new RoomClient(version, data => Send(0, data), replicaDirectory,
                     native ? (Action<string>)NativeGuestScene.Load : null);
                 client.CommandLatencyMs += metrics.RecordCommand;
+                client.ViewReceived += bytes => {
+                    if (!NativeGuestScene.Ready || !nativeClient) return;
+                    ApplyNativeTile(ColonyView.Decode(bytes),true);
+                    GuestDiagnostics.AppliedView();
+                };
                 client.PeripheralReceived += bytes => {
                     if (NativeGuestScene.Ready) ApplyNativeTile(ColonyView.Decode(bytes),false);
                 };
@@ -165,7 +169,7 @@ namespace Queyang.Game
             if (replicaDirectory != null) closedReplica = replicaDirectory;
             CleanupClosedReplica();
             replicaDirectory = null; nativeClient = sceneAnnounced = false;
-            appliedNativeView = null; NativeView = null;
+            NativeView = null;
             link = null; host = null; client = null; colony = null; closing = null;
             old?.Dispose();
             if (old != null) UnityEngine.Application.runInBackground = previousBackgroundMode;
@@ -239,13 +243,6 @@ namespace Queyang.Game
                         client.NativeWorldReady();
                         sceneAnnounced = true;
                         lastIncoming = joinTime = Time();
-                    }
-                    if (sceneAnnounced && client.View != null && !ReferenceEquals(appliedNativeView, client.View))
-                    {
-                        var next = ColonyView.Decode(client.View);
-                        ApplyNativeTile(next,true);
-                        appliedNativeView = client.View;
-                        GuestDiagnostics.AppliedView();
                     }
                     if (sceneAnnounced && client.Live)
                     {

@@ -60,6 +60,9 @@ namespace Queyang.Game
                     if (!TryHex(p[4].Substring(i, 8), out int code)) return Conflict;
                     var matches = tags.Where(t => Hash(t.ToString()) == code).Take(2).ToArray();
                     if (matches.Length != 1) return Conflict;
+                    // Filter edits are generated against the last confirmed opposite state.
+                    // Validate all affected tags in the staged copy before touching ONI.
+                    if (next.Contains(matches[0]) == on) return Conflict;
                     if (on) next.Add(matches[0]); else next.Remove(matches[0]);
                 }
                 if (!f.AcceptedTags.SetEquals(next)) f.UpdateFilters(next);

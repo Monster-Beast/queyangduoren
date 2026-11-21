@@ -14,6 +14,7 @@ namespace Queyang.Game
         static readonly FieldInfo Completed = AccessTools.DeclaredField(typeof(TechInstance), "complete");
         static readonly FieldInfo Inventory = AccessTools.DeclaredField(typeof(TechInstance), "progressInventory");
         static readonly MethodInfo RefreshResearch = AccessTools.DeclaredMethod(typeof(ResearchScreen), "OnActiveResearchChanged");
+        static readonly MethodInfo RefreshUnlock = AccessTools.DeclaredMethod(typeof(PlanScreen), "OnResearchComplete");
         static string QueueVersion() => Digest(string.Join(",", Research.Instance.GetResearchQueue().Select(q => q.tech.Id)));
         static string ResearchRequest(string[] p)
         {
@@ -70,10 +71,12 @@ namespace Queyang.Game
             using (var reader = new BinaryReader(s))
             {
                 if (reader.ReadUInt16() != all.Length) return;
+                var unlocks=new List<Tech>();
                 foreach (var tech in all)
                 {
                     bool done = reader.ReadBoolean();
                     var instance = r.Get(tech);
+                    if (done && (instance==null || !instance.IsComplete())) unlocks.Add(tech);
                     if (done && instance == null) instance = r.GetOrAdd(tech);
                     if (instance != null) Completed.SetValue(instance, done);
                     foreach (var id in tech.costsByResearchTypeID.Keys.OrderBy(k => k, StringComparer.Ordinal))
@@ -96,6 +99,8 @@ namespace Queyang.Game
                 ActiveTech.SetValue(r, active < 0 ? null : r.GetOrAdd(all[active]));
                 if (s.Position != s.Length) throw new InvalidDataException("Invalid research state");
                 lastResearch = data;
+                if (PlanScreen.Instance!=null)
+                    foreach (var tech in unlocks) RefreshUnlock.Invoke(PlanScreen.Instance,new object[]{tech});
                 var screen = CurrentResearchScreen;
                 if (screen != null && screen.IsScreenActive()) RefreshResearch.Invoke(screen, new object[] { queue });
             }

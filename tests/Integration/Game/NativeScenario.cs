@@ -12,7 +12,7 @@ namespace Queyang.Integration
     // The peer replays observations previously made by a separate real hosting game.
     internal sealed class NativeScenario
     {
-        enum Stage { Join, Load, Pan, Overlay, Details, Screenshot, Order, Completion, ProxySelect, ProxyOrder, ProxyCancel, ProxyDone, Exit }
+        enum Stage { Join, Load, Pan, Overlay, Details, Screenshot, Order, Completion, ProxySelect, ProxyOrder, ProxyCancel, ProxyDone, Printed, Exit }
         readonly Action<string> log;
         readonly string recording;
         Stage stage;
@@ -26,6 +26,10 @@ namespace Queyang.Integration
         int ladderCell;
         NativeProxySettings proxy;
         string engineException;
+        int selectedSaveId;
+        string expectedVitals, expectedProfile;
+        System.Action staleClick;
+        string staleError;
 
         public NativeScenario(Action<string> log, string report)
         {
@@ -88,15 +92,36 @@ namespace Queyang.Integration
                         throw new Exception("Vanilla temperature overlay did not activate");
                     log("NATIVE_TEMPERATURE_OVERLAY_ACTIVE");
                     OverlayScreen.Instance.ToggleOverlay(originalOverlay, true);
+                    if (!string.IsNullOrEmpty(recording) && File.Exists(Path.Combine(recording,"dupe-vitals.bin")))
+                    {
+                        using (var r = new BinaryReader(File.OpenRead(Path.Combine(recording,"dupe-vitals.bin"))))
+                        {
+                            selectedSaveId = r.ReadInt32();
+                            var reply = Queyang.Core.Wire.Text(r,8192);
+                            string prefix = "NM1/v/" + selectedSaveId + "/";
+                            if (!reply.StartsWith(prefix,StringComparison.Ordinal)) throw new InvalidDataException("Invalid recorded duplicant");
+                            expectedVitals = NativeManagement.Digest(reply.Substring(prefix.Length));
+                            if (r.BaseStream.Position < r.BaseStream.Length)
+                            {
+                                string profile = Queyang.Core.Wire.Text(r,8192);
+                                string profilePrefix = "NM1/pf/" + selectedSaveId + "/";
+                                if (!profile.StartsWith(profilePrefix,StringComparison.Ordinal)) throw new InvalidDataException("Invalid recorded profile");
+                                expectedProfile = NativeManagement.Digest(profile.Substring(profilePrefix.Length));
+                            }
+                            Queyang.Core.Wire.End(r);
+                        }
+                    }
                     var nearest = Components.LiveMinionIdentities.Items
-                        .Where(d => d != null && ClusterUtil.GetMyWorldId(d) == ClusterManager.Instance.activeWorldId)
+                        .Where(d => d != null && ClusterUtil.GetMyWorldId(d) == ClusterManager.Instance.activeWorldId &&
+                            (selectedSaveId == 0 || selectedSaveId == d.GetComponent<KPrefabID>().InstanceID))
                         .OrderBy(d => (d.transform.position - CameraController.Instance.transform.position).sqrMagnitude)
                         .FirstOrDefault();
                     if (nearest == null) throw new Exception("No duplicant in guest world");
+                    selectedSaveId = nearest.GetComponent<KPrefabID>().InstanceID;
                     dupe = nearest.GetComponent<KSelectable>();
                     PlayerController.Instance.ActivateTool(SelectTool.Instance);
                     SelectTool.Instance.Select(dupe, false);
-                    until = Time.unscaledTime + 5;
+                    until = Time.unscaledTime + 12;
                     stage = Stage.Details;
                     break;
                 case Stage.Details:
@@ -105,6 +130,16 @@ namespace Queyang.Integration
                         if (Time.unscaledTime > until) throw new Exception("Duplicant details sidebar did not open");
                         break;
                     }
+                    bool vitalsReady = NativeManagement.DisplayedVitals(selectedSaveId,expectedVitals,out var info);
+                    bool profileReady = NativeManagement.DisplayedProfile(selectedSaveId,expectedProfile,out var profileInfo);
+                    if ((!vitalsReady && (expectedVitals != null || string.IsNullOrEmpty(recording))) ||
+                        (!profileReady && (expectedProfile != null || string.IsNullOrEmpty(recording))))
+                    {
+                        if (Time.unscaledTime > until) throw new Exception("Guest errand labels and stamina did not match authoritative duplicant details");
+                        break;
+                    }
+                    if (vitalsReady) log("NATIVE_AUTHORITATIVE_DUPLICANT " + info);
+                    if (profileReady) log("NATIVE_AUTHORITATIVE_DUPLICANT_PROFILE " + profileInfo);
                     log("NATIVE_DUPLICANT_DETAILS target=" + dupe.GetProperName());
                     guestFrame.Capture();
                     stage = Stage.Screenshot;
@@ -148,10 +183,35 @@ namespace Queyang.Integration
                     stage = Stage.ProxyOrder;
                     break;
                 case Stage.ProxyOrder:
+                    if (!string.IsNullOrEmpty(recording) && File.Exists(Path.Combine(recording, "ladder-state.txt")))
+                    {
+                        var encoded = File.ReadAllText(Path.Combine(recording, "ladder-state.txt")).Split('/')[3];
+                        string expected = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(encoded.Replace('_', '/')));
+                        if (string.IsNullOrWhiteSpace(expected)) throw new InvalidDataException("Empty host building readout");
+                        if (!DetailsScreen.Instance.GetComponentsInChildren<LocText>(false).Any(t => t.text == expected))
+                        {
+                            if (Time.unscaledTime > until) throw new InvalidDataException("Host ladder readout missing from visible native details");
+                            break;
+                        }
+                        log("NATIVE_BUILDING_DETAILS matched=true");
+                    }
                     if (!ProxyButton("指派拆除建筑", true)) { CheckProxyTimeout(); break; }
                     stage = Stage.ProxyCancel;
                     break;
                 case Stage.ProxyCancel:
+                    if (staleClick != null)
+                    {
+                        if (!ProxyButton("取消拆除建筑", false)) { CheckProxyTimeout(); break; }
+                        staleClick(); staleClick = null;
+                        break;
+                    }
+                    if (staleError != null)
+                    {
+                        if (!NativeGuestFeedback.Visible || !NativeGuestFeedback.Text.EndsWith(staleError,StringComparison.Ordinal))
+                        { CheckProxyTimeout(); break; }
+                        log("NATIVE_STALE_SETTING stockMenuPreserved=true rejectionVisible=true");
+                        staleError = null;
+                    }
                     if (!ProxyButton("取消拆除建筑", true)) { CheckProxyTimeout(); break; }
                     stage = Stage.ProxyDone;
                     break;
@@ -166,6 +226,33 @@ namespace Queyang.Integration
                     if (!ladderFrame.Complete) break;
                     log("NATIVE_PROXY_LADDER_STOCK_MENU hostConfirmedOrder=True hostConfirmedCancel=True");
                     log("NATIVE_LADDER_HUD_SAVED");
+                    NativeEcology.Replay(recording,log);
+                    NativeFoodChain.Replay(recording,log);
+                    NativeInfrastructure.Replay(recording, log);
+                    if (!string.IsNullOrEmpty(recording) && File.Exists(Path.Combine(recording,"printed.bin")))
+                    {
+                        using (var r=new BinaryReader(File.OpenRead(Path.Combine(recording,"printed.bin"))))
+                        {
+                            selectedSaveId=r.ReadInt32();
+                            expectedVitals=NativeManagement.Digest(Queyang.Core.Wire.Text(r,8192).Split('/')[3]);
+                            expectedProfile=NativeManagement.Digest(Queyang.Core.Wire.Text(r,8192).Split('/')[3]);
+                        }
+                        CoopSession.Command("fixture/printed",0,0);
+                        until=Time.unscaledTime+15; stage=Stage.Printed;
+                        break;
+                    }
+                    Leave();
+                    break;
+                case Stage.Printed:
+                    if (Time.unscaledTime>until) throw new TimeoutException("Newly printed duplicant details did not match its host");
+                    var printed=NativeWorldMirror.GetDupeSelectable(selectedSaveId);
+                    if (printed==null) break;
+                    if (printed.GetComponent<NativeDupeIdentityMarker>()==null || printed.GetComponent<MinionIdentity>()!=null)
+                        throw new InvalidDataException("Expected a render-only post-baseline duplicant");
+                    if (SelectTool.Instance.selected!=printed) { SelectTool.Instance.Select(printed,false); break; }
+                    if (!NativeManagement.DisplayedVitals(selectedSaveId,expectedVitals,out _) ||
+                        !NativeManagement.DisplayedProfile(selectedSaveId,expectedProfile,out _)) break;
+                    log("NATIVE_PRINTED_GUEST renderOnly=true selected=true vitals=true profile=true");
                     Leave();
                     break;
                 case Stage.Exit:
@@ -190,6 +277,11 @@ namespace Queyang.Integration
                 var info = infos?.FirstOrDefault(row => row.text == label && row.buttonGo != null && row.buttonGo.activeInHierarchy);
                 if (info == null) continue;
                 if (!click) return true;
+                if (stage == Stage.ProxyOrder && !string.IsNullOrEmpty(recording) && File.Exists(Path.Combine(recording,"ladder-stale.txt")))
+                {
+                    staleClick = info.onClick;
+                    staleError = File.ReadAllText(Path.Combine(recording,"ladder-stale.txt"));
+                }
                 ClickStockControl(info);
                 return true;
             }

@@ -32,15 +32,22 @@ namespace Queyang.Integration
         private float nextSample;
         private string report;
         private bool isHost, hostReady, loading, guestStarted, finished;
+        private MaterialCompetition materials;
+        private TerrainNetworks terrain;
+        private readonly NativeInfrastructure infrastructure = new NativeInfrastructure();
         private float start, hostTime;
         private int step;
         private string lastStatus;
         private float lastCheck;
         private bool featuresRun;
+        private NativeEcology ecology;
+        private NativeFoodChain foodChain;
+        private NativeOrderChecks orderChecks;
         private bool readonlyFixture, steamLobby;
         private SteamSocketPairCheck steamPair;
         private GuestLifecycle lifecycle;
         private NativeScenario native;
+        private NativeLifecycle nativeLifecycle;
         private FixtureDialogs hostDialogs;
         private FixtureFrame hostFrame;
         private float hostHudSince;
@@ -68,6 +75,11 @@ namespace Queyang.Integration
                 try { lifecycle = new GuestLifecycle(Log, report); }
                 catch (Exception error) { finished = true; Log("FAIL " + error); }
             }
+            if (Environment.GetEnvironmentVariable("QY_SMOKE_ROLE") == "native-lifecycle")
+            {
+                try { nativeLifecycle = new NativeLifecycle(Log, report); }
+                catch (Exception error) { finished = true; Log("FAIL " + error); }
+            }
         }
         private void Log(string line) { File.AppendAllText(report, line + Environment.NewLine); }
         private void Update()
@@ -75,7 +87,8 @@ namespace Queyang.Integration
             if (finished || Time.realtimeSinceStartup - start < 2) return;
             try
             {
-                if (native != null) finished = native.Update();
+                if (nativeLifecycle != null) finished = nativeLifecycle.Update();
+                else if (native != null) finished = native.Update();
                 else if (lifecycle != null) { lifecycle.Update(); finished = lifecycle.Done; }
                 else if (isHost) HostStep();
                 else GuestStep();
@@ -84,6 +97,7 @@ namespace Queyang.Integration
         }
         private void HostStep()
         {
+            if (!ModEntry.PatchesLoaded) throw new InvalidOperationException("Production co-op patches did not load. Check build and Harmony errors in host.log.");
             if (!loading)
             {
                 if (hostDialogs != null && hostDialogs.Check()) return;
@@ -107,9 +121,16 @@ namespace Queyang.Integration
             if (!steamLobby && !hostPublished)
             {
                 if (hostFrame != null && !CaptureHostHud()) return;
+                if (!infrastructure.Record(Environment.GetEnvironmentVariable("QY_NATIVE_RECORDING"), Log)) return;
                 hostPublished = true;
                 Log("HOST_READY " + CoopSession.Endpoint);
+                if (File.Exists(Path.Combine(Path.GetDirectoryName(report), "materials.flag")))
+                    materials = HostFeatureChecks.BeginMaterialCompetition(Log);
+                if (File.Exists(Path.Combine(Path.GetDirectoryName(report), "terrain.flag")))
+                    terrain = new TerrainNetworks(Log);
             }
+            if (materials != null) { finished = materials.Tick(); return; }
+            if (terrain != null) { finished=terrain.Tick(); return; }
             if (steamLobby)
             {
                 if (!CoopSession.IsHosting) throw new Exception(CoopSession.Status);
@@ -144,6 +165,19 @@ namespace Queyang.Integration
             }
             if (!featuresRun && File.Exists(Path.Combine(Path.GetDirectoryName(report),"features.flag")))
             {
+                string recording = Environment.GetEnvironmentVariable("QY_NATIVE_RECORDING");
+                if (!string.IsNullOrEmpty(recording))
+                {
+                    if (foodChain == null)
+                    {
+                        if (ecology == null) ecology = new NativeEcology(recording,Log);
+                        if (!ecology.Tick()) return;
+                        foodChain = new NativeFoodChain(recording,Log);
+                    }
+                    if (!foodChain.Tick()) return;
+                }
+                if (orderChecks==null) orderChecks=new NativeOrderChecks(Log);
+                if (!orderChecks.Tick()) return;
                 featuresRun = true;
                 Log("FEATURE native management " + NativeManagementChecks.Run());
                 HostFeatureChecks.Run(Log);
@@ -207,7 +241,7 @@ namespace Queyang.Integration
             }
         }
         private GuestScenario scenario;
-        private void OnDestroy() { steamPair?.Dispose(); }
+        private void OnDestroy() { steamPair?.Dispose(); terrain?.Dispose(); }
 
         private void ReadonlyStep()
         {

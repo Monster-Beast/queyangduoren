@@ -47,11 +47,11 @@ namespace Queyang.Core
 
         internal bool Confirm(int offset)
         {
-            if (offset < Confirmed || offset > Sent || (offset != Length && offset % Wire.ChunkSize != 0))
+            if (offset < 0 || offset > Sent || (offset != Length && offset % Wire.ChunkSize != 0))
                 throw new InvalidDataException("Invalid native save acknowledgement.");
-            bool advanced = offset > Confirmed;
+            if (offset <= Confirmed) return false;
             Confirmed = offset;
-            return advanced;
+            return true;
         }
 
         internal byte[] Finish()

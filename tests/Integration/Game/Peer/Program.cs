@@ -28,7 +28,13 @@ namespace Queyang.Integration
                     log("PASS real host with three concurrent TCP test peers");
                     return 0;
                 }
-                if (args.Length==1 && args[0]=="--native-replay") return NativeReplay.Run(log);
+                if (args.Length>=1 && args[0]=="--native-replay")
+                {
+                    int duration=300;
+                    if (args.Length>2 || (args.Length==2 && (!int.TryParse(args[1],out duration) || duration<1)))
+                        throw new ArgumentException("Expected --native-replay [durationSeconds]");
+                    return NativeReplay.Run(log,duration);
+                }
                 var recording = args.Length==1 && args[0]=="--native-record"
                     ? new NativeRecording(NativeRecording.LocalDirectory(),log) : null;
                 if (args.Length!=0 && recording==null) throw new ArgumentException("Unknown peer mode.");

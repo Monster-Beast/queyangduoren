@@ -6,18 +6,19 @@ namespace Queyang.Game
     public sealed class ModEntry : KMod.UserMod2
     {
         internal static string ModId;
+        internal static bool PatchesLoaded { get; private set; }
         public override void OnLoad(Harmony harmony)
         {
             ModId = mod.staticID;
             // ChangeList is a const in the game DLL. Read the installed metadata, not an inlined value.
             var buildField = typeof(KleiVersion).GetField("ChangeList");
             if (buildField == null || !buildField.IsLiteral ||
-                System.Convert.ToUInt32(buildField.GetRawConstantValue()) != 744825u)
+                System.Convert.ToUInt32(buildField.GetRawConstantValue()) != 764025u)
             {
-                Debug.LogWarning("[QueyangCoop] Unsupported game build. This package targets 744825.");
+                Debug.LogWarning("[QueyangCoop] Unsupported game build. This package targets 764025.");
                 return;
             }
-            try { base.OnLoad(harmony); }
+            try { base.OnLoad(harmony); PatchesLoaded = true; }
             catch (System.Exception error)
             {
                 harmony.UnpatchAll(harmony.Id);

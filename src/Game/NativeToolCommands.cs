@@ -33,6 +33,24 @@ namespace Queyang.Game
             CoopSession.Command(cmd.Action, cmd.X, cmd.Y);
             nextDispatch = Time.unscaledTime + 0.055f;
         }
+        internal static void EnqueueSelected(string action, GameObject selected)
+        {
+            if (selected == null) return;
+            var prefab = selected.GetComponent<KPrefabID>();
+            var marker = selected.GetComponent<NativeBuildingIdentity>();
+            int id = marker != null ? marker.SaveId : prefab != null ? prefab.InstanceID : -1;
+            if (id <= 0) { NativeGuestFeedback.Show("正在等待房主确认这个对象。"); return; }
+            var building = selected.GetComponent<Building>();
+            int cell = marker != null ? marker.Cell : building != null ? building.GetCell() : Grid.PosToCell(selected);
+            if (action.StartsWith("priority", StringComparison.Ordinal))
+            {
+                var priority = selected.GetComponent<Prioritizable>();
+                if (priority == null || priority.GetMasterPriority().priority_class != PriorityScreen.PriorityClass.basic)
+                { NativeGuestFeedback.Show("请使用原版优先级工具为此处下单。"); return; }
+                action += "/" + priority.GetMasterPriority().priority_value;
+            }
+            Enqueue("object/" + id + "/" + action, cell);
+        }
         internal static void Enqueue(string action, int cell)
         {
             var view = CoopSession.NativeView;
@@ -43,8 +61,11 @@ namespace Queyang.Game
             {
                 var tile = lastTiles.Find(t => x >= t.X && y >= t.Y && x < t.X+ColonyView.Width && y < t.Y+ColonyView.Height);
                 if (tile == null) { NativeGuestFeedback.Show("正在等待这一区域的数据。"); return; }
-                int id = tile.Cells[(y-tile.Y)*ColonyView.Width+x-tile.X].TargetId;
+                var sample = tile.Cells[(y-tile.Y)*ColonyView.Width+x-tile.X];
+                int id = sample.TargetId;
                 if (id < 1) { NativeGuestFeedback.Show("此处没有可修改的订单或建筑。"); return; }
+                if (action.StartsWith("priority", StringComparison.Ordinal) && sample.OrderPriority > 0)
+                    action += "/" + sample.OrderPriority;
                 action += ":" + id;
             }
             if (pending.Count >= 256) { NativeGuestFeedback.Show("已选格子过多，请等待当前订单发送后再试。"); return; }
@@ -101,7 +122,8 @@ namespace Queyang.Game
                 if (!NativeGuestScene.Active) return true;
                 if (!NativeGuestScene.Ready || ___def == null || ___path == null || ___path.Count == 0) return false;
                 string tool = ___def.PrefabID == WireConfig.ID ? "wire" : ___def.PrefabID == GasConduitConfig.ID ? "gaspipe" :
-                    ___def.PrefabID == LiquidConduitConfig.ID ? "liquidpipe" : null;
+                    ___def.PrefabID == LiquidConduitConfig.ID ? "liquidpipe" : ___def.PrefabID == SolidConduitConfig.ID ? "rail" :
+                    ___def.PrefabID == LogicWireConfig.ID ? "logicwire" : null;
                 if (tool == null) { NativeGuestFeedback.Show("这种管线请由房主铺设。"); return false; }
                 if (___selectedElements == null || ___selectedElements.Count != 1)
                 { NativeGuestFeedback.Show("请重新选择管线材料。"); return false; }

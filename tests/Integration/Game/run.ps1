@@ -1,6 +1,6 @@
 # Opt-in integration fixture. Build a private game copy; never point the patcher at the Steam install.
 [CmdletBinding()]
-param([string]$SavePath,[string]$GameDir=$env:ONI_GAME_DIR,[int]$TimeoutSeconds=160,[switch]$SecondGame,[switch]$GuestOnly,[switch]$SteamLobby,[switch]$Persistence,[ValidateRange(0,86400)][int]$SoakSeconds=0,[switch]$Lifecycle,[switch]$LifecycleScreenshot,[switch]$SoloPerformance,[switch]$NativeRecord,[string]$NativeReplay,[string]$NativeEndpoint)
+param([string]$SavePath,[string]$GameDir=$env:ONI_GAME_DIR,[int]$TimeoutSeconds=160,[switch]$SecondGame,[switch]$GuestOnly,[switch]$SteamLobby,[switch]$Persistence,[ValidateRange(0,86400)][int]$SoakSeconds=0,[switch]$Lifecycle,[switch]$LifecycleScreenshot,[switch]$SoloPerformance,[switch]$NativeRecord,[string]$NativeReplay,[string]$NativeEndpoint,[switch]$NativeLifecycle,[switch]$MaterialCompetition,[switch]$TerrainNetworks)
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 . (Join-Path $repo 'tools/dev-common.ps1')
@@ -9,7 +9,17 @@ if (!$GameDir) {
     $GameDir=Join-Path $steamRoot 'steamapps/common/OxygenNotIncluded'
 }
 $GameDir = (Resolve-Path -LiteralPath $GameDir).Path
-if (!$GuestOnly -and !$NativeReplay -and !$NativeEndpoint) {
+if ($MaterialCompetition -or $TerrainNetworks) {
+    if (($MaterialCompetition -and $TerrainNetworks) -or $SecondGame -or $GuestOnly -or $SteamLobby -or $Persistence -or $SoakSeconds -or $Lifecycle -or $SoloPerformance -or $NativeRecord -or $NativeReplay -or $NativeEndpoint -or $NativeLifecycle) { throw 'Select one isolated host fixture at a time.' }
+    $TimeoutSeconds=[Math]::Max($TimeoutSeconds,300)
+}
+if ($NativeLifecycle) {
+    if (!$NativeReplay) { throw 'Use -NativeLifecycle with -NativeReplay <recording directory>.' }
+    if (!$SavePath) { $SavePath=Join-Path $NativeReplay 'baseline.sav' }
+    $TimeoutSeconds=[Math]::Max($TimeoutSeconds,540)
+}
+$needsSave=$NativeLifecycle -or (!$GuestOnly -and !$NativeReplay -and !$NativeEndpoint)
+if ($needsSave) {
     if (!$SavePath) { throw 'Provide -SavePath for the disposable host, or -GuestOnly for the Unity guest check.' }
     $SavePath = (Resolve-Path -LiteralPath $SavePath).Path
     if ([IO.Path]::GetExtension($SavePath) -ine '.sav') { throw 'Select a Vanilla .sav for the disposable host.' }
@@ -28,7 +38,7 @@ if ($SoakSeconds -and ($GuestOnly -or $SteamLobby -or $SecondGame -or $Persisten
 if ($SoakSeconds -gt 0) { $TimeoutSeconds=[Math]::Max($TimeoutSeconds,$SoakSeconds + 90) }
 if (!(Test-Path -LiteralPath (Join-Path $GameDir OxygenNotIncluded.exe))) { throw 'Set ONI_GAME_DIR to your Steam install.' }
 if (Get-Process OxygenNotIncluded -ErrorAction SilentlyContinue) { throw 'Close active ONI sessions before this test.' }
-$initialSaveHash = if (!$GuestOnly -and !$NativeReplay -and !$NativeEndpoint) { (Get-FileHash -LiteralPath $SavePath).Hash }
+$initialSaveHash = if ($needsSave) { (Get-FileHash -LiteralPath $SavePath).Hash }
 $realDb=Join-Path (Get-DefaultModsRoot) 'mods.json'
 $initialDbHash=if (Test-Path -LiteralPath $realDb) { (Get-FileHash -LiteralPath $realDb).Hash }
 $sourceDll=Join-Path $GameDir 'OxygenNotIncluded_Data/Managed/Assembly-CSharp-firstpass.dll'
@@ -47,6 +57,8 @@ $qaRoot=Join-Path $repo 'artifacts/qa'
 $run=Get-CheckedPath $qaRoot (Join-Path $qaRoot ('game-'+[Guid]::NewGuid().ToString('N')))
 $copy=Get-CheckedPath $run (Join-Path $run 'GameCopy')
 [IO.Directory]::CreateDirectory($copy) | Out-Null
+if ($MaterialCompetition) { [IO.File]::WriteAllText((Join-Path $run 'materials.flag'),'run') }
+if ($TerrainNetworks) { [IO.File]::WriteAllText((Join-Path $run 'terrain.flag'),'run') }
 Write-Output "Run directory: $run"
 $exe=Join-Path $copy OxygenNotIncluded.exe
 $processes=@()
@@ -99,7 +111,7 @@ try {
     $env:QY_SMOKE_HOST_CAPTURE=if($SecondGame){'1'}else{'0'}
     if ($NativeRecord) { $env:QY_NATIVE_RECORDING=Join-Path $run 'native-recording'; [IO.Directory]::CreateDirectory($env:QY_NATIVE_RECORDING) | Out-Null }
     if ($NativeReplay) { $env:QY_NATIVE_RECORDING=Get-CheckedPath $qaRoot (Resolve-Path -LiteralPath $NativeReplay).Path }
-    $roles=if ($NativeReplay -or $NativeEndpoint) { 'guest-native' } elseif ($Lifecycle) { 'guest-lifecycle' } elseif ($GuestOnly) { 'guest-readonly' } elseif ($SteamLobby) { 'host' } else { @('host','client') }
+    $roles=if ($NativeLifecycle) { 'native-lifecycle' } elseif ($NativeReplay -or $NativeEndpoint) { 'guest-native' } elseif ($Lifecycle) { 'guest-lifecycle' } elseif ($GuestOnly) { 'guest-readonly' } elseif ($SteamLobby -or $MaterialCompetition -or $TerrainNetworks) { 'host' } else { @('host','client') }
     foreach ($role in $roles) {
         $klei=Join-Path $run "$role/Klei"
         $gameProfile=Join-Path $klei 'OxygenNotIncluded'
@@ -120,13 +132,13 @@ try {
         $env:QY_SMOKE_ROLE=$role
         $env:QY_SMOKE_REPORT=Join-Path $run "$role.report"
         $env:QY_SMOKE_SAVE=Join-Path $gameProfile 'save_files/Fixture/Fixture.sav'
-        if ($role -eq 'host' -or $Lifecycle) {
+        if ($role -eq 'host' -or $Lifecycle -or $NativeLifecycle) {
             [IO.Directory]::CreateDirectory((Split-Path $env:QY_SMOKE_SAVE)) | Out-Null
             Copy-Item -LiteralPath $SavePath -Destination $env:QY_SMOKE_SAVE
         }
         $log=Join-Path $run "$role.log"
         $peerExe=Join-Path $PSScriptRoot 'Peer/bin/Release/net48/Peer.exe'
-        if (($role -eq 'client' -and !$SecondGame) -or $guestFixture) {
+        if (($role -eq 'client' -and !$SecondGame) -or $guestFixture -or $TerrainNetworks) {
             $ids=foreach($modulePath in @((Join-Path $managed 'Assembly-CSharp.dll'),(Join-Path $mod 'QueyangCoop.dll'),(Join-Path $mod 'Queyang.Core.dll'))) {
                 $image=[Mono.Cecil.ModuleDefinition]::ReadModule($modulePath)
                 try { $image.Mvid.ToString() } finally { $image.Dispose() }
@@ -135,7 +147,7 @@ try {
         }
         if ($guestFixture) {
             $env:QY_SMOKE_REPORT=Join-Path $run 'fixture.report'
-            $serveArgs=if ($NativeReplay) { @('--native-replay') } else { @('--serve-readonly',([string]($TimeoutSeconds + 30))) }
+            $serveArgs=if ($NativeReplay) { @('--native-replay',([string]($TimeoutSeconds + 30))) } else { @('--serve-readonly',([string]($TimeoutSeconds + 30))) }
             $readyMark=if ($NativeReplay) { '^NATIVE_REPLAY_READY' } else { '^READONLY_FIXTURE_READY' }
             $server=Start-Process -FilePath $peerExe -ArgumentList $serveArgs -WorkingDirectory $run -PassThru -WindowStyle Hidden
             $processes+=$server
@@ -162,12 +174,12 @@ try {
         $sampleAt=0
         $savedManifest=$false
         $restarted=$false
-        $done=if($role -eq 'host' -and !$SteamLobby) { '^HOST_READY' } else { '^PASS ' }
+        $done=if($TerrainNetworks) { '^PASS terrain and networks' } elseif($MaterialCompetition) { '^PASS material competition' } elseif ($role -eq 'host' -and !$SteamLobby) { '^HOST_READY' } else { '^PASS ' }
         while ($timer.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
             if (Test-Path -LiteralPath $env:QY_SMOKE_REPORT) {
                 $lines=Get-Content -LiteralPath $env:QY_SMOKE_REPORT
                 if ($lines -match '^FAIL ') { throw "Game smoke $role failed. See report in $run" }
-                if (($role -in @('guest-native','client') -or (($NativeRecord -or $SecondGame) -and $role -eq 'host')) -and $lines -match '^NATIVE_RESTART_REQUIRED') {
+                if (($role -in @('guest-native','native-lifecycle','client') -or (($NativeRecord -or $SecondGame) -and $role -eq 'host')) -and $lines -match '^NATIVE_RESTART_REQUIRED') {
                     if ($restarted) { throw 'The fresh isolated profile requested a second restart.' }
                     if (!$process.WaitForExit(15000)) { throw 'Native restart requested but game did not quit.' }
                     $restarted=$true
@@ -214,6 +226,19 @@ try {
             throw "Game smoke $role did not reach $done. See $log"
         }
         Get-Content -LiteralPath $env:QY_SMOKE_REPORT
+        if ($NativeLifecycle) {
+            $roundLog=Get-Content -LiteralPath $env:QY_SMOKE_REPORT
+            $tapeLog=Get-Content -LiteralPath (Join-Path $run 'fixture.report')
+            foreach ($i in 1..3) {
+                foreach ($pattern in @("^NATIVE_LIFECYCLE_GUEST_PASS round=$i$", "^NATIVE_LIFECYCLE_SOLO_SAVED round=$i progressed=True bytes=[1-9]\d*$", "^NATIVE_LIFECYCLE_SOLO_READBACK round=$i markerVerified=True$", "^NATIVE_LIFECYCLE_ROUND_PASS round=$i$")) {
+                    if (@($roundLog -match $pattern).Count -ne 1) { throw "Missing native lifecycle evidence for round $i ($pattern)" }
+                }
+                if (@($tapeLog -match "^NATIVE_REPLAY_JOIN $i$").Count -ne 1) { throw "Missing fresh baseline for round $i" }
+            }
+            if (@($tapeLog -match '^NATIVE_REPLAY_DIG ').Count -ne 3 -or @($roundLog -match '^NATIVE_COUNTERS simStep=0 findChore=0 setChore=0 saveAttempts=0 worldStarts=0 ').Count -ne 3) {
+                throw 'Expected three independent stock-tool joins without guest-side simulation or saving.'
+            }
+        }
         if ($Lifecycle) {
             $layers=@(Select-String -LiteralPath $log -Pattern '\[QueyangCoop\] guest-closed simStep=0 findChore=0 setChore=0 saveAttempts=0 worldStarts=0 views=[1-9]\d*')
             $rounds=@(Select-String -LiteralPath $env:QY_SMOKE_REPORT -Pattern '^LIFECYCLE_ROUND_PASS round=[123]$')
@@ -250,15 +275,17 @@ try {
 } finally {
     $hostReport=Join-Path $run 'host.report'
     $featureFailed=$false
-    if ($processes.Count -gt 0 -and !$processes[0].HasExited -and (Test-Path -LiteralPath $hostReport) -and
+    if (!$TerrainNetworks -and !$MaterialCompetition -and $processes.Count -gt 0 -and !$processes[0].HasExited -and (Test-Path -LiteralPath $hostReport) -and
         (Select-String -LiteralPath $hostReport -Pattern '^HOST_READY' -Quiet)) {
         [IO.File]::WriteAllText((Join-Path $run 'features.flag'),'run')
         $featureWait=[Diagnostics.Stopwatch]::StartNew()
-        while ($featureWait.Elapsed.TotalSeconds -lt 12 -and !(Select-String -LiteralPath $hostReport -Pattern '^FEATURE_CHECKS_DONE' -Quiet)) {
+        $featureTimeout = if ($NativeRecord) { 100 } else { 12 }
+        while ($featureWait.Elapsed.TotalSeconds -lt $featureTimeout -and !(Select-String -LiteralPath $hostReport -Pattern '^FEATURE_CHECKS_DONE|^FAIL ' -Quiet)) {
             Start-Sleep -Milliseconds 250
         }
         Get-Content -LiteralPath $hostReport
-        $featureFailed=!(Select-String -LiteralPath $hostReport -Pattern '^FEATURE_CHECKS_DONE' -Quiet)
+        $featureFailed=!(Select-String -LiteralPath $hostReport -Pattern '^FEATURE_CHECKS_DONE' -Quiet) -or
+            (Select-String -LiteralPath $hostReport -Pattern '^FEATURE FAIL |^FAIL ' -Quiet)
     }
     foreach ($p in $processes) {
         if (!$p.HasExited) {
@@ -281,7 +308,7 @@ try {
         (Get-FileHash -LiteralPath $sourceDll).Hash -ne $initialDllHash -or
         ($initialDbHash -and (Get-FileHash -LiteralPath $realDb).Hash -ne $initialDbHash)) { throw 'Unexpected change to original test inputs.' }
     # Keep reports and raw, private engine logs locally; remove the copied game and save files.
-    foreach ($child in 'GameCopy','host','client','guest-readonly','guest-lifecycle','guest-native') {
+    foreach ($child in 'GameCopy','host','client','guest-readonly','guest-lifecycle','guest-native','native-lifecycle') {
         $owned=Get-CheckedPath $run (Join-Path $run $child)
         if (Test-Path -LiteralPath $owned) { Remove-Item -LiteralPath $owned -Recurse -Force }
     }

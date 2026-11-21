@@ -10,6 +10,7 @@ namespace Queyang.Game
         static readonly Dictionary<int, BuildingDef> buildings = new Dictionary<int, BuildingDef>();
         static readonly Dictionary<int, Marker> buildingMarkers = new Dictionary<int, Marker>();
         static readonly Dictionary<int, GameObject> digMarkers = new Dictionary<int, GameObject>();
+        static readonly Dictionary<int, GameObject> mopMarkers = new Dictionary<int, GameObject>();
         static readonly HashSet<int> visibleDupes = new HashSet<int>();
         static readonly Dictionary<int, MinionIdentity> localDupes = new Dictionary<int, MinionIdentity>();
         static readonly Dictionary<int, KBatchedAnimController> spawnedDupes = new Dictionary<int, KBatchedAnimController>();
@@ -19,7 +20,7 @@ namespace Queyang.Game
 
         sealed class Marker
         {
-            public int Hash, Target;
+            public int Hash, Target, SaveId;
             public byte Style, Flags;
             public GameObject Object;
             public KBatchedAnimController Anim;
@@ -54,11 +55,16 @@ namespace Queyang.Game
                 if ((sample.Flags & 1) == 0) continue;
                 ApplyElement(cell, sample);
                 ApplyDig(cell, (sample.Flags & 8) != 0);
+                if (view.HasEnvironment) ApplyMop(cell, sample.MopOrdered);
                 ApplyBuilding(cell, sample);
+                if (view.CoversEnvironment(i) && sample.BuildingSaveId > 0)
+                    NativeMaterialReadings.Apply(GetBuildingSelectable(cell, sample.BuildingSaveId)?.GetComponent<PrimaryElement>(), sample.Structure);
                 if (view.Detailed)
                 {
-                    NativeUtilities.Apply(cell, sample);
-                    NativeUtilityDisplay.Apply(cell, sample);
+                    bool hasEnvironment = view.CoversEnvironment(i);
+                    if (hasEnvironment) NativeEnvironment.Apply(cell, sample);
+                    NativeUtilities.Apply(cell, sample, hasEnvironment);
+                    NativeUtilityDisplay.Apply(cell, sample, hasEnvironment);
                 }
             }
             ApplyDupes(view);
@@ -97,18 +103,34 @@ namespace Queyang.Game
                 if (dig != null && dig.materialDisplay != null) dig.materialDisplay.enabled = ordered;
             }
             bool needed = ordered && local == null;
-            if (digMarkers.TryGetValue(cell, out var marker))
+            ApplyDesignation(cell, needed, DigPlacerConfig.ID, digMarkers);
+        }
+
+        static void ApplyMop(int cell, bool ordered)
+        {
+            var local = Grid.Objects[cell, (int)ObjectLayer.MopPlacer];
+            if (local != null)
             {
-                if (!needed) { Object.Destroy(marker); digMarkers.Remove(cell); }
+                var mesh = local.GetComponentInChildren<MeshRenderer>(true);
+                if (mesh != null) mesh.enabled = ordered;
+            }
+            ApplyDesignation(cell, ordered && local == null, MopPlacerConfig.ID, mopMarkers);
+        }
+
+        static void ApplyDesignation(int cell, bool needed, string prefabId, Dictionary<int, GameObject> markers)
+        {
+            if (markers.TryGetValue(cell, out var marker))
+            {
+                if (!needed) { Object.Destroy(marker); markers.Remove(cell); }
                 return;
             }
             if (!needed) return;
-            var prefab = Assets.TryGetPrefab(new Tag(DigPlacerConfig.ID));
+            var prefab = Assets.TryGetPrefab(new Tag(prefabId));
             var source = prefab == null ? null : prefab.GetComponentInChildren<MeshFilter>(true);
             if (source == null) return;
             var sourceRenderer = source.GetComponent<MeshRenderer>();
             if (sourceRenderer == null) return;
-            marker = new GameObject("Dig designation");
+            marker = new GameObject(prefabId);
             marker.layer = source.gameObject.layer;
             marker.transform.SetParent(markerRoot.transform, false);
             marker.transform.position = Grid.CellToPosCCC(cell, Grid.SceneLayer.FXFront2) +
@@ -117,7 +139,7 @@ namespace Queyang.Game
             marker.transform.rotation = source.transform.rotation;
             marker.AddComponent<MeshFilter>().sharedMesh = source.sharedMesh;
             marker.AddComponent<MeshRenderer>().sharedMaterial = sourceRenderer.sharedMaterial;
-            digMarkers.Add(cell, marker);
+            markers.Add(cell, marker);
         }
 
         internal static bool IsDigVisible(int cell)
@@ -148,6 +170,11 @@ namespace Queyang.Game
                 {
                     Pose(anim, sample.BuildingAnimation, sample.BuildingFrame);
                     ApplyPrimary(item.GetComponent<PrimaryElement>(), sample.Structure);
+                    if (sample.TargetId > 0 && item.GetComponent<Door>() != null && item.GetComponent<BuildingComplete>() != null)
+                    {
+                        var controls = item.GetComponent<NativeProxySettings>() ?? item.gameObject.AddComponent<NativeProxySettings>();
+                        controls.Initialize(cell, sample.TargetId);
+                    }
                 }
             }
             if (sample.AnchorDX != 0 || sample.AnchorDY != 0)
@@ -163,7 +190,8 @@ namespace Queyang.Game
                 return;
             }
             if (buildingMarkers.TryGetValue(cell, out var current) && current.Hash == sample.BuildingHash &&
-                (current.Style & 127) == (sample.BuildingStyle & 127) && current.Flags == flags && current.Target == sample.TargetId)
+                (current.Style & 127) == (sample.BuildingStyle & 127) && current.Flags == flags &&
+                current.Target == sample.TargetId && current.SaveId == sample.BuildingSaveId)
             {
                 if (current.Style != sample.BuildingStyle)
                 {
@@ -207,6 +235,8 @@ namespace Queyang.Game
             // the host's saved KPrefabID and spawn functions must never be copied to the proxy.
             marker.AddComponent<KPrefabID>().PrefabTag = new Tag(def.PrefabID);
             marker.AddComponent<KSelectable>().SetName(def.Name);
+            var identity = marker.AddComponent<NativeBuildingIdentity>();
+            identity.Cell = cell; identity.SaveId = sample.BuildingSaveId;
             if ((flags & 32) == 0 && (sample.Flags & 8) == 0 && sample.TargetId > 0)
                 marker.AddComponent<NativeProxySettings>().Initialize(cell, sample.TargetId);
             PrimaryElement primary = null;
@@ -217,7 +247,7 @@ namespace Queyang.Game
                 ApplyPrimary(primary, sample.Structure);
             }
             marker.SetActive(true);
-            buildingMarkers[cell] = new Marker { Hash = sample.BuildingHash, Target = sample.TargetId, Style = sample.BuildingStyle,
+            buildingMarkers[cell] = new Marker { Hash = sample.BuildingHash, Target = sample.TargetId, SaveId = sample.BuildingSaveId, Style = sample.BuildingStyle,
                 Flags = flags, Object = marker, Anim = controller, Primary = primary };
         }
 
@@ -239,11 +269,29 @@ namespace Queyang.Game
 
         static float ReadTemperature(PrimaryElement p) => p.InternalTemperature;
 
+        internal static KSelectable GetBuildingSelectable(int cell, int saveId)
+        {
+            if (!Grid.IsValidCell(cell) || saveId <= 0) return null;
+            if (buildingMarkers.TryGetValue(cell, out var marker))
+                return marker.SaveId == saveId ? marker.Object.GetComponent<KSelectable>() : null;
+            var obj = HostWorld.FindBuilding(cell);
+            if (obj == null || obj.GetComponent<KPrefabID>()?.InstanceID != saveId) return null;
+            var selectable = obj.GetComponent<KSelectable>();
+            return selectable != null && selectable.IsSelectable ? selectable : null;
+        }
+
         static void RemoveBuildingMarker(int cell)
         {
             if (!buildingMarkers.TryGetValue(cell, out var marker)) return;
             DestroySelectableProxy(marker.Object);
             buildingMarkers.Remove(cell);
+        }
+
+        internal static KSelectable GetDupeSelectable(int hostId)
+        {
+            if (localDupes.TryGetValue(hostId, out var local) && local != null) return local.GetComponent<KSelectable>();
+            if (spawnedDupes.TryGetValue(hostId, out var marker) && marker != null) return marker.GetComponent<KSelectable>();
+            return null;
         }
 
         static void ApplyDupes(ColonyView view)
@@ -260,7 +308,10 @@ namespace Queyang.Game
                 if (d.SaveId < 0 || !visibleDupes.Add(d.SaveId)) continue;
                 KBatchedAnimController anim;
                 if (localDupes.TryGetValue(d.SaveId, out var dupe))
+                {
+                    if (dupe.GetProperName() != d.Name) dupe.SetName(d.Name);
                     anim = dupe.GetComponent<KBatchedAnimController>();
+                }
                 else if (!spawnedDupes.TryGetValue(d.SaveId, out anim))
                 {
                     anim = CreateDupe(d);
@@ -268,6 +319,11 @@ namespace Queyang.Game
                     spawnedDupes.Add(d.SaveId, anim);
                 }
                 if (anim == null) continue;
+                if (dupe == null && anim.gameObject.name != d.Name)
+                {
+                    anim.gameObject.name = d.Name;
+                    anim.GetComponent<KSelectable>().SetName(d.Name);
+                }
                 var pos = anim.transform.position;
                 anim.transform.position = new Vector3(d.X + d.SubX / 255f, d.Y + d.SubY / 255f, pos.z);
                 SetVisible(anim, true);
@@ -329,6 +385,7 @@ namespace Queyang.Game
             collider.size = new Vector2(.75f, 1.8f); collider.offset = new Vector2(0, .9f);
             marker.AddComponent<KPrefabID>().PrefabTag = new Tag(MinionConfig.ID);
             marker.AddComponent<KSelectable>().SetName(dupe.Name);
+            marker.AddComponent<NativeDupeIdentityMarker>().HostId = dupe.SaveId;
             marker.AddComponent<SymbolOverrideController>();
             var appearance = marker.AddComponent<Accessorizer>();
             marker.SetActive(true);
@@ -339,7 +396,15 @@ namespace Queyang.Game
         static void SetVisible(KBatchedAnimController anim, bool visible)
         {
             if (anim == null) return;
-            if (visible ? hidden.Remove(anim) : hidden.Add(anim)) anim.SetVisiblity(visible);
+            if (visible ? hidden.Remove(anim) : hidden.Add(anim))
+            {
+                var tool = SelectTool.Instance;
+                if (!visible && tool != null && tool.selected != null && tool.selected.gameObject == anim.gameObject)
+                    tool.Select(null, true);
+                var selectable = anim.GetComponent<KSelectable>();
+                if (selectable != null) selectable.IsSelectable = visible;
+                anim.SetVisiblity(visible);
+            }
         }
 
         static void Pose(KBatchedAnimController anim, int hash, byte frame)
@@ -355,9 +420,11 @@ namespace Queyang.Game
         {
             if (markerRoot != null) DestroySelectableProxy(markerRoot);
             markerRoot = null;
-            buildingMarkers.Clear(); digMarkers.Clear(); buildings.Clear(); visibleDupes.Clear(); hidden.Clear();
+            buildingMarkers.Clear(); digMarkers.Clear(); mopMarkers.Clear(); buildings.Clear(); visibleDupes.Clear(); hidden.Clear();
             spawnedDupes.Clear(); expiredDupes.Clear(); localDupes.Clear(); NativeUtilities.Reset(); NativeUtilityDisplay.Reset();
             NativeResources.Reset();
+            NativeEnvironment.Reset();
+            NativeMaterialReadings.Reset();
         }
 
         internal static void DestroySelectableProxy(GameObject target)

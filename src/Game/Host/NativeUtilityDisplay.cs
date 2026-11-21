@@ -8,9 +8,9 @@ namespace Queyang.Game
     // connection animations and layers as the vanilla overlay without rebuilding a sim graph.
     internal static class NativeUtilityDisplay
     {
-        static readonly ObjectLayer[] layers = { ObjectLayer.Wire, ObjectLayer.GasConduit, ObjectLayer.LiquidConduit, ObjectLayer.LogicWire };
-        static readonly ObjectLayer[] tiles = { ObjectLayer.WireTile, ObjectLayer.GasConduitTile, ObjectLayer.LiquidConduitTile, ObjectLayer.LogicWireTile };
-        static readonly string[] prefabIds = { WireConfig.ID, GasConduitConfig.ID, LiquidConduitConfig.ID, LogicWireConfig.ID };
+        static readonly ObjectLayer[] layers = { ObjectLayer.Wire, ObjectLayer.GasConduit, ObjectLayer.LiquidConduit, ObjectLayer.LogicWire, ObjectLayer.SolidConduit };
+        static readonly ObjectLayer[] tiles = { ObjectLayer.WireTile, ObjectLayer.GasConduitTile, ObjectLayer.LiquidConduitTile, ObjectLayer.LogicWireTile, ObjectLayer.SolidConduitTile };
+        static readonly string[] prefabIds = { WireConfig.ID, GasConduitConfig.ID, LiquidConduitConfig.ID, LogicWireConfig.ID, SolidConduitConfig.ID };
         static readonly Dictionary<int, KBatchedAnimController> proxies = new Dictionary<int, KBatchedAnimController>();
         static readonly HashSet<KBatchedAnimController> suppressed = new HashSet<KBatchedAnimController>();
         static readonly List<int> expired = new List<int>();
@@ -23,7 +23,8 @@ namespace Queyang.Game
             var overlay = OverlayScreen.Instance;
             var mode = overlay == null ? default : overlay.GetMode();
             int next = mode == OverlayModes.Power.ID ? 0 : mode == OverlayModes.GasConduits.ID ? 1 :
-                mode == OverlayModes.LiquidConduits.ID ? 2 : mode == OverlayModes.Logic.ID ? 3 : -1;
+                mode == OverlayModes.LiquidConduits.ID ? 2 : mode == OverlayModes.Logic.ID ? 3 :
+                mode == OverlayModes.SolidConveyor.ID ? 4 : -1;
             if (next != active)
             {
                 Reset();
@@ -36,6 +37,7 @@ namespace Queyang.Game
                     case 1: manager = game.gasConduitSystem; break;
                     case 2: manager = game.liquidConduitSystem; break;
                     case 3: manager = game.logicCircuitSystem; break;
+                    case 4: manager = game.solidConduitSystem; break;
                 }
             }
             if (proxies.Count == 0) return;
@@ -53,14 +55,16 @@ namespace Queyang.Game
             foreach (int cell in expired) Remove(cell);
         }
 
-        internal static void Apply(int cell, ColonyCell data)
+        internal static void Apply(int cell, ColonyCell data, bool hasEnvironment)
         {
             if (active < 0 || manager == null) return;
-            bool present = (data.Utilities & (1 << active)) != 0;
+            bool rail = active == 4;
+            if (rail && !hasEnvironment) return;
+            bool present = rail ? data.RailPresent : (data.Utilities & (1 << active)) != 0;
             var local = Grid.Objects[cell, (int)layers[active]] ?? Grid.Objects[cell, (int)tiles[active]];
             var localAnim = local == null ? null : local.GetComponent<KBatchedAnimController>();
-            var connections = (UtilityConnections)((data.Connections >> (active * 4)) & 15);
-            bool same = local != null && present && manager.GetDisplayConnections(cell) == connections;
+            var connections = rail ? (UtilityConnections)data.RailConnections : (UtilityConnections)((data.Connections >> (active * 4)) & 15);
+            bool same = !rail && local != null && present && manager.GetDisplayConnections(cell) == connections;
             if (localAnim != null)
             {
                 if (same && suppressed.Remove(localAnim)) localAnim.SetVisiblity(true);
@@ -97,6 +101,11 @@ namespace Queyang.Game
                 reading = string.Format(culture, "{0:0} W / {1:0} W", data.WattsUsed, data.WattsSafe);
                 proxy.TintColour = data.WattsUsed > data.WattsSafe ? Color.red : Color.white;
             }
+            else if (rail)
+            {
+                var cargo = data.RailItem == 0 ? null : Assets.TryGetPrefab(new Tag(data.RailItem));
+                reading = cargo == null ? "空" : string.Format(culture, "{0} {1:0.###} kg", cargo.GetProperName(), data.RailMass);
+            }
             else if (active == 3)
             {
                 reading = data.LogicValue.ToString(culture);
@@ -119,6 +128,9 @@ namespace Queyang.Game
             proxies.Remove(cell);
             if (proxy != null) NativeWorldMirror.DestroySelectableProxy(proxy.gameObject);
         }
+
+        internal static KSelectable GetOverlaySelectable(int cell) =>
+            proxies.TryGetValue(cell, out var proxy) && proxy != null ? proxy.GetComponent<KSelectable>() : null;
 
         internal static void Reset()
         {

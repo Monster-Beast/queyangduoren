@@ -28,14 +28,17 @@ namespace Queyang.Core
         public bool Rejected { get; private set; }
         public event Action<string> ResultReceived;
         public event Action<double> CommandLatencyMs;
+        public event Action<byte[]> ViewReceived;
         public event Action<byte[]> PeripheralReceived;
         bool peripheralPending;
+        uint peripheralGeneration;
         byte[] peripheral;
         int peripheralOffset;
         public bool RequestPeripheral(int x,int y)
         {
             if (!worldReady || !Live || peripheralPending || x < 0 || y < 0) return false;
             peripheralPending = true;
+            peripheralGeneration = generation;
             Send(Message.PeripheralRequest,w => { w.Write(x); w.Write(y); });
             return true;
         }
@@ -68,7 +71,7 @@ namespace Queyang.Core
             if (disposed) return;
             disposed=true; WaitingForNativeWorld=false;
             save?.Dispose(); save=null;
-            room=null; View=null; staging=null; pending.Clear();
+            room=null; View=null; staging=null; peripheral=null; peripheralPending=false; peripheralOffset=0; pending.Clear();
         }
         public void Ping(long stamp)
         {
@@ -140,7 +143,7 @@ namespace Queyang.Core
                         {
                             var complete = peripheral;
                             peripheral = null; peripheralOffset = 0; peripheralPending = false;
-                            PeripheralReceived?.Invoke(complete);
+                            if (peripheralGeneration == generation) PeripheralReceived?.Invoke(complete);
                         }
                         break;
                     case Message.NativeBegin:
@@ -197,11 +200,9 @@ namespace Queyang.Core
                     case Message.Result:
                         var cmd = r.ReadUInt64(); var seq = r.ReadUInt64(); r.ReadUInt64();
                         var result = Wire.Text(r,8192); Wire.End(r);
-                        if (pending.TryGetValue(cmd,out var start))
-                        {
-                            pending.Remove(cmd);
-                            CommandLatencyMs?.Invoke((Stopwatch.GetTimestamp()-start)*1000.0/Stopwatch.Frequency);
-                        }
+                        if (!pending.TryGetValue(cmd,out var start)) return;
+                        pending.Remove(cmd);
+                        CommandLatencyMs?.Invoke((Stopwatch.GetTimestamp()-start)*1000.0/Stopwatch.Frequency);
                         if (!result.StartsWith("NM1/",StringComparison.Ordinal))
                             Status = result.StartsWith("M1:",StringComparison.Ordinal) ? "Management updated" :
                                 "#" + cmd + " [" + seq + "] " + result;
@@ -221,6 +222,7 @@ namespace Queyang.Core
             revision++;
             if (first) Status = "Connected";
             Ack(Message.Applied,revision);
+            ViewReceived?.Invoke(View);
         }
         void Ack(Message type, ulong rev) => Send(type,w => {
             w.Write(generation); w.Write(rev); w.Write(received);

@@ -1,7 +1,10 @@
 using System;
 using System.Linq;
+using System.IO;
+using System.Collections.Generic;
 using HarmonyLib;
 using Queyang.Game;
+using Packet = Queyang.Core.Wire;
 
 namespace Queyang.Integration
 {
@@ -21,6 +24,7 @@ namespace Queyang.Integration
             string QueueVersion() => NativeManagement.Digest(string.Join(",", Research.Instance.GetResearchQueue().Select(q => q.tech.Id)));
 
             var research = Research.Instance;
+            CheckColony(Exec);
             var oldQueue = research.GetResearchQueue().ToArray();
             try
             {
@@ -68,6 +72,7 @@ namespace Queyang.Integration
                 Expect(Exec(route).StartsWith("ERROR ") && Exec("priority/" + id + "/" + job.Id + "/" + priority + "/999").StartsWith("ERROR "), "reject stale or invalid priority");
             }
             finally { consumer.SetPersonalPriority(job, oldPriority); }
+            CheckDuplicant(dupe, id, Exec);
 
             Expect(Exec("assign/" + id + "/bogus/bogus").StartsWith("ERROR "), "reject invalid assignment");
             Expect(HostWorld.Execute("nm/switch/1/1/0", -1, -1).StartsWith("ERROR "), "reject invalid building coordinate");
@@ -98,7 +103,125 @@ namespace Queyang.Integration
                 testedSwitch = true;
                 break;
             }
-            return "research=true schedule=true priority=true switch=" + testedSwitch;
+            return "research=true schedule=true priority=true vitals=true profile=true catalogue=true overview=true switch=" + testedSwitch;
+        }
+
+        static void CheckColony(Func<string,string> exec)
+        {
+            var manager=ScheduleManager.Instance;
+            var field=AccessTools.DeclaredField(typeof(ScheduleManager),"schedules");
+            var original=manager.GetSchedules();
+            var groups=Db.Get().ScheduleGroups.allGroups;
+            var source=new List<Schedule> { new Schedule("基础",groups,false), new Schedule("晚班",groups,false),
+                new Schedule("第三班",groups,false) };
+            var replica=new List<Schedule> { new Schedule("基础",groups,false), new Schedule("晚班",groups,false) };
+            void Sync()
+            {
+                field.SetValue(manager,source);
+                var pages=Enumerable.Range(0,(source.Count+1)/2).Select(i=>exec("schedules/"+i).Split('/')).ToArray();
+                field.SetValue(manager,replica);
+                foreach (var p in pages)
+                {
+                    Expect(p.Length==4 && p[1]=="sl","schedule directory");
+                    NativeManagement.ApplySchedulePage(p[2],p[3]);
+                }
+                Expect(source.Select(s=>s.name).SequenceEqual(replica.Select(s=>s.name)),"schedule directory order");
+            }
+            try
+            {
+                Sync();
+                var same=replica[1];
+                source[1].name="新晚班"; source[1].alarmActivated=true;
+                source[1].AddTimetable(source[0].GetBlocks().ToList());
+                source.RemoveAt(0);
+                Sync();
+                Expect(replica.Count==2 && ReferenceEquals(same,replica[0]) && same.alarmActivated &&
+                    same.GetBlocks().Select(b=>b.GroupId).SequenceEqual(source[0].GetBlocks().Select(b=>b.GroupId)),
+                    "rename, delete and timetable growth");
+            }
+            finally { field.SetValue(manager,original); NativeManagement.Reset(); }
+
+            string summary=exec("overview");
+            Expect(summary.StartsWith("NM1/ov/",StringComparison.Ordinal),"host overview");
+            NativeManagement.ApplyOverview(summary.Substring(7));
+            string first=NativeManagement.OverviewText;
+            NativeManagement.ApplyOverview(summary.Substring(7));
+            var inventory=ClusterManager.Instance.activeWorld.worldInventory;
+            Expect(first==NativeManagement.OverviewText && first.Contains(GameUtil.GetFormattedCalories(RationTracker.Get().CountAmount(null,inventory,false))),
+                "calories and repeated summary");
+            NativeManagement.Reset();
+        }
+
+        static void CheckDuplicant(MinionIdentity dupe, int id, Func<string,string> exec)
+        {
+            BinaryReader Query(string path, string type)
+            {
+                string prefix = "NM1/" + type + "/" + id + "/";
+                string reply = exec(path + "/" + id);
+                Expect(reply.StartsWith(prefix, StringComparison.Ordinal), path);
+                var r = new BinaryReader(new MemoryStream(Convert.FromBase64String(reply.Substring(prefix.Length).Replace('_','/'))));
+                Expect(r.ReadByte() == (type=="pf" ? 2 : 1), path + " version");
+                return r;
+            }
+            var driver = dupe.GetComponent<ChoreDriver>();
+            var current = driver.GetCurrentChore();
+            float stamina = Db.Get().Amounts.Stamina.Lookup(dupe).value;
+            float hitPoints = dupe.GetComponent<Health>().hitPoints;
+            using (var r = Query("vitals","v"))
+            {
+                Packet.Text(r,256); Packet.Text(r,256);
+                bool working = r.ReadBoolean();
+                if (current == null) Expect(!working, "idle duplicant shows a chore");
+                void Errand()
+                {
+                    Expect(Packet.Text(r,256).Length > 0, "empty chore");
+                    Packet.Text(r,256); r.ReadInt32(); r.ReadInt32(); r.ReadInt32();
+                }
+                if (working) Errand();
+                int count = r.ReadByte();
+                for (int i=0; i<count; i++) Errand();
+                int n = r.ReadByte(); bool sawStamina = false, sawHealth = false;
+                for (int i=0; i<n; i++)
+                {
+                    int index = r.ReadByte(); float value = r.ReadSingle();
+                    r.ReadSingle(); r.ReadSingle(); Packet.Text(r,128);
+                    if (index == 0) sawStamina = value == stamina;
+                    if (index == 6) sawHealth = value == hitPoints;
+                }
+                Expect(sawStamina && sawHealth && driver.GetCurrentChore() == current &&
+                    Db.Get().Amounts.Stamina.Lookup(dupe).value == stamina, "read-only stamina, health, chore");
+                Packet.End(r);
+            }
+            using (var r = Query("profile","pf"))
+            {
+                var resume = dupe.GetComponent<MinionResume>();
+                var food = dupe.GetComponent<ConsumableConsumer>();
+                Expect(r.ReadSingle() == resume.TotalExperienceGained && Packet.Text(r,160) == (resume.CurrentHat ?? "") &&
+                    Packet.Text(r,160) == (resume.TargetHat ?? ""), "experience and hats");
+                void Ids(System.Collections.Generic.IEnumerable<int> source)
+                {
+                    int count = r.ReadUInt16();
+                    var actual = Enumerable.Range(0,count).Select(_=>r.ReadInt32());
+                    Expect(actual.SequenceEqual(source.Distinct().OrderBy(k=>k)), "profile IDs");
+                }
+                Ids(resume.MasteryBySkillID.Where(p=>p.Value).Select(p=>new HashedString(p.Key).HashValue));
+                Ids(resume.GrantedSkillIDs.Select(s=>new HashedString(s).HashValue));
+                Ids(food.forbiddenTagSet.Select(t=>t.GetHash()));
+                Ids(food.dietaryRestrictionTagSet.Select(t=>t.GetHash()));
+                var effects = dupe.GetComponent<Klei.AI.Effects>();
+                int count = r.ReadByte();
+                for (int i=0; i<count; i++)
+                {
+                    var instance = effects.Get(new HashedString(r.ReadInt32()));
+                    float remaining = r.ReadSingle();
+                    string label = Packet.Text(r,256);
+                    Expect(instance != null && remaining == (instance.effect.duration>0 ? Math.Max(0,instance.timeRemaining) : -1) &&
+                        !string.IsNullOrEmpty(label), "active effect");
+                }
+                Packet.End(r);
+            }
+            Expect(exec("vitals/2147483647") == "NM1/v/2147483647/-" &&
+                exec("profile/2147483647") == "NM1/pf/2147483647/-", "missing duplicant");
         }
     }
 }

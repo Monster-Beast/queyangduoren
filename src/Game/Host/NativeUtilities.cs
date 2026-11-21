@@ -34,7 +34,8 @@ namespace Queyang.Game
             if (!flow.HasConduit(cell)) return default;
             var contents = flow.GetContents(cell);
             return contents.mass <= 0 ? default : new MaterialSample {
-                Element = (int)contents.element, Mass = contents.mass, Temperature = contents.temperature };
+                Element = (int)contents.element, Mass = contents.mass, Temperature = contents.temperature,
+                GermType = contents.diseaseIdx, Germs = contents.diseaseCount };
         }
     }
 
@@ -70,18 +71,18 @@ namespace Queyang.Game
             toggle.ForceUpdateVisualState();
         }
 
-        internal static void Apply(int cell, ColonyCell data)
+        internal static void Apply(int cell, ColonyCell data, bool hasEnvironment)
         {
             var game = global::Game.Instance;
-            if (game.gasConduitFlow.HasConduit(cell)) SetContents(game.gasConduitFlow, cell, data.GasPipe, ConduitFlow.MAX_GAS_MASS);
-            if (game.liquidConduitFlow.HasConduit(cell)) SetContents(game.liquidConduitFlow, cell, data.LiquidPipe, ConduitFlow.MAX_LIQUID_MASS);
+            if (game.gasConduitFlow.HasConduit(cell)) SetContents(game.gasConduitFlow, cell, data.GasPipe, ConduitFlow.MAX_GAS_MASS, hasEnvironment);
+            if (game.liquidConduitFlow.HasConduit(cell)) SetContents(game.liquidConduitFlow, cell, data.LiquidPipe, ConduitFlow.MAX_LIQUID_MASS, hasEnvironment);
             ushort circuit = game.circuitManager.GetCircuitID(cell);
             if (circuit != CircuitManager.INVALID_ID && (data.Utilities & 1) != 0) circuits[circuit] = data;
             if (game.logicCircuitSystem.GetNetworkForCell(cell) is LogicCircuitNetwork logic)
                 signals[logic] = data.LogicValue;
         }
 
-        static void SetContents(ConduitFlow flow, int cell, MaterialSample sample, float maxMass)
+        static void SetContents(ConduitFlow flow, int cell, MaterialSample sample, float maxMass, bool hasEnvironment)
         {
             var old = flow.GetContents(cell);
             if (sample.Mass == 0)
@@ -89,12 +90,15 @@ namespace Queyang.Game
                 if (old.mass > 0) flow.SetContents(cell, ConduitFlow.ConduitContents.Empty);
                 return;
             }
-            if (old.mass == sample.Mass && old.temperature == sample.Temperature && (int)old.element == sample.Element)
+            int germs = hasEnvironment ? sample.Germs : old.diseaseCount;
+            byte strain = germs == 0 ? byte.MaxValue : hasEnvironment ? sample.GermType : old.diseaseIdx;
+            if (old.mass == sample.Mass && old.temperature == sample.Temperature && (int)old.element == sample.Element &&
+                old.diseaseCount == germs && (germs == 0 || old.diseaseIdx == strain))
                 return;
             var element = ElementLoader.FindElementByHash((SimHashes)sample.Element);
             if (element != null)
                 flow.SetContents(cell, new ConduitFlow.ConduitContents(element.id, Mathf.Clamp(sample.Mass, 0, maxMass),
-                    Mathf.Clamp(sample.Temperature, 0, Sim.MaxTemperature), 255, 0));
+                    Mathf.Clamp(sample.Temperature, 0, Sim.MaxTemperature), strain, germs));
         }
 
         internal static void Reset() { circuits.Clear(); signals.Clear(); }

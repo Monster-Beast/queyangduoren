@@ -10,7 +10,9 @@ namespace Queyang.Core
         enum NativeStage { None, Requested, Sending, Loading, Ready, Failed }
         sealed class Peer
         {
+            public int SessionId;
             public bool Accepted, Subscribed, Live;
+            public bool Disconnected;
             public int X, Y;
             public uint Generation;
             public ulong Revision, LastCommand;
@@ -23,6 +25,9 @@ namespace Queyang.Core
             public int PeripheralX, PeripheralY;
             public bool PeripheralPending;
             public double NextPeripheral;
+            public int CenterPage;
+            public readonly Dictionary<long,int> PeripheralPages = new Dictionary<long,int>();
+            public readonly Queue<long> PeripheralOrder = new Queue<long>();
             public readonly Dictionary<ulong, byte[]> Results = new Dictionary<ulong, byte[]>();
         }
 
@@ -32,31 +37,36 @@ namespace Queyang.Core
         readonly Action<int, byte[]> send;
         readonly Action<int> drop;
         readonly Func<int,int,byte[]> capture;
+        readonly Func<int,int,int,byte[]> capturePage;
         readonly Func<string,int,int,string> execute;
         readonly Func<double> now;
         readonly Func<Stream> openNativeSave;
         public event Action<Exception> NativeCaptureFailed;
         ulong sequence;
+        int lastSessionId;
         public int Guests => peers.Count;
 
         public RoomHost(string fingerprint, Action<int,byte[]> send, Action<int> drop,
             Func<int,int,byte[]> capture, Func<string,int,int,string> execute, Func<double> now,
-            Func<Stream> openNativeSave = null)
+            Func<Stream> openNativeSave = null, Func<int,int,int,byte[]> capturePage = null)
         {
             this.fingerprint = fingerprint; this.send = send; this.drop = drop;
             this.capture = capture; this.execute = execute; this.now = now;
             this.openNativeSave = openNativeSave;
+            this.capturePage = capturePage;
         }
 
         public void Connect(int id)
         {
             if (peers.Count >= 3 || peers.ContainsKey(id)) { drop(id); return; }
-            peers.Add(id, new Peer { Progress = now(), LastSeen = now() });
+            peers.Add(id, new Peer { SessionId = checked(++lastSessionId), Progress = now(), LastSeen = now() });
         }
         public void Remove(int id)
         {
             if (!peers.TryGetValue(id,out var p)) return;
             peers.Remove(id);
+            p.Disconnected = true;
+            p.Target = null;
             p.Save?.Dispose();
             p.Save = null;
         }
@@ -67,7 +77,8 @@ namespace Queyang.Core
         }
         void Send(int id, Message type, Action<BinaryWriter> write)
         {
-            send(id, Wire.Pack(type, w => { w.Write(room); w.Write(id); write(w); }));
+            var session = peers[id].SessionId;
+            send(id, Wire.Pack(type, w => { w.Write(room); w.Write(session); write(w); }));
         }
 
         public void Receive(int id, byte[] frame)
@@ -93,7 +104,7 @@ namespace Queyang.Core
                     Send(id, Message.Welcome, w => {});
                     return;
                 }
-                if (!ViewPatch.Equal(Wire.Bytes(r,16),room) || r.ReadInt32() != id)
+                if (!ViewPatch.Equal(Wire.Bytes(r,16),room) || r.ReadInt32() != p.SessionId)
                     throw new InvalidDataException("Wrong room or peer generation");
                 p.LastSeen = now();
                 switch (type)
@@ -127,7 +138,8 @@ namespace Queyang.Core
                     case Message.Window:
                         var generation = r.ReadUInt32(); var rev = r.ReadUInt64(); var offset = r.ReadInt32(); Wire.End(r);
                         if (generation != p.Generation || p.Target == null || rev != p.Revision + 1) return;
-                        if (offset < p.Confirmed || offset > p.Sent) throw new InvalidDataException("Invalid window");
+                        if (offset < 0 || offset > p.Sent) throw new InvalidDataException("Invalid window");
+                        if (type == Message.Window && offset <= p.Confirmed) return;
                         if (offset != p.Confirmed) p.Progress = now();
                         p.Confirmed = offset;
                         if (type == Message.Applied)
@@ -144,9 +156,9 @@ namespace Queyang.Core
                     case Message.Command:
                         var g = r.ReadUInt32(); var cmd = r.ReadUInt64(); var action = Wire.Text(r);
                         var cx = r.ReadInt32(); var cy = r.ReadInt32(); Wire.End(r);
+                        Spend(p, 1);
                         if (p.Results.TryGetValue(cmd,out var cached)) { send(id,cached); break; }
                         if (cmd == 0 || cmd <= p.LastCommand) { Result(id,p,cmd,"ERROR Expired",false); break; }
-                        Spend(p, 1);
                         p.LastCommand = cmd;
                         string outcome = g == p.Generation && p.Live ? execute(action,cx,cy) : "ERROR View not ready";
                         Result(id,p,cmd,outcome,true); break;
@@ -170,7 +182,7 @@ namespace Queyang.Core
         {
             var seq = ++sequence;
             var frame = Wire.Pack(Message.Result, w => {
-                w.Write(room); w.Write(id); w.Write(command); w.Write(seq); w.Write(p.Revision); Wire.Text(w,text,8192);
+                w.Write(room); w.Write(p.SessionId); w.Write(command); w.Write(seq); w.Write(p.Revision); Wire.Text(w,text,8192);
             });
             if (cache)
             {
@@ -184,6 +196,21 @@ namespace Queyang.Core
         {
             p.Base = Array.Empty<byte>(); p.Target = null; p.Patch = null; p.Revision = 0;
             p.ScanAt = 0; p.Live = false; p.Progress = now();
+        }
+
+        byte[] Capture(Peer p, bool peripheral)
+        {
+            int x=peripheral ? p.PeripheralX : p.X, y=peripheral ? p.PeripheralY : p.Y;
+            if (capturePage==null) return capture(x,y);
+            if (!peripheral) return capturePage(x,y,p.CenterPage++ & int.MaxValue);
+            long key=((long)x<<32)|(uint)y;
+            if (!p.PeripheralPages.TryGetValue(key,out int page))
+            {
+                if (p.PeripheralPages.Count>=256) p.PeripheralPages.Remove(p.PeripheralOrder.Dequeue());
+                p.PeripheralOrder.Enqueue(key);
+            }
+            p.PeripheralPages[key]=(page+1)&int.MaxValue;
+            return capturePage(x,y,page);
         }
 
         // Called from Tick on the host game thread. A new connection freezes a fresh save at admission.
@@ -245,9 +272,9 @@ namespace Queyang.Core
                     if (p.PeripheralPending && time >= p.NextPeripheral)
                     {
                         p.PeripheralPending = false; p.NextPeripheral = time + .125;
-                        var tile = capture(p.PeripheralX,p.PeripheralY);
+                        var tile = Capture(p,true);
                         if (tile.Length == 0 || tile.Length > Wire.MaxFrame) throw new InvalidDataException("Invalid peripheral tile");
-                        for (int offset = 0; offset < tile.Length; offset += Wire.ChunkSize)
+                        for (int offset = 0; !p.Disconnected && offset < tile.Length; offset += Wire.ChunkSize)
                         {
                             int count = Math.Min(Wire.ChunkSize,tile.Length-offset);
                             Send(id,Message.PeripheralChunk,w => {
@@ -255,10 +282,11 @@ namespace Queyang.Core
                             });
                         }
                     }
+                    if (p.Disconnected) continue;
                     if (p.Target == null && time >= p.ScanAt)
                     {
                         p.ScanAt = time + 0.25;
-                        var view = capture(p.X,p.Y);
+                        var view = Capture(p,false);
                         if (p.Live && ViewPatch.Equal(p.Base,view)) continue;
                         var patch = ViewPatch.Compare(p.Base,view);
                         p.Target = view; p.Patch = patch; p.Sent = p.Confirmed = 0; p.Progress = time;

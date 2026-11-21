@@ -15,9 +15,10 @@ public class RoomTests
         public byte[] Colony = new byte[] { 7, 8, 9 };
         public double Time;
         public int Calls, Dropped;
+        public Action<byte[]> OnSend;
         public Pair(string build = "test")
         {
-            Host = new RoomHost("test", (id, b) => Down.Enqueue(b), id => Dropped++,
+            Host = new RoomHost("test", (id, b) => { Down.Enqueue(b); OnSend?.Invoke(b); }, id => Dropped++,
                 (x, y) => Colony, (action, x, y) => { Calls++; return "OK"; }, () => Time);
             Client = new RoomClient(build, Up.Enqueue);
             Host.Connect(1); Client.Connected();
@@ -95,6 +96,22 @@ public class RoomTests
     }
 
     [Fact]
+    public void ReusedTransportHandleHasNewLeaseAndOldCommandCannotMutateWorld()
+    {
+        var p = new Pair(); p.Live();
+        p.Client.Command("dig", 2, 3); var delayed = p.Up.Dequeue();
+        p.Host.Remove(1); p.Client.Dispose();
+        p.Host.Connect(1); p.Client = new RoomClient("test",p.Up.Enqueue); p.Client.Connected(); p.Live();
+        Assert.Throws<InvalidDataException>(() => p.Host.Receive(1,delayed));
+        Assert.Equal(0,p.Calls);
+        var replies = new List<string>(); p.Client.ResultReceived += replies.Add;
+        p.Client.Command("dig",2,3); var current = p.Up.Dequeue();
+        p.Host.Receive(1,current); p.Host.Receive(1,current);
+        while (p.Down.TryDequeue(out var b)) p.Client.Receive(b);
+        Assert.Equal(1,p.Calls); Assert.Equal(new[] {"OK"},replies);
+    }
+
+    [Fact]
     public void PeerBuildAndSeatLimitsAreChecked()
     {
         var p = new Pair("different"); p.Step();
@@ -135,6 +152,29 @@ public class RoomTests
         p.Client.Receive(p.Down.Dequeue());
         Assert.Contains("View not ready", p.Client.Status);
         Assert.Equal(0, p.Calls);
+    }
+
+    [Fact]
+    public void DisconnectInTransportSendStopsCurrentViewImmediately()
+    {
+        var p = new Pair(); p.Step();
+        while (p.Up.TryDequeue(out var b)) p.Host.Receive(1,b);
+        p.OnSend = _ => p.Host.Remove(1);
+        p.Host.Tick();
+        Assert.Single(p.Down); Assert.Equal(0,p.Host.Guests);
+        p.Host.Connect(2); p.Client=new RoomClient("test",b=>p.Host.Receive(2,b));
+        p.Down.Clear(); p.OnSend=null;
+        p.Client.Connected(); p.Live();
+    }
+
+    [Fact]
+    public void CommandRetransmissionsShareThePerPeerInputBudget()
+    {
+        var p = new Pair(); p.Live(); p.Time += 1;
+        p.Client.Command("dig",2,3); var command = p.Up.Dequeue();
+        for (int i=0; i<32; ++i) p.Host.Receive(1,command);
+        Assert.Throws<InvalidDataException>(() => p.Host.Receive(1,command));
+        Assert.Equal(1,p.Calls);
     }
 
     [Fact]

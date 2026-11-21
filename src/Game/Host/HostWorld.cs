@@ -31,7 +31,9 @@ namespace Queyang.Game
         private static WorldContainer World =>
             ClusterManager.Instance == null ? null : ClusterManager.Instance.activeWorld;
 
-        public static byte[] Capture(int x, int y)
+        public static byte[] Capture(int x, int y) => CapturePage(x,y,-1);
+
+        internal static byte[] CapturePage(int x, int y, int sample)
         {
             var world = World;
             if (world == null || Grid.WidthInCells == 0)
@@ -54,10 +56,11 @@ namespace Queyang.Game
                 y -= ColonyView.Height / 2;
             }
             var view = new ColonyView {
-                Native = true, Detailed = true, HasResources = true,
+                Native = true, Detailed = true, HasResources = true, HasEnvironment = true,
                 X = Math.Max(origin.x, Math.Min(origin.x + size.x - ColonyView.Width, x)),
                 Y = Math.Max(origin.y, Math.Min(origin.y + size.y - ColonyView.Height, y))
             };
+            view.EnvironmentPage = sample>=0 ? sample%4 : NativeEnvironment.NextPage(world, view.X, view.Y);
             var clock = GameClock.Instance;
             var speed = SpeedControlScreen.Instance;
             view.Cycle = clock.GetCycle() + 1;
@@ -107,7 +110,7 @@ namespace Queyang.Game
                 if (dupes.Count == 64) break;
             }
             view.Dupes = dupes.ToArray();
-            NativeResources.Capture(view, world);
+            NativeResources.Capture(view, world,sample);
             return view.Encode();
         }
 
@@ -134,7 +137,21 @@ namespace Queyang.Game
         private static GameObject GetTarget(int cell)
         {
             var dig = Grid.Objects[cell, (int)ObjectLayer.DigPlacer];
-            return dig != null ? dig : FindBuilding(cell);
+            return dig != null ? dig : FindBuilding(cell) ?? SecondaryTarget(cell);
+        }
+
+        static GameObject SecondaryTarget(int cell)
+        {
+            var mop = Grid.Objects[cell, (int)ObjectLayer.MopPlacer];
+            if (mop != null) return mop;
+            var plant = Grid.Objects[cell, (int)ObjectLayer.Plants]?.GetComponent<HarvestDesignatable>() ??
+                Grid.Objects[cell,(int)ObjectLayer.Building]?.GetComponent<HarvestDesignatable>();
+            if (plant != null && plant.HarvestWhenReady) return plant.gameObject;
+            var pile = Grid.Objects[cell, (int)ObjectLayer.Pickupables]?.GetComponent<Pickupable>()?.objectLayerListItem;
+            for (; pile != null; pile = pile.nextItem)
+                if (pile.pickupable?.Clearable != null && NativeEntitySampler.IsMarked(pile.pickupable.Clearable))
+                    return pile.pickupable.gameObject;
+            return null;
         }
 
         private static ColonyCell ReadCell(int cell, Dictionary<ushort, ColonyCell> circuits)
@@ -142,7 +159,7 @@ namespace Queyang.Game
             var element = Grid.Element[cell];
             var building = FindBuilding(cell);
             var dig = Grid.Objects[cell, (int)ObjectLayer.DigPlacer];
-            var target = dig != null ? dig : building;
+            var target = dig != null ? dig : building ?? SecondaryTarget(cell);
             var result = new ColonyCell {
                 ElementHash = (int)element.id, Visibility = Grid.Visible[cell], RenderGround = Grid.RenderedByWorld[cell],
                 Flags = 1, Element = element.name, Mass = Grid.Mass[cell],
@@ -157,6 +174,14 @@ namespace Queyang.Game
             if (element.IsLiquid) result.Flags |= 4;
             if (element.id == SimHashes.Oxygen || element.id == SimHashes.ContaminatedOxygen) result.Flags |= 64;
             if (dig != null) result.Flags |= 8;
+            result.MopOrdered = Grid.Objects[cell, (int)ObjectLayer.MopPlacer] != null;
+            var priority = target == null ? null : target.GetComponent<Prioritizable>();
+            if (priority != null && priority.IsPrioritizable())
+            {
+                var setting = priority.GetMasterPriority();
+                if (setting.priority_class == PriorityScreen.PriorityClass.basic)
+                    result.OrderPriority = (byte)Mathf.Clamp(setting.priority_value, 1, 9);
+            }
             if (building != null)
             {
                 var item = building.GetComponent<Building>();
@@ -169,8 +194,7 @@ namespace Queyang.Game
                     result.BuildingSaveId = building.GetComponent<KPrefabID>().InstanceID;
                     var primary = building.GetComponent<PrimaryElement>();
                     if (primary != null)
-                        result.Structure = new MaterialSample { Element = (int)primary.ElementID,
-                            Mass = primary.Mass, Temperature = primary.Temperature };
+                        result.Structure = NativeMaterialReadings.Capture(primary);
                     var anim = building.GetComponent<KBatchedAnimController>();
                     if (anim != null)
                     {
@@ -198,6 +222,7 @@ namespace Queyang.Game
             }
             ReadConnections(ref result, cell);
             ReadUtilityValues(ref result, cell, circuits);
+            NativeEnvironment.Capture(cell, ref result);
             return result;
         }
 
@@ -218,6 +243,28 @@ namespace Queyang.Game
             if (action != null && action.Length <= 512 && action.StartsWith("plan/",StringComparison.Ordinal))
                 return PlaceNativePlan(action,cell,world);
             if (string.IsNullOrEmpty(action) || action.Length > 96) return "ERROR Unsupported tool";
+            if (action.StartsWith("object/", StringComparison.Ordinal))
+            {
+                int end = action.IndexOf('/', 7);
+                if (end < 0 || !int.TryParse(action.Substring(7, end - 7), NumberStyles.None,
+                    CultureInfo.InvariantCulture, out int id) || id <= 0) return "ERROR Invalid selected object";
+                var selected = KPrefabIDTracker.Get().GetInstance(id);
+                if (selected == null || selected.GetComponent<Pickupable>()?.storage != null) return "ERROR Selected object changed";
+                var b = selected.GetComponent<Building>();
+                if ((b != null ? b.GetCell() : Grid.PosToCell(selected)) != cell) return "ERROR Selected object moved";
+                string edit = action.Substring(end + 1);
+                if (edit == "sweep")
+                {
+                    var pickup = selected.GetComponent<Pickupable>();
+                    if (pickup?.Clearable == null || !pickup.Clearable.isClearable || selected.HasTag(GameTags.BaseMinion))
+                        return "ERROR Selected object cannot be swept";
+                    pickup.Clearable.MarkForClear(false, false);
+                    return "OK Sweep designated";
+                }
+                if (edit != "cancel" && !(edit.StartsWith("priority", StringComparison.Ordinal) && edit.Length == 11))
+                    return "ERROR Unsupported object tool";
+                return EditChecked(edit, selected.gameObject);
+            }
             if (action.StartsWith("build/", StringComparison.Ordinal)) return PlaceSelected(action, cell, world);
             if (action.StartsWith("building/", StringComparison.Ordinal) || action.StartsWith("b/", StringComparison.Ordinal))
                 return BuildingOptions(action, cell, x, y);
@@ -249,7 +296,20 @@ namespace Queyang.Game
             TargetKey key;
             if (target == null || !TargetKeys.TryGetValue(target, out key) || key.Value != expectedId)
                 return "ERROR The selected order or building has changed";
-            return EditTarget(action.Substring(0, colon), target);
+            return EditChecked(action.Substring(0, colon), target);
+        }
+
+        private static string EditChecked(string edit, GameObject target)
+        {
+            if (edit.StartsWith("priority", StringComparison.Ordinal) && edit.Length > 9)
+            {
+                var priority = target.GetComponent<Prioritizable>();
+                if (edit.Length != 11 || edit[9] != '/' || edit[10] < '1' || edit[10] > '9' || priority == null ||
+                    priority.GetMasterPriority().priority_class != PriorityScreen.PriorityClass.basic ||
+                    priority.GetMasterPriority().priority_value != edit[10] - '0') return "ERROR Order priority changed";
+                edit = edit.Substring(0, 9);
+            }
+            return EditTarget(edit, target);
         }
 
         private static string Place(string prefab, int cell, WorldContainer world)
@@ -336,6 +396,11 @@ namespace Queyang.Game
             switch (action)
             {
                 case "cancel":
+                    var sweep = target.GetComponent<Clearable>();
+                    if (sweep != null && NativeEntitySampler.IsMarked(sweep)) { sweep.CancelClearing(); return "OK Sweep cancelled"; }
+                    var harvest = target.GetComponent<HarvestDesignatable>();
+                    if (harvest != null && harvest.HarvestWhenReady) { harvest.SetHarvestWhenReady(false); return "OK Harvest cancelled"; }
+                    if (target.GetComponent<Moppable>() != null) { target.Trigger((int)GameHashes.Cancel, null); return "OK Mop cancelled"; }
                     if (target.GetComponent<Constructable>() != null || target.GetComponent<Diggable>() != null)
                     {
                         target.Trigger((int)GameHashes.Cancel, null);

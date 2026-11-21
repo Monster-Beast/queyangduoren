@@ -37,7 +37,7 @@ namespace Queyang.Game
         private float nextInviteCheck, nextSend;
         private int group, tool, overlay, zoom = 1;
         private bool showResult;
-        private Vector2 resultScroll;
+        private Vector2 resultScroll, overviewScroll;
         private string lan = "127.0.0.1:24714", lobby = "", localMessage = "";
         private int selectedX = -1, selectedY = -1, dragX, dragY, dragOriginX, dragOriginY;
         private bool dragging;
@@ -129,6 +129,7 @@ namespace Queyang.Game
             hadClient = diagnostic;
             if (!menu && !HostMenu()) expanded = false;
             bool connecting = CoopSession.IsNativeClient && !NativeGuestScene.Ready;
+            if (CoopSession.IsNativeClient && !HostMenu()) NativeManagement.OverviewOpen=false;
             gateInput = diagnostic || connecting || menu || HostMenu();
             BlockMenuKeys = diagnostic || connecting || menu && expanded;
             UpdateBlocker();
@@ -227,7 +228,8 @@ namespace Queyang.Game
 
         private Rect PanelRect(float width, float height)
         {
-            if (CoopSession.IsNativeClient && NativeGuestScene.Ready) return new Rect(width - 265, 12, 253, 79);
+            if (CoopSession.IsNativeClient && NativeGuestScene.Ready)
+                return new Rect(width - 295, 12, 283, NativeManagement.OverviewOpen ? Mathf.Min(height-24,385) : 79);
             if (CoopSession.IsClient) return new Rect(0, 0, width, height);
             return expanded ? new Rect(width - 366, 12, 354, 312) : new Rect(width - 126, 12, 114, 34);
         }
@@ -277,6 +279,16 @@ namespace Queyang.Game
                 Fill(new Rect(0, 0, w, h), new Color(.10f, .10f, .14f));
                 GUI.Label(new Rect(12, 8, w - 24, 28), CoopSession.Status);
                 if (GUI.Button(new Rect(12, 39, 132, 30), "离开房间")) CoopSession.Disconnect();
+                if (NativeGuestScene.Ready && GUI.Button(new Rect(150,39,w-162,30),NativeManagement.OverviewOpen ? "收起概览" : "殖民地概览"))
+                    NativeManagement.OverviewOpen=!NativeManagement.OverviewOpen;
+                if (NativeManagement.OverviewOpen)
+                {
+                    string content=NativeManagement.OverviewText ?? "正在获取房主的热量与警报";
+                    float textHeight=GUI.skin.label.CalcHeight(new GUIContent(content),w-48);
+                    overviewScroll=GUI.BeginScrollView(new Rect(12,76,w-24,h-88),overviewScroll,new Rect(0,0,w-48,textHeight));
+                    GUI.Label(new Rect(0,0,w-48,textHeight),content);
+                    GUI.EndScrollView();
+                }
                 return;
             }
             if (NativeGuestScene.Active)

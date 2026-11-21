@@ -96,3 +96,33 @@ Copy-Item -LiteralPath $sourceSave -Destination $backupSave -ErrorAction Stop
 ## 发布判定
 
 主 agent 输出 commit、支持的游戏 build 与内容包、包版本/SHA-256、能力表、T01–T11 状态和证据、性能数据及剩余限制。状态限定为“通过/失败/待环境验证”，如失败需给最短复现。自动化通过但缺双机实测时可交付候选包；实机项通过后才能标记已验收。向 Steam Workshop 公开上传属于单独的发布动作。
+
+### 冻结版本的独立构建与安装回滚
+
+在主工作区构建并保存候选 ZIP，再从同一提交新建独立检出。以下命令在仓库根目录的 PowerShell 中执行，环境变量 `ONI_GAME_DIR` 指向该轮验收的游戏安装目录。先检查工作区，其中未提交的生产代码不会进入独立检出。
+
+~~~powershell
+git status --short
+$revision = git rev-parse HEAD
+$candidate = (Get-FileHash -LiteralPath artifacts/QueyangCoop-dev.zip).Hash
+$checkout = Join-Path ([IO.Path]::GetTempPath()) ("Queyang-verify-" + [guid]::NewGuid().ToString("N"))
+git worktree add --detach $checkout $revision
+~~~
+
+锁定依赖、重新编译、打包。预期两个不同路径生成的 ZIP 逐字节一致。随后执行隔离安装测试，它在独立检出的 artifacts 下创建临时 mods 目录，检查首次安装、重复安装、备份、恢复、重复 Mod ID，玩家自己的 Mod 目录不参与测试。
+
+~~~powershell
+Push-Location $checkout
+try {
+    dotnet restore QueyangDuoren.sln --locked-mode
+    if ($LASTEXITCODE) { throw '依赖恢复失败' }
+    dotnet build QueyangDuoren.sln -c Release --no-restore
+    if ($LASTEXITCODE) { throw '独立构建失败' }
+    .\tools\package.ps1
+    $rebuilt = (Get-FileHash -LiteralPath artifacts/QueyangCoop-dev.zip).Hash
+    if ($rebuilt -ne $candidate) { throw "候选包 $candidate 与独立构建 $rebuilt 不一致" }
+    .\tests\Integration\Packaging\smoke.ps1
+} finally { Pop-Location }
+~~~
+
+记录提交号、Klei build、SHA-256 和安装测试结果。确认没有在独立检出中编辑文件后，可用 `git worktree remove $checkout` 移除该检出，主工作区和玩家存档保留。
