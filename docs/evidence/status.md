@@ -2,6 +2,8 @@
 
 工作分支 feature/host-authoritative-coop，文档基线 9098722。目标为 Windows x64、Steam Vanilla、Klei changelist 744825（Steam 安装清单 buildid 24423041）。构建环境使用 .NET SDK 9.0.316。程序集 Assembly-CSharp.dll 的 SHA-256 为 A58E04D0FFDF89B86FB28B71AD900625B3B539DB30D67F8C6269F73A9F5AE599。
 
+**玩家版缺口**　房主使用原版殖民地界面，当前客机使用自绘面板。下列数据验证了技术原型的网络、操作和持久化。原版客机场景、动画、叠层、侧栏和工具仍待接入及双机验收。
+
 ## 当前入口和决策
 
 - 核心编译目标 netstandard2.0，游戏适配层 net48，直接引用本地游戏程序集。游戏构建号不匹配则停止安装多人补丁，输出原因。单机不启动会话。
