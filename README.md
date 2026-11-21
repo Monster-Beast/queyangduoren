@@ -4,7 +4,7 @@
 
 ## 构建和安装
 
-已有游戏的试玩者可直接使用仓库中的 [0.1.0 开发包](dist/QueyangCoop-0.1.0-dev.zip)。在仓库根目录运行以下命令，可先预览安装目录，再安装同一份已测包。SHA-256 为 `A99D2EDD8DE84AA6DF88B520A3EB4D3A9BE4B32D1B38E334785BBAC8EF4E8956`。
+已有游戏的试玩者可直接使用仓库中的 [0.1.0 开发包](dist/QueyangCoop-0.1.0-dev.zip)。在仓库根目录运行以下命令，可先预览安装目录，再安装同一份已测包。SHA-256 为 `C1F5A7AEB6C039362C371D70C9E7FB9CD29DCFEB583DC578B2598B6CCAD1F92C`。
 
 ~~~powershell
 .\tools\install-dev.ps1 -Package .\dist\QueyangCoop-0.1.0-dev.zip -WhatIf
