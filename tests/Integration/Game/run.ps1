@@ -108,7 +108,10 @@ try {
         [IO.Compression.ZipFile]::ExtractToDirectory($gamePackage,$mod)
         Copy-Item -LiteralPath $fixture -Destination $mod
         # Dev distribution type and Vanilla DLC id are the values in the game's serialized settings.
-        $modDb=@{version=1;mods=@(@{label=@{distribution_platform=4;id='QueyangCoop';title='Queyang Co-op (Development)';version=0};status=1;enabled=$true;enabledForDlc=@('');crash_count=0;reinstall_path=$null;staticID=$ModId})}
+        # KMod.Local.Subscribe stores the Unity Mono hash of the directory name in label.version.
+        # This is the value written by build 744825 for QueyangCoop. A zero here stages a
+        # reinstall, disabling this otherwise freshly installed fixture on its next boot.
+        $modDb=@{version=1;mods=@(@{label=@{distribution_platform=4;id='QueyangCoop';title='Queyang Co-op (Development)';version=-181413377};status=1;enabled=$true;enabledForDlc=@('');crash_count=0;reinstall_path=$null;staticID=$ModId})}
         [IO.File]::WriteAllText((Join-Path $mods 'mods.json'),($modDb|ConvertTo-Json -Depth 6))
         $prefs="strings:`n  SavesDefaultToCloud: Disabled`nints:`n  EXPANSION1_ID.ENABLED: 0`n  DLC2_ID.ENABLED: 0`n  DLC3_ID.ENABLED: 0`n  DLC4_ID.ENABLED: 0`n  DLC5_ID.ENABLED: 0`n  COSMETIC1_ID.ENABLED: 0`n  LanguageConfirmationVersion: 2`nfloats: {}`n"
         [IO.File]::WriteAllText((Join-Path $gameProfile 'kplayerprefs.yaml'),$prefs)

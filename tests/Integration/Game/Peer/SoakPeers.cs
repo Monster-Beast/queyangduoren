@@ -37,7 +37,11 @@ namespace Queyang.Integration
                     SideViews++;
                 };
                 Client.CommandLatencyMs+=ms=>Latencies.Add(ms);
-                Client.ResultReceived+=_=>Inspected++;
+                Client.ResultReceived+=result=>{
+                    if (!result.StartsWith("OK Cycle ", StringComparison.Ordinal))
+                        throw new InvalidDataException("Unexpected colony overview: " + result);
+                    Inspected++;
+                };
                 Link.Join(endpoint,false);
             }
             public void Poll()
@@ -73,6 +77,8 @@ namespace Queyang.Integration
             var clock=Stopwatch.StartNew();
             double started=-1, lastReport=0, nextInspection=0, nextSwap=0, nextPing=0;
             int joined=0;
+            long reconnectBytes=0, reconnectCommands=0;
+            var reconnectLatencies=new List<double>();
             var previousSamples=new long[3];
             double rejoinAt=-1;
             try
@@ -114,7 +120,13 @@ namespace Queyang.Integration
                         if(now>=nextSwap && now<started+seconds-3)
                         {
                             nextSwap=now+150;
-                            guests[2]?.Dispose(); guests[2]=null; rejoinAt=now+1;
+                            var leaving=guests[2];
+                            if (leaving == null || !leaving.Client.Live || leaving.Inspected == 0 || leaving.SideViews == 0)
+                                throw new IOException("Rejoining guest did not receive a colony overview and peripheral view");
+                            reconnectBytes+=leaving.Bytes;
+                            reconnectCommands+=leaving.Inspected;
+                            reconnectLatencies.AddRange(leaving.Latencies);
+                            leaving.Dispose(); guests[2]=null; rejoinAt=now+1;
                             guests[1].Client.Subscribe(guests[1].OriginX+(joined%2==0?8:0),guests[1].OriginY);
                         }
                         if(now-lastReport>=60)
@@ -142,6 +154,11 @@ namespace Queyang.Integration
                     log("SOAK peer="+i+" views="+g.Applied+" peripheralViews="+g.SideViews+" frames="+g.Frames+" rxBytes="+g.Bytes+
                         " commands="+g.Inspected+" commandP95ms="+g.Latencies[(int)Math.Ceiling(g.Latencies.Count*0.95)-1].ToString("F1"));
                 }
+                reconnectLatencies.AddRange(guests[2].Latencies);
+                reconnectLatencies.Sort();
+                log("SOAK reconnectTotal rxBytes="+(reconnectBytes+guests[2].Bytes)+
+                    " commands="+(reconnectCommands+guests[2].Inspected)+" commandP95ms="+
+                    reconnectLatencies[(int)Math.Ceiling(reconnectLatencies.Count*0.95)-1].ToString("F1"));
                 log("PASS real host, three TCP guests, "+seconds+" seconds, "+joined+" reconnections");
             }
             finally { foreach(var g in guests) g?.Dispose(); }

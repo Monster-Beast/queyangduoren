@@ -207,7 +207,7 @@ namespace Queyang.Game
         static void Remove(int id)
         {
             if (!proxies.TryGetValue(id, out var p)) return;
-            proxies.Remove(id); Object.Destroy(p.Primary.gameObject);
+            proxies.Remove(id); NativeWorldMirror.DestroySelectableProxy(p.Primary.gameObject);
         }
 
         internal static KSelectable GetSelectable(int hostSaveId)
@@ -269,7 +269,7 @@ namespace Queyang.Game
 
         internal static void Reset()
         {
-            foreach (var p in proxies.Values) if (p.Primary != null) Object.Destroy(p.Primary.gameObject);
+            foreach (var p in proxies.Values) if (p.Primary != null) NativeWorldMirror.DestroySelectableProxy(p.Primary.gameObject);
             proxies.Clear(); hidden.Clear(); knownTags.Clear(); guestInventory = null; stockWorld = null;
             hostStocks.Clear(); nextStockSample = nextHudRefresh = 0;
         }

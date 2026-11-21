@@ -24,12 +24,19 @@ namespace Queyang.Integration
         bool restarting;
         int ladderCell;
         NativeProxySettings proxy;
+        string engineException;
 
         public NativeScenario(Action<string> log, string report)
         {
             this.log = log;
             screenshot = Path.Combine(Path.GetDirectoryName(report), "native-guest.png");
             recording = Environment.GetEnvironmentVariable("QY_NATIVE_RECORDING");
+            Application.logMessageReceived += OnUnityLog;
+        }
+
+        void OnUnityLog(string message, string stack, LogType level)
+        {
+            if (level == LogType.Exception && engineException == null) engineException = message + "\n" + stack;
         }
 
         // ConfirmDialogScreen stores these LocText references privately. Read the
@@ -91,6 +98,7 @@ namespace Queyang.Integration
 
         public bool Update()
         {
+            if (engineException != null) throw new InvalidOperationException("Unity logged an exception during native play or teardown: " + engineException);
             if (restarting) return false;
             if (Time.unscaledTime >= nextDialogCheck || stage == Stage.Join || stage == Stage.Details)
             {
@@ -207,6 +215,7 @@ namespace Queyang.Integration
                     break;
                 case Stage.Exit:
                     if (global::Game.Instance != null || NativeGuestScene.Active || MainMenu.Instance == null || !MainMenu.Instance.IsActive()) break;
+                    Application.logMessageReceived -= OnUnityLog;
                     log("PASS native game client loaded the colony, sent a stock dig order and returned to menu");
                     return true;
             }
@@ -226,12 +235,56 @@ namespace Queyang.Integration
                 var info = infos?.FirstOrDefault(row => row.text == label && row.buttonGo != null && row.buttonGo.activeInHierarchy);
                 if (info == null) continue;
                 if (!click) return true;
-                var pointer = new PointerEventData(UnityEngine.EventSystems.EventSystem.current) { button = PointerEventData.InputButton.Left };
-                bool sent = ExecuteEvents.Execute(info.buttonGo,pointer,ExecuteEvents.pointerClickHandler);
-                if (!sent) throw new Exception("No pointer handler on rendered native building action");
+                ClickStockControl(info);
                 return true;
             }
             return false;
+        }
+        void ClickStockControl(KIconButtonMenu.ButtonInfo info)
+        {
+            var go = info.buttonGo;
+            var button = go.GetComponent<KButton>();
+            var toggle = go.GetComponent<KToggle>();
+            var basic = go.GetComponent<KBasicToggle>();
+            if (button == null && toggle == null && basic == null)
+                throw new Exception("The stock action template has no supported click control");
+            if (!info.isInteractable || (button != null && !button.isInteractable) || (toggle != null && !toggle.IsInteractable()))
+                throw new Exception("Stock action is not interactable: " + info.text);
+            // The screenshot runner starts the game with its OS window hidden. Klei's mouse
+            // handlers discard events while hasFocus is false. Reproduce focused player input
+            // only during this event dispatch, without bringing the window to the foreground.
+            var focus = AccessTools.DeclaredField(typeof(KInputManager), "hasFocus");
+            bool wasFocused = (bool)focus.GetValue(null);
+            Vector2 screenPos = go.transform.position;
+            var pointer = new PointerEventData(UnityEngine.EventSystems.EventSystem.current) {
+                button = PointerEventData.InputButton.Left, clickCount = 1, clickTime = Time.unscaledTime,
+                eligibleForClick = true, position = screenPos, pressPosition = screenPos,
+                pointerPress = go, rawPointerPress = go, pointerEnter = go
+            };
+            bool clicked = false;
+            void Observed() { clicked = true; log("NATIVE_STOCK_UI_CLICKED " + info.text); }
+            if (button != null) button.onClick += Observed;
+            if (toggle != null) toggle.onClick += Observed;
+            if (basic != null) basic.onClick += Observed;
+            try
+            {
+                if (!wasFocused) focus.SetValue(null,true);
+                if (!KInputManager.isFocused) throw new Exception("Stock input is captured by another tool");
+                log("NATIVE_STOCK_POINTER " + info.text + " hasFocus=" + wasFocused + " control=" +
+                    (button != null ? "KButton" : toggle != null ? "KToggle" : "KBasicToggle"));
+                ExecuteEvents.Execute(go,pointer,ExecuteEvents.pointerDownHandler);
+                ExecuteEvents.Execute(go,pointer,ExecuteEvents.pointerUpHandler);
+                if (!ExecuteEvents.Execute(go,pointer,ExecuteEvents.pointerClickHandler))
+                    throw new Exception("No pointer handler on stock action");
+                if (!clicked) throw new Exception("Pointer event did not activate the rendered stock control: " + info.text);
+            }
+            finally
+            {
+                if (!wasFocused) focus.SetValue(null,false);
+                if (button != null) button.onClick -= Observed;
+                if (toggle != null) toggle.onClick -= Observed;
+                if (basic != null) basic.onClick -= Observed;
+            }
         }
         void Leave()
         {

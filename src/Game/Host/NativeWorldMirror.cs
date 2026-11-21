@@ -242,7 +242,7 @@ namespace Queyang.Game
         static void RemoveBuildingMarker(int cell)
         {
             if (!buildingMarkers.TryGetValue(cell, out var marker)) return;
-            Object.Destroy(marker.Object);
+            DestroySelectableProxy(marker.Object);
             buildingMarkers.Remove(cell);
         }
 
@@ -301,7 +301,7 @@ namespace Queyang.Game
                 var anim = spawnedDupes[id];
                 spawnedDupes.Remove(id);
                 hidden.Remove(anim);
-                if (anim != null) Object.Destroy(anim.gameObject);
+                if (anim != null) DestroySelectableProxy(anim.gameObject);
             }
         }
 
@@ -353,11 +353,24 @@ namespace Queyang.Game
 
         internal static void Reset()
         {
-            if (markerRoot != null) Object.Destroy(markerRoot);
+            if (markerRoot != null) DestroySelectableProxy(markerRoot);
             markerRoot = null;
             buildingMarkers.Clear(); digMarkers.Clear(); buildings.Clear(); visibleDupes.Clear(); hidden.Clear();
             spawnedDupes.Clear(); expiredDupes.Clear(); localDupes.Clear(); NativeUtilities.Reset(); NativeUtilityDisplay.Reset();
             NativeResources.Reset();
+        }
+
+        internal static void DestroySelectableProxy(GameObject target)
+        {
+            if (target == null) return;
+            // KSelectable.OnCleanUp normally unselects itself. The transient proxy's
+            // animator can already be destroyed at that point. Let ONI clear the live
+            // highlight and close the details panel before releasing any components.
+            var tool = SelectTool.Instance;
+            var selected = tool == null ? null : tool.selected;
+            if (selected != null && selected.transform.IsChildOf(target.transform))
+                tool.Select(null, true);
+            Object.Destroy(target);
         }
     }
 }

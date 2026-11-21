@@ -130,6 +130,7 @@ namespace Queyang.Integration
         private readonly Func<double> now;
         private bool ordered,completed;
         private int menuX,menuY,menuStep;
+        private bool menuRead;
         private string[] operations;
         private double orderFirstSentAt=double.NaN;
 
@@ -173,7 +174,7 @@ namespace Queyang.Integration
 
         internal Stream OpenSave()
         {
-            ordered=false; completed=false; menuStep=0; orderFirstSentAt=double.NaN;
+            ordered=false; completed=false; menuStep=0; menuRead=false; orderFirstSentAt=double.NaN;
             log("NATIVE_REPLAY_BASELINE");
             return File.OpenRead(save);
         }
@@ -182,7 +183,11 @@ namespace Queyang.Integration
         {
             if (operations!=null && completed && x==menuX && y==menuY)
             {
-                if (action==operations[0]) return operations[1+menuStep*2];
+                if (action==operations[0])
+                {
+                    if (!menuRead) { log("NATIVE_REPLAY_LADDER_MENU_OPEN"); menuRead=true; }
+                    return operations[1+menuStep*2];
+                }
                 if (menuStep<2 && action==operations[2+menuStep*2])
                 {
                     menuStep++;
@@ -190,6 +195,8 @@ namespace Queyang.Integration
                     return operations[1+menuStep*2];
                 }
             }
+            if (action.StartsWith("nm/setproxy/",StringComparison.Ordinal))
+                log("NATIVE_REPLAY_LADDER_MENU_REJECT " + action + " at " + x + "," + y + " step=" + menuStep);
             if (action!="dig" || x!=digX || y!=digY || ordered) return "ERROR Expected recorded dig";
             ordered=true;
             log("NATIVE_REPLAY_DIG " + x + "," + y);

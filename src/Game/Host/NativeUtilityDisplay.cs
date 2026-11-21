@@ -117,13 +117,13 @@ namespace Queyang.Game
         {
             if (!proxies.TryGetValue(cell, out var proxy)) return;
             proxies.Remove(cell);
-            if (proxy != null) Object.Destroy(proxy.gameObject);
+            if (proxy != null) NativeWorldMirror.DestroySelectableProxy(proxy.gameObject);
         }
 
         internal static void Reset()
         {
             foreach (var anim in suppressed) if (anim != null) anim.SetVisiblity(true);
-            foreach (var proxy in proxies.Values) if (proxy != null) Object.Destroy(proxy.gameObject);
+            foreach (var proxy in proxies.Values) if (proxy != null) NativeWorldMirror.DestroySelectableProxy(proxy.gameObject);
             suppressed.Clear(); proxies.Clear(); manager = null; parent = null; active = -1;
         }
     }
