@@ -29,7 +29,7 @@ namespace Queyang.Integration
         int selectedSaveId;
         string expectedVitals, expectedProfile;
         NativeStockTools stockTools;
-        byte[] lastAliveView;
+        byte[] lastAliveView, deadView;
         System.Action staleClick;
         string staleError;
 
@@ -263,6 +263,7 @@ namespace Queyang.Integration
                     if (File.Exists(Path.Combine(recording,"printed-dead.view")))
                     {
                         lastAliveView=File.ReadAllBytes(Path.Combine(recording,"printed-last-alive.view"));
+                        deadView=File.ReadAllBytes(Path.Combine(recording,"printed-dead.view"));
                         CoopSession.Command("fixture/printed-alive",0,0);
                         stage=Stage.PrintedAlive; until=Time.unscaledTime+12; break;
                     }
@@ -279,10 +280,13 @@ namespace Queyang.Integration
                     stage=Stage.PrintedDeath; until=Time.unscaledTime+12;
                     break;
                 case Stage.PrintedDeath:
-                    if (Time.unscaledTime>until) throw new TimeoutException("Printed duplicant still selected or details retained after recorded death");
-                    if (NativeWorldMirror.GetDupeSelectable(selectedSaveId)!=null || SelectTool.Instance.selected!=null ||
-                        DetailsScreen.Instance.target!=null || DetailsScreen.Instance.IsActive() || !NativeManagement.SelectionDetailsCleared) break;
-                    log("NATIVE_PRINTED_DEATH_GUEST proxyGone=true sidebarClosed=true detailsCleared=true");
+                    bool receivedDeath=CoopSession.View!=null && CoopSession.View.SequenceEqual(deadView);
+                    if (Time.unscaledTime>until) throw new TimeoutException("Post-death frame="+receivedDeath+" proxy="+NativeWorldMirror.GetDupeSelectable(selectedSaveId)+
+                        " selected="+SelectTool.Instance.selected+" target="+DetailsScreen.Instance.target+" sidebarVisible="+
+                        DetailsScreen.Instance.gameObject.activeInHierarchy+" dataCleared="+NativeManagement.SelectionDetailsCleared);
+                    if (!receivedDeath || NativeWorldMirror.GetDupeSelectable(selectedSaveId)!=null || SelectTool.Instance.selected!=null ||
+                        DetailsScreen.Instance.target!=null || DetailsScreen.Instance.gameObject.activeInHierarchy || !NativeManagement.SelectionDetailsCleared) break;
+                    log("NATIVE_PRINTED_DEATH_GUEST exactHostFrame=true proxyGone=true sidebarClosed=true detailsCleared=true");
                     NativeInfrastructure.Replay(recording,log);
                     StartStockTools();
                     break;

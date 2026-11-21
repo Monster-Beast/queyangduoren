@@ -37,6 +37,19 @@
 
 新版夹具为扫地、调优先级、采收、拖地各写入一份 `order-i.bin` 和操作前、后的两张视区，供客机用原版拖动工具回放。运行 `10850d87a5274314a0cd15637e67fcba` 的重叠格测试在建筑锚格 49792 与非锚格 49791 读到同一建筑菜单。建筑令牌 115、种子清扫令牌 179 分别生效。过期清扫失败后建筑菜单保持可用，结果为 `NATIVE_OVERLAP_HOST ... wrongObjectRejected=true buildingMenuIntact=true`。
 
+## 正式房主复验与设施并发修改
+
+正式运行 `2d5928897d7146b7ac77054bbbc7f6f9` 使用第 3 周期 Vanilla 存档。测试包的 SHA-256 为 `398CB883BC2410AE0988A4F6758F581F1A47242EA83BCC747253167B282604DC`，原始存档为 `F115FE51875668F0AA027A576E3C468291BF5D6B25267227ED9F5FB08A594993`。该轮包含独立的复制人分页，并重新通过上面的生态、装备、订单检查。
+
+| 对象 | 房主正式命令及原版组件读数 |
+|---|---|
+| 仓储设施 11 | 一批添加两种物品。下一批的第一项合法、第二项包含已添加物品，房主拒绝整批，`TreeFilterable.AcceptedTags` 与提交前完全一致。随后一批移除两项成功。|
+| 糊糊制造机 2157 | 泥土和水制软泥糕配方的 `ComplexFabricator.GetRecipeQueueCount` 依次为 0、2、3、2、无限。两位编辑者都看到初始 0，第二笔基于 0 的写入被拒绝，队列保持 2。|
+| 门 2497 | 从正式建筑菜单取得带版本的操作，读原版 `Door.RequestedState` 确认为 Opened，重发旧操作被拒绝。修改复制人 79 的权限后，`AccessControl.GetSetPermission` 对 79 返回 GoLeft，复制人 81 的权限保持原值。旧授权变更被拒绝。此项验证模式请求，门的实际运动和自动化信号另见地形与管网实测。|
+| 新打印人 2487 | 新人存在于原版实时名单，拥有 Mining1 技能，食物和药物限制可查询。设施测试后，夹具触发 ONI 的 Slain 死亡流程。在格子 49795 确认其从在世名单移除，`nm/vitals` 与 `nm/profile` 都返回缺失。录下死亡前、后分别覆盖该存档 ID 的原始视图区。|
+
+房主证据在该轮 `host.report` 的 `NATIVE_FILTER_HOST`、`NATIVE_RECIPE_HOST`、`NATIVE_DOOR_HOST`、`NATIVE_PRINTED_DEATH_HOST` 和 `FEATURE_CHECKS_DONE`。随后运行器用不含生产联机程序集的独立游戏进程重开房主手动保存的档，`readback.report` 报告 `PASS native host save re-opened`，最终退出码 0，输入哈希校验通过。
+
 ## 本地复测
 
 1. 将 `$materialSave` 指向有解锁梯子、可用工人和可达施工地点的 Vanilla 存档。运行以下命令，预期末尾出现 `PASS material competition`。
@@ -48,7 +61,7 @@
 2. 将 `$colonySave` 指向含复制人、可用储物容器和可种植区域的 Vanilla 存档。运行后在本轮输出目录找到 `host.report` 和 `native-recording`，预期有 `FEATURE_CHECKS_DONE`。
 
    ```powershell
-   .\tests\Integration\Game\run.ps1 -SavePath $colonySave -NativeRecord
+   .\tests\Integration\Game\run.ps1 -SavePath $colonySave -NativeRecord -Persistence
    ```
 
 3. 将 `$recording` 设为上一步的 `native-recording` 目录。回放的 `guest-native.report` 应包含对应夹具的 `NATIVE_*_GUEST` 行。旧录像可以跳过尚未采集的项目，报告中的 `SKIPPED` 和 `symbolReadback=False` 应保留在结果里。

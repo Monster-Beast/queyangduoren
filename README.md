@@ -6,7 +6,14 @@
 
 ## 构建和安装
 
-当前游戏版本可按下方步骤从源码构建。仓库保留的 [0.2.0 历史包](dist/QueyangCoop-0.2.0-dev.zip) 适用于 Klei 744825。历史包哈希见[当时的验收记录](docs/evidence/native.md)。
+当前游戏版本可使用仓库中的 [0.3.0-dev 开发包](dist/QueyangCoop-0.3.0-dev.zip)。在仓库根目录先预览安装目标，第二行安装同一个 ZIP。安装器会为已有的不同版本备份，并打印回滚路径。
+
+~~~powershell
+.\tools\install-dev.ps1 -Package .\dist\QueyangCoop-0.3.0-dev.zip -WhatIf
+.\tools\install-dev.ps1 -Package .\dist\QueyangCoop-0.3.0-dev.zip
+~~~
+
+仓库保留的 [0.2.0 历史包](dist/QueyangCoop-0.2.0-dev.zip) 适用于 Klei 744825。历史包哈希见[当时的验收记录](docs/evidence/native.md)。
 
 好友只下载 ZIP 时，可退出游戏，将四个包文件解压到个人“文档”下的 `Klei\OxygenNotIncluded\mods\Local\QueyangCoop\`，然后在游戏 Mods 菜单启用。同一台机器选用一种安装方式即可，避免重复加载。
 
