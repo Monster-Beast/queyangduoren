@@ -121,16 +121,18 @@ namespace Queyang.Integration
                     Advance(Stage.Red,"sensor green opened door; electrical endpoints connected"); break;
                 case Stage.Red:
                     if (Sample(4,1).LogicValue!=0 || door.IsOpen() || !DoorReceived() || Sample(6,1).BuildingAnimation==openAnimation) break;
-                    Set(game.electricalConduitSystem,C(3,1),power[1].gameObject,UtilityConnections.Left);
-                    Set(game.electricalConduitSystem,C(4,1),power[2].gameObject,UtilityConnections.Right);
+                    Util.KDestroyGameObject(power[2].gameObject);
                     Advance(Stage.Split,"sensor red closed door"); break;
                 case Stage.Split:
-                    if (Together() || !ValidEndpoints() || (Sample(3,1).Connections & (int)UtilityConnections.Right)!=0) break;
+                    if (Together() || !ValidEndpoints() || (Sample(4,1).Utilities & 1)!=0) break;
+                    power[2]=Build(WireConfig.ID,C(4,1),SimHashes.Cuprite).GetComponent<global::Wire>();
                     Set(game.electricalConduitSystem,C(3,1),power[1].gameObject,UtilityConnections.Left|UtilityConnections.Right);
                     Set(game.electricalConduitSystem,C(4,1),power[2].gameObject,UtilityConnections.Left|UtilityConnections.Right);
+                    Set(game.electricalConduitSystem,C(5,1),power[3].gameObject,UtilityConnections.Left|UtilityConnections.Right);
                     Advance(Stage.Restored,"wire disconnected distinct circuits TCP topology updated"); break;
                 case Stage.Restored:
-                    if (!Together() || (Sample(3,1).Connections & (int)UtilityConnections.Right)==0) break;
+                    if (!Together() || (Sample(4,1).Utilities & 1)==0 || (Sample(4,1).Connections & 3)!=3) break;
+                    log("TERRAIN research unlocked in stock building requirements "+NativeManagementChecks.CheckUnlockProjection());
                     log("PASS terrain and networks: native phase, fog, opening, sensor-door, circuit split/rejoin; TCP projection");
                     Dispose(); return true;
             }

@@ -17,7 +17,6 @@ namespace Queyang.Integration
         readonly int plantId, eggId, x, y, previousLastId;
         readonly float started;
         readonly Tag foodTag, babyTag;
-        GameObject printed;
         int foodId, babyId, stage;
         float lastCapture;
         string state = "spawn";
@@ -65,7 +64,6 @@ namespace Queyang.Integration
             if (Time.realtimeSinceStartup-started > 30) throw new TimeoutException("Ecology " + state);
             if (Time.realtimeSinceStartup < lastCapture + .25f) return false;
             lastCapture = Time.realtimeSinceStartup;
-            if (stage == 3) return NativePrintedDupe.Record(printed,dir,log);
             var bytes = HostWorld.Capture(x,y);
             var page = EntityStateCodec.Decode(ColonyView.Decode(bytes).EntityPayload);
             ColonyEntity Find(int id) => page.Entities.FirstOrDefault(e=>e.Id==id);
@@ -107,8 +105,7 @@ namespace Queyang.Integration
                 using(var w=new BinaryWriter(File.Create(Path.Combine(dir,"ecology-ids.bin"))))
                 { w.Write(plantId); w.Write(eggId); w.Write(foodId); w.Write(babyId); }
                 log("NATIVE_ECOLOGY_HOST harvest=true eggHatched=true foodKcal="+food.Value+" freshness="+food.Limit);
-                printed=NativePrintedDupe.Print(x,y); stage=3;
-                state="waiting for delivered duplicant to spawn in host viewport";
+                return true;
             }
             return false;
         }

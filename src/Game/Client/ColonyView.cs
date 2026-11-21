@@ -48,6 +48,8 @@ namespace Queyang.Game
         public int Germs, Lux, RailItem;
         public int RoomType, RoomAnchor, RoomSize;
         public byte OrderPriority;
+        public int OrderTargetId;
+        public byte SeparateOrderPriority;
         public bool MopOrdered;
         public byte GermType, RailConnections;
         public float Decor, RailMass;
@@ -119,7 +121,7 @@ namespace Queyang.Game
                 bool extended = HasEnvironment || EntityPayload != null;
                 if (extended && !HasResources) throw new InvalidDataException("Extended state requires native resource state.");
                 w.Write(extended ? (ushort)8 : HasResources ? (ushort)7 : Detailed ? (ushort)6 : Native ? NativeVersion : (ushort)4);
-                bool orders = extended && Array.Exists(Cells, c => c.MopOrdered || c.OrderPriority != 0);
+                bool orders = extended && Array.Exists(Cells,c=>c.MopOrdered || c.OrderPriority!=0 || c.OrderTargetId!=0 || c.SeparateOrderPriority!=0);
                 if (extended) w.Write((byte)((HasEnvironment ? 1 : 0) | (EntityPayload != null ? 2 : 0) | (orders ? 4 : 0)));
                 w.Write(X); w.Write(Y);
                 w.Write(Cycle); w.Write(CycleFraction); w.Write(Paused); w.Write(Speed);
@@ -184,6 +186,7 @@ namespace Queyang.Game
                     // Incompressible worst case: retain all entity bytes, rotate environmental coverage.
                     if (!pageEnvironment) return Encode(4, true);
                     if (nameBytes > 2) return Encode(2, true);
+                    if (nameBytes != 0) return Encode(0, true);
                 }
                 int shortNames = HasResources ? 14 : 24;
                 if (stream.Length > MaxViewport && Detailed && nameBytes > shortNames) return Encode(shortNames, false);
@@ -196,6 +199,7 @@ namespace Queyang.Game
         {
             name = name ?? string.Empty;
             if (ids.ContainsKey(name)) return;
+            if (nameBytes == 0) { ids.Add(name,0); return; }
             if (nameBytes == 2 && name.Length != 0 && name[0] >= 0x800) { ids.Add(name, 0); return; }
             var encoder = Encoding.UTF8.GetEncoder();
             var buffer = new byte[nameBytes];

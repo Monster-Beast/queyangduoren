@@ -152,7 +152,11 @@ namespace Queyang.Game
                     e.Available = Amount(pickup.UnreservedAmount);
                     if (pickup.Clearable != null && MarkedForClear(pickup.Clearable)) e.Flags |= Marked;
                     if (c.Place == ColonyItemPlace.Carried && obj.GetComponent<Equippable>()?.isEquipped == true)
+                    {
                         e.Flags |= ColonyEntity.Worn;
+                        var owner=KPrefabIDTracker.Get().GetInstance(c.Owner);
+                        if (owner!=null) NativeWearDisplay.Capture(e,owner.gameObject,obj.GetComponent<Equippable>());
+                    }
                     if (c.Kind == ColonyEntityKind.Food) { e.Value = Amount(obj.GetComponent<Edible>().Calories / 1000f); e.Limit = Freshness(obj); }
                     if (c.Kind == ColonyEntityKind.Egg)
                     {

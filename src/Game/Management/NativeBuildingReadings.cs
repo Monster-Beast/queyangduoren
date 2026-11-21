@@ -71,7 +71,13 @@ namespace Queyang.Game
             var door = target.GetComponent<Door>();
             if (door != null) lines.Add($"门 {door.CurrentState} → {door.RequestedState}");
             var valve = target.GetComponent<Valve>();
-            if (valve != null) lines.Add(FormattableString.Invariant($"阀门 {valve.DesiredFlow:0.###} / {valve.MaxFlow:0.###} kg/s"));
+            if (valve != null) lines.Add(FormattableString.Invariant($"阀门 {valve.GetComponent<ValveBase>().CurrentFlow:0.###} kg/s · 目标 {valve.DesiredFlow:0.###} · 上限 {valve.MaxFlow:0.###}"));
+            var building = target.GetComponent<Building>();
+            if (building != null)
+            {
+                AddPort(lines, "输入", building.Def.InputConduitType, building.GetUtilityInputCell());
+                AddPort(lines, "输出", building.Def.OutputConduitType, building.GetUtilityOutputCell());
+            }
             var sensor = target.GetComponent<IThresholdSwitch>();
             if (sensor != null) lines.Add($"传感器 {sensor.Format(sensor.CurrentValue, true)} · {(sensor.ActivateAboveThreshold ? "高于" : "低于")} {sensor.Format(sensor.Threshold, true)}");
             var room = global::Game.Instance.roomProber?.GetRoomOfGameObject(target);
@@ -85,6 +91,17 @@ namespace Queyang.Game
             }
             return Prefix + "g/" + id.ToString(CultureInfo.InvariantCulture) + "/" +
                 Convert.ToBase64String(Encoding.UTF8.GetBytes(text.ToString())).Replace('/', '_');
+        }
+
+        static void AddPort(List<string> lines, string label, ConduitType type, int cell)
+        {
+            if ((type != ConduitType.Liquid && type != ConduitType.Gas) || !Grid.IsValidCell(cell)) return;
+            Grid.CellToXY(cell, out int x, out int y);
+            var flow = Conduit.GetFlowManager(type);
+            if (!flow.HasConduit(cell)) { lines.Add($"{label} ({x},{y}) · 未接管"); return; }
+            var data = flow.GetContents(cell);
+            string material = data.mass > 0 ? ElementLoader.FindElementByHash(data.element)?.name : "空";
+            lines.Add(FormattableString.Invariant($"{label} ({x},{y}) · {material} {data.mass:0.###} kg"));
         }
 
         static void ReceiveReadings(string[] fields)

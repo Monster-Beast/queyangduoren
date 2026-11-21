@@ -120,6 +120,15 @@ try {
         [IO.Directory]::CreateDirectory($mod) | Out-Null
         [IO.Compression.ZipFile]::ExtractToDirectory($gamePackage,$mod)
         Copy-Item -LiteralPath $fixture -Destination $mod
+        [ordered]@{
+            role=$role
+            package=(Get-FileHash -LiteralPath $gamePackage).Hash
+            gameAssembly=(Get-FileHash -LiteralPath (Join-Path $managed 'Assembly-CSharp.dll')).Hash
+            coop=(Get-FileHash -LiteralPath (Join-Path $mod 'QueyangCoop.dll')).Hash
+            core=(Get-FileHash -LiteralPath (Join-Path $mod 'Queyang.Core.dll')).Hash
+            driver=(Get-FileHash -LiteralPath (Join-Path $mod 'SmokeDriver.dll')).Hash
+            sourceSave=$initialSaveHash
+        } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run "$role-input.json") -Encoding UTF8
         # Dev distribution type and Vanilla DLC id are the values in the game's serialized settings.
         # KMod.Local.Subscribe stores the Unity Mono hash of the directory name in label.version.
         # This is the value written by build 744825 for QueyangCoop. A zero here stages a

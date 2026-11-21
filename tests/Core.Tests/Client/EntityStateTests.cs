@@ -32,6 +32,26 @@ namespace Queyang.Core.Tests
         }
 
         [Fact]
+        public void WornSymbolsFitDensePageAndOlderItemsRemainReadable()
+        {
+            var items = Enumerable.Range(1,EntityStateCodec.MaxCount).Select(id=>new ColonyEntity {
+                Kind=ColonyEntityKind.Item, Id=id, Place=ColonyItemPlace.Carried, OwnerId=1000, Flags=ColonyEntity.Worn,
+                WearBuild=-321, WearSymbols=Enumerable.Repeat((byte)0x99,64).ToArray()
+            }).ToArray();
+            var page=new ColonyEntityPage { Entities=items };
+            var bytes=EntityStateCodec.Encode(page);
+            Assert.InRange(bytes.Length,1,ColonyView.MaxEntityPayload);
+            var copy=EntityStateCodec.Decode(bytes).Entities[0];
+            Assert.Equal(-321,copy.WearBuild);
+            Assert.Equal(items[0].WearSymbols,copy.WearSymbols);
+            items[0].WearSymbols[0]=3;
+            Assert.Throws<InvalidDataException>(()=>EntityStateCodec.Encode(page));
+            page.Entities=new[]{new ColonyEntity {Kind=ColonyEntityKind.Item,Id=4,Place=ColonyItemPlace.Carried,OwnerId=1000}};
+            var legacy=EntityStateCodec.Encode(page); legacy[0]=2;
+            Assert.Empty(EntityStateCodec.Decode(legacy).Entities[0].WearSymbols);
+        }
+
+        [Fact]
         public void MovingAnItemPreservesIdentityAndRejectsInvalidOwnersAndDuplicates()
         {
             var item = new ColonyEntity { Kind = ColonyEntityKind.Item, Id = 21, Cell = 18, Mass = 100 };

@@ -43,6 +43,22 @@ namespace Queyang.Core.Tests
         }
 
         [Fact]
+        public void OverlappingBuildingAndOrderIdentitiesHaveIndependentPriorityBounds()
+        {
+            var v=View(); v.HasEnvironment=true;
+            v.Cells[8]=new ColonyCell { Flags=1, TargetId=80, OrderPriority=7, MopOrdered=true, OrderTargetId=19, SeparateOrderPriority=4 };
+            var raw=v.Encode();
+            var cell=ColonyView.Decode(raw).Cells[8];
+            Assert.Equal((80,(byte)7,19,(byte)4,true),(cell.TargetId,cell.OrderPriority,cell.OrderTargetId,cell.SeparateOrderPriority,cell.MopOrdered));
+            raw[^1]=10;
+            Assert.Throws<InvalidDataException>(()=>ColonyView.Decode(raw));
+            raw[^1]=4; Array.Clear(raw,raw.Length-5,4);
+            Assert.Throws<InvalidDataException>(()=>ColonyView.Decode(raw));
+            v.Cells[8].OrderTargetId=0;
+            Assert.Throws<InvalidDataException>(()=>v.Encode());
+        }
+
+        [Fact]
         public void RoomMembershipMustHaveValidDimensionsAndCanBeCleared()
         {
             var v=View(); v.HasEnvironment=true;
@@ -91,6 +107,7 @@ namespace Queyang.Core.Tests
                     LogicValue=r.Next(), GasPipe=Material(), LiquidPipe=Material(), Structure=Material(), Lux=r.Next(), Decor=Value(),
                     RoomType = -r.Next(1,int.MaxValue), RoomAnchor = r.Next(), RoomSize = r.Next(1,int.MaxValue),
                     OrderPriority=(byte)r.Next(1,10), MopOrdered=r.Next(2)==0,
+                    OrderTargetId=r.Next(1,int.MaxValue), SeparateOrderPriority=(byte)r.Next(10),
                     Germs=r.Next(), GermType=(byte)r.Next(256), RailPresent=true, RailItem=r.Next(), RailConnections=15, RailMass=Value() };
             v.Dupes = Enumerable.Range(1,64).Select(i=>new ColonyDupe { Id=i, SaveId=i, Name=Name(), Activity=Name() }).ToArray();
             v.Piles = Enumerable.Range(0,ColonyView.MaxPiles).Select(i=>new ColonyPile { SaveId=i, Cell=(ushort)i, Material=Material(), Animation=r.Next() }).ToArray();
@@ -113,6 +130,7 @@ namespace Queyang.Core.Tests
                 for (int i=0; i<covered.Length; i++)
                 {
                     Assert.Equal((v.Cells[i].OrderPriority,v.Cells[i].MopOrdered),(copy.Cells[i].OrderPriority,copy.Cells[i].MopOrdered));
+                    Assert.Equal((v.Cells[i].OrderTargetId,v.Cells[i].SeparateOrderPriority),(copy.Cells[i].OrderTargetId,copy.Cells[i].SeparateOrderPriority));
                     if (copy.CoversEnvironment(i))
                     {
                         covered[i]=true; count++;

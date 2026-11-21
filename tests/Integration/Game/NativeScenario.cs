@@ -12,7 +12,7 @@ namespace Queyang.Integration
     // The peer replays observations previously made by a separate real hosting game.
     internal sealed class NativeScenario
     {
-        enum Stage { Join, Load, Pan, Overlay, Details, Screenshot, Order, Completion, ProxySelect, ProxyOrder, ProxyCancel, ProxyDone, Printed, Exit }
+        enum Stage { Join, Load, Pan, Overlay, Details, Screenshot, Order, Completion, ProxySelect, ProxyOrder, ProxyCancel, ProxyDone, Printed, StockTools, Exit }
         readonly Action<string> log;
         readonly string recording;
         Stage stage;
@@ -28,6 +28,7 @@ namespace Queyang.Integration
         string engineException;
         int selectedSaveId;
         string expectedVitals, expectedProfile;
+        NativeStockTools stockTools;
         System.Action staleClick;
         string staleError;
 
@@ -228,7 +229,6 @@ namespace Queyang.Integration
                     log("NATIVE_LADDER_HUD_SAVED");
                     NativeEcology.Replay(recording,log);
                     NativeFoodChain.Replay(recording,log);
-                    NativeInfrastructure.Replay(recording, log);
                     if (!string.IsNullOrEmpty(recording) && File.Exists(Path.Combine(recording,"printed.bin")))
                     {
                         using (var r=new BinaryReader(File.OpenRead(Path.Combine(recording,"printed.bin"))))
@@ -241,7 +241,8 @@ namespace Queyang.Integration
                         until=Time.unscaledTime+15; stage=Stage.Printed;
                         break;
                     }
-                    Leave();
+                    NativeInfrastructure.Replay(recording, log);
+                    StartStockTools();
                     break;
                 case Stage.Printed:
                     if (Time.unscaledTime>until) throw new TimeoutException("Newly printed duplicant details did not match its host");
@@ -253,7 +254,11 @@ namespace Queyang.Integration
                     if (!NativeManagement.DisplayedVitals(selectedSaveId,expectedVitals,out _) ||
                         !NativeManagement.DisplayedProfile(selectedSaveId,expectedProfile,out _)) break;
                     log("NATIVE_PRINTED_GUEST renderOnly=true selected=true vitals=true profile=true");
-                    Leave();
+                    NativeInfrastructure.Replay(recording, log);
+                    StartStockTools();
+                    break;
+                case Stage.StockTools:
+                    if (stockTools.Tick()) Leave();
                     break;
                 case Stage.Exit:
                     if (global::Game.Instance != null || NativeGuestScene.Active || MainMenu.Instance == null || !MainMenu.Instance.IsActive()) break;
@@ -332,6 +337,12 @@ namespace Queyang.Integration
                 if (toggle != null) toggle.onClick -= Observed;
                 if (basic != null) basic.onClick -= Observed;
             }
+        }
+        void StartStockTools()
+        {
+            var rows=StockOrderTape.Load(recording);
+            if (rows==null) { Leave(); return; }
+            stockTools=new NativeStockTools(rows,log); stage=Stage.StockTools;
         }
         void Leave()
         {

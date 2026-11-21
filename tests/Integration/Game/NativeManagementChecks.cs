@@ -152,6 +152,28 @@ namespace Queyang.Integration
             NativeManagement.Reset();
         }
 
+        // Uses the disposable terrain room after the physics checks, before discarding that world.
+        internal static string CheckUnlockProjection()
+        {
+            var tech=Db.Get().Techs.resources.First(t=>!t.Disabled && t.FoundNode && !t.IsComplete() &&
+                t.unlockedItems.Any(i=>Assets.GetBuildingDef(i.Id)!=null && !i.IsComplete()));
+            var entry=tech.unlockedItems.First(i=>Assets.GetBuildingDef(i.Id)!=null && !i.IsComplete());
+            var apply=AccessTools.DeclaredMethod(typeof(NativeManagement),"ApplyResearch");
+            var canBuild=AccessTools.DeclaredMethod(typeof(PlanScreen),"TechRequirementsMet");
+            string Capture()=>HostWorld.Execute("nm/research",0,0).Substring("NM1/r/".Length);
+            bool Unlocked()=>(bool)canBuild.Invoke(PlanScreen.Instance,new object[]{entry});
+            string initial=Capture();
+            Expect(!Unlocked(),"stock build entry initially locked");
+            Research.Instance.GetOrAdd(tech).Purchased();
+            string complete=Capture();
+            Expect(initial!=complete && Unlocked(),"native completion emitted research change");
+            apply.Invoke(null,new object[]{initial});
+            Expect(!tech.IsComplete() && !Unlocked(),"restore test baseline");
+            apply.Invoke(null,new object[]{complete});
+            Expect(tech.IsComplete() && Unlocked(),"replayed completion unlocks stock building requirement");
+            return tech.Id+" -> "+entry.Id;
+        }
+
         static void CheckDuplicant(MinionIdentity dupe, int id, Func<string,string> exec)
         {
             BinaryReader Query(string path, string type)

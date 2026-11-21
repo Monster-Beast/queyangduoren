@@ -52,7 +52,7 @@ namespace Queyang.Integration
         private static void EnvironmentReadback(Action<string> record)
         {
             var view = ColonyView.Decode(HostWorld.Capture(-1, -1));
-            int compared = 0, lights = 0, decorated = 0, infected = 0;
+            int compared = 0, lights = 0, decorated = 0, infected = 0, rooms = 0;
             for (int i = 0; i < view.Cells.Length; ++i)
             {
                 if (!view.CoversEnvironment(i)) continue;
@@ -60,13 +60,21 @@ namespace Queyang.Integration
                 int cell = Grid.XYToCell(view.X + i % ColonyView.Width, view.Y + i / ColonyView.Width);
                 Require(sample.Germs == Grid.DiseaseCount[cell] && (sample.Germs == 0 || sample.GermType == Grid.DiseaseIdx[cell]), "Wrong grid disease reading");
                 Require(sample.Lux == Grid.LightIntensity[cell] && sample.Decor == Grid.Decor[cell], "Wrong grid light or decor");
+                var cavity = global::Game.Instance.roomProber.GetCavityForCell(cell);
+                if (cavity?.room?.roomType != null && cavity.NumCells > 0)
+                {
+                    Require(sample.RoomType == new HashedString(cavity.room.roomType.Id).HashValue &&
+                        sample.RoomSize == cavity.NumCells && sample.RoomAnchor == cavity.cells[0], "Wrong room assignment");
+                    rooms++;
+                }
+                else Require(sample.RoomType == 0, "Unexpected room assignment");
                 if (sample.Germs > 0) infected++;
                 if (sample.Lux > 0) lights++;
                 if (sample.Decor != 0) decorated++;
                 compared++;
             }
             Require(compared > 0, "Host did not send v8 environment");
-            record($"FEATURE DETAIL environment cells={compared} illuminated={lights} decorated={decorated} infected={infected}");
+            record($"FEATURE DETAIL environment cells={compared} illuminated={lights} decorated={decorated} infected={infected} inRoom={rooms}");
         }
 
         private static List<KeyValuePair<string, string>> Menu(string route)

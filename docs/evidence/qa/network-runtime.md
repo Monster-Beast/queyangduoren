@@ -52,3 +52,7 @@ $save = Read-Host '输入可复制的 Vanilla .sav 完整路径'
 2026-11-22 用最终候选包复测。真实游戏内的 `CreateSocketPair` 选用了原生网络回环（`nativeNetworkLoopback=True`）。两个句柄分别收到了 44 字节的 QYMP Ping 和 Pong，双向校验成功。随后关闭两个句柄并退出好友房，运行器返回 0，原始文件哈希检查通过。本地报告位于 `artifacts/qa/game-ab0e62bd42f240d3b894ea5acadd87f5/host.report`。跨账号邀请、远端身份和跨机 P2P 路径各需单独验收。
 
 当前机器上曾通过 `-SecondGame` 尝试并行启动第二个 Unity 实例，第二个进程在产生引擎日志前已退出，因此未取得“双 Unity 客机经 Steam 好友邀请加入”的证据。T07 仍需两台具备独立 Steam 账号的测试环境完成邀请、P2P 建连和重新邀请。四个 TCP 端点和真实 Steam 四人会话应分别记录。首次实测还发现快照中的复制人 ID 未填充导致握手后断开，修正后上述真实挖掘与建造流程通过。
+
+## 地形与线路的独立游戏夹具
+
+`tests/Integration/Game/run.ps1 -TerrainNetworks -SavePath $save` 在独立资料目录加载 Vanilla 存档副本，在未揭示区域布置密封冰室、氧气室、温度传感器、气密门及并行的电线和逻辑线。房主使用游戏的热量消息融冰、开挖消息打通两间气室；测试改变温度传感器阈值和电网连接，由原生模拟更新门和电路。一个走实际回环 TCP 的只读 RoomClient 校验传来的可见性、物态、扩散后的氧气、逻辑信号、门动画和电线方向，房主端另查实际 circuit ID 的分离和重合。运行成功时 host.report 留下分阶段的 `TERRAIN` 行及最后的 `PASS terrain and networks`。此模式和三轮原版重新入房均独占当前游戏进程，需串行运行。

@@ -22,6 +22,7 @@ namespace Queyang.Integration
         Equippable vest;
         MinionIdentity wearer;
         int vestId, wearerId;
+        int vestBuild, vestSymbol;
 
         static int Id(GameObject obj) => obj.GetComponent<KPrefabID>().InstanceID;
         static void Require(bool ok, string reason)
@@ -29,6 +30,19 @@ namespace Queyang.Integration
             if (!ok) throw new InvalidDataException("Native food chain: "+reason);
         }
         static bool Near(float a, float b) => Math.Abs(a-b) < .005f;
+
+        static KAnim.Build.Symbol Rendered(GameObject wearer,int hash)
+        {
+            return wearer.GetComponent<SymbolOverrideController>().GetSymbolOverrides
+                .Where(entry=>entry.targetSymbol.HashValue==hash)
+                .OrderByDescending(entry=>entry.priority).Select(entry=>entry.sourceSymbol).FirstOrDefault();
+        }
+        static bool VisibleSymbol(GameObject owner,int target,int build)
+        {
+            if (!Assets.TryGetAnim(new HashedString(build),out var file)) return false;
+            return Rendered(owner,target)?.build==file.GetData().build &&
+                owner.GetComponent<KBatchedAnimController>().GetSymbolVisiblity(new KAnimHashedString(target));
+        }
 
         internal NativeFoodChain(string dir, Action<string> log)
         {
@@ -165,12 +179,20 @@ namespace Queyang.Integration
                     break;
                 case 5:
                     if (!Record("vest",Grid.PosToCell(vest),vestId,e=>e!=null && e.Place==ColonyItemPlace.Ground)) return false;
-                    wearer.GetEquipment().Equip(vest);
+                    vest.Assign(wearer);
+                    if (!vest.isEquipped) wearer.GetEquipment().Equip(vest);
                     Require(vest.isEquipped && wearer.GetEquipment().IsEquipped(vest),"native equip failed");
                     break;
                 case 6:
+                    var asset=vest.GetBuildOverride();
+                    Require(asset!=null,"vest has no wearable build");
+                    vestBuild=new HashedString(asset.name).HashValue;
+                    var visible=asset.GetData().build.symbols.FirstOrDefault(s=>s!=null &&
+                        VisibleSymbol(wearer.gameObject,s.hash.HashValue,vestBuild));
+                    if (visible==null) { waiting="native visible clothing symbol "+asset.name; return false; }
+                    vestSymbol=visible.hash.HashValue;
                     if (!Record("worn",Grid.PosToCell(wearer),vestId,e=>e!=null && e.Place==ColonyItemPlace.Carried &&
-                        e.OwnerId==wearerId && (e.Flags&ColonyEntity.Worn)!=0)) return false;
+                        e.OwnerId==wearerId && e.IsWorn && e.WearBuild==vestBuild && e.WearSymbols.Any(b=>(b&0xaa)!=0))) return false;
                     wearer.GetEquipment().Unequip(vest);
                     Require(!vest.isEquipped && !wearer.GetEquipment().IsEquipped(vest),"native unequip failed");
                     break;
@@ -178,8 +200,11 @@ namespace Queyang.Integration
                     if (!Record("removed",Grid.PosToCell(vest),vestId,e=>e!=null && e.Place==ColonyItemPlace.Ground &&
                         (e.Flags&ColonyEntity.Worn)==0)) return false;
                     using(var w=new BinaryWriter(File.Create(Path.Combine(dir,"gear.bin"))))
-                    { w.Write(vestId); w.Write(wearerId); }
-                    log($"NATIVE_EQUIPMENT_HOST wearer={wearerId} vest={vestId} equippedAndRemoved=true");
+                    {
+                        Require(!VisibleSymbol(wearer.gameObject,vestSymbol,vestBuild),"unequipped vest remains visible on host");
+                        w.Write(vestId); w.Write(wearerId); w.Write(vestBuild); w.Write(vestSymbol);
+                    }
+                    log($"NATIVE_EQUIPMENT_HOST wearer={wearerId} vest={vestId} equippedAndRemoved=true visibleBuild={vestBuild} symbol={vestSymbol}");
                     stage++;
                     return true;
             }
@@ -190,6 +215,11 @@ namespace Queyang.Integration
         internal static void Replay(string dir,Action<string> log)
         {
             if (string.IsNullOrEmpty(dir)) return;
+            if (!File.Exists(Path.Combine(dir,"foodchain.bin")))
+            {
+                log("NATIVE_FOOD_CHAIN_SKIPPED recording predates food chain fixture");
+                return;
+            }
             using(var r=new BinaryReader(File.OpenRead(Path.Combine(dir,"foodchain.bin"))))
             {
                 int food=r.ReadInt32(), box=r.ReadInt32(), rot=r.ReadInt32(), baby=r.ReadInt32(), meat=r.ReadInt32();
@@ -224,16 +254,26 @@ namespace Queyang.Integration
                     Near(Row(meat).Mass,meatKg) && Near(Row(meat).Value,meatKcal),"post-death meat or calories");
                 SelectTool.Instance.Select(null,true);
                 log("NATIVE_FOOD_CHAIN_GUEST storedReleased=true selectedMealClosed=true rotMass=true selectedCritterClosed=true meatKcal="+meatKcal);
+                if (!File.Exists(Path.Combine(dir,"gear.bin")))
+                {
+                    log("NATIVE_EQUIPMENT_SKIPPED recording predates equipment fixture");
+                    return;
+                }
                 using(var gear=new BinaryReader(File.OpenRead(Path.Combine(dir,"gear.bin"))))
                 {
                     int vest=gear.ReadInt32(), wearer=gear.ReadInt32();
+                    bool hasSymbols=gear.BaseStream.Position<gear.BaseStream.Length;
+                    int build=hasSymbols?gear.ReadInt32():0, symbol=hasSymbols?gear.ReadInt32():0;
                     Apply("vest"); Select(vest);
                     Apply("worn"); Closed(vest);
                     Require(Row(vest)?.OwnerId==wearer && (Row(vest).Flags&ColonyEntity.Worn)!=0,"missing worn equipment");
+                    var carrier=NativeWorldMirror.GetDupeSelectable(wearer);
+                    if (hasSymbols) Require(carrier!=null && VisibleSymbol(carrier.gameObject,symbol,build),"guest vest symbol did not appear");
                     Apply("removed"); Select(vest);
                     Require(Row(vest).Place==ColonyItemPlace.Ground && (Row(vest).Flags&ColonyEntity.Worn)==0,"vest still assigned");
+                    if (hasSymbols) Require(!VisibleSymbol(carrier.gameObject,symbol,build),"guest vest symbol still visible after removal");
                     SelectTool.Instance.Select(null,true);
-                    log("NATIVE_EQUIPMENT_GUEST wornOwner=true oldGroundSelectionClosed=true unequippedSelectable=true");
+                    log("NATIVE_EQUIPMENT_GUEST wornOwner=true oldGroundSelectionClosed=true unequippedSelectable=true symbolReadback="+hasSymbols);
                 }
             }
         }

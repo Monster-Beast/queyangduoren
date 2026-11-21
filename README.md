@@ -1,21 +1,16 @@
 # 《缺氧》同图合作 Mod
 
-每位玩家都运行自己的 Windows Steam 版《缺氧》。房主加载殖民地并推进物理、复制人 AI 和任务；好友收到房主当前的临时存档副本，在自己的原版殖民地场景中移动镜头、打开侧栏和下单。一个房间最多 4 人。适配基础游戏（Vanilla）Klei 744825 / Steam build 24423041。
+每位玩家都运行自己的 Windows Steam 版《缺氧》。房主加载殖民地并推进物理、复制人 AI 和任务；好友收到房主当前的临时存档副本，在自己的原版殖民地场景中移动镜头、打开侧栏和下单。一个房间最多 4 人。本分支源码面向基础游戏（Vanilla）Klei 764025 / Steam build 26798728。
 
-0.2.0 为原版画面开发候选，测试范围、截图和未覆盖的操作见[原版客机实测](docs/evidence/native.md)。早期 0.1.0 使用主菜单格子地图。
+0.3.0-dev 的原版房主、客机截图及单份授权下的实测结果见[新版验收记录](docs/evidence/single-license-764025.md)。旧版本的测试记录见[0.2.0 原版客机实测](docs/evidence/native.md)。
 
 ## 构建和安装
 
-已有游戏的试玩者可直接使用仓库中的 [0.2.0 原版客机开发包](dist/QueyangCoop-0.2.0-dev.zip)。在仓库根目录运行以下命令，可先预览安装目录，再安装同一份已测包。包哈希见[验收记录](docs/evidence/native.md)。
-
-~~~powershell
-.\tools\install-dev.ps1 -Package .\dist\QueyangCoop-0.2.0-dev.zip -WhatIf
-.\tools\install-dev.ps1 -Package .\dist\QueyangCoop-0.2.0-dev.zip
-~~~
+当前游戏版本可按下方步骤从源码构建。仓库保留的 [0.2.0 历史包](dist/QueyangCoop-0.2.0-dev.zip) 适用于 Klei 744825。历史包哈希见[当时的验收记录](docs/evidence/native.md)。
 
 好友只下载 ZIP 时，可退出游戏，将四个包文件解压到个人“文档”下的 `Klei\OxygenNotIncluded\mods\Local\QueyangCoop\`，然后在游戏 Mods 菜单启用。同一台机器选用一种安装方式即可，避免重复加载。
 
-自行编译需要 Windows、Steam 版《缺氧》和 .NET SDK 9。项目按本机 ONI 构建号 744825 编译。若 Steam 不在默认库，先将环境变量 ONI_GAME_DIR 指向包含 OxygenNotIncluded.exe 的目录。两端使用同一个候选包并启用 Vanilla，关闭其他 Mod、DLC 后重启游戏。
+自行编译需要 Windows、Steam 版《缺氧》和 .NET SDK 9。项目按本机 ONI 构建号 764025 编译。若 Steam 不在默认库，先将环境变量 ONI_GAME_DIR 指向包含 OxygenNotIncluded.exe 的目录。两端使用同一个候选包并启用 Vanilla，关闭其他 Mod、DLC 后重启游戏。
 
 1. 在仓库根目录运行环境检查和核心测试。预期 doctor 打印游戏库、程序集哈希和 SDK，测试全部通过。
 

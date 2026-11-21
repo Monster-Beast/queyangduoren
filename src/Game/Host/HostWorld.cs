@@ -137,7 +137,7 @@ namespace Queyang.Game
         private static GameObject GetTarget(int cell)
         {
             var dig = Grid.Objects[cell, (int)ObjectLayer.DigPlacer];
-            return dig != null ? dig : FindBuilding(cell) ?? SecondaryTarget(cell);
+            return FindBuilding(cell) ?? dig ?? SecondaryTarget(cell);
         }
 
         static GameObject SecondaryTarget(int cell)
@@ -159,7 +159,8 @@ namespace Queyang.Game
             var element = Grid.Element[cell];
             var building = FindBuilding(cell);
             var dig = Grid.Objects[cell, (int)ObjectLayer.DigPlacer];
-            var target = dig != null ? dig : building ?? SecondaryTarget(cell);
+            var order = dig ?? SecondaryTarget(cell);
+            var target = building ?? order;
             var result = new ColonyCell {
                 ElementHash = (int)element.id, Visibility = Grid.Visible[cell], RenderGround = Grid.RenderedByWorld[cell],
                 Flags = 1, Element = element.name, Mass = Grid.Mass[cell],
@@ -175,12 +176,11 @@ namespace Queyang.Game
             if (element.id == SimHashes.Oxygen || element.id == SimHashes.ContaminatedOxygen) result.Flags |= 64;
             if (dig != null) result.Flags |= 8;
             result.MopOrdered = Grid.Objects[cell, (int)ObjectLayer.MopPlacer] != null;
-            var priority = target == null ? null : target.GetComponent<Prioritizable>();
-            if (priority != null && priority.IsPrioritizable())
+            result.OrderPriority = ReadPriority(target);
+            if (order != null && order != target)
             {
-                var setting = priority.GetMasterPriority();
-                if (setting.priority_class == PriorityScreen.PriorityClass.basic)
-                    result.OrderPriority = (byte)Mathf.Clamp(setting.priority_value, 1, 9);
+                result.OrderTargetId = TargetKeys.GetValue(order,CreateKey).Value;
+                result.SeparateOrderPriority = ReadPriority(order);
             }
             if (building != null)
             {
@@ -228,6 +228,14 @@ namespace Queyang.Game
 
         private static TargetKey CreateKey(GameObject obj) => new TargetKey(obj);
 
+        static byte ReadPriority(GameObject target)
+        {
+            var priority=target==null ? null : target.GetComponent<Prioritizable>();
+            if(priority==null || !priority.IsPrioritizable()) return 0;
+            var value=priority.GetMasterPriority();
+            return value.priority_class==PriorityScreen.PriorityClass.basic ? (byte)Mathf.Clamp(value.priority_value,1,9) : (byte)0;
+        }
+
         public static string Execute(string action, int x, int y)
         {
             int cell;
@@ -261,6 +269,11 @@ namespace Queyang.Game
                     pickup.Clearable.MarkForClear(false, false);
                     return "OK Sweep designated";
                 }
+                int tokenStart = edit.IndexOf(':');
+                if (tokenStart < 1 || !int.TryParse(edit.Substring(tokenStart + 1), NumberStyles.None,
+                    CultureInfo.InvariantCulture, out int token) || !TargetKeys.TryGetValue(selected.gameObject, out var current)
+                    || current.Value != token) return "ERROR Selected order changed";
+                edit = edit.Substring(0, tokenStart);
                 if (edit != "cancel" && !(edit.StartsWith("priority", StringComparison.Ordinal) && edit.Length == 11))
                     return "ERROR Unsupported object tool";
                 return EditChecked(edit, selected.gameObject);
@@ -294,9 +307,16 @@ namespace Queyang.Game
                 return "ERROR Unsupported tool or missing target";
             var target = GetTarget(cell);
             TargetKey key;
-            if (target == null || !TargetKeys.TryGetValue(target, out key) || key.Value != expectedId)
-                return "ERROR The selected order or building has changed";
-            return EditChecked(action.Substring(0, colon), target);
+            var requested=action.Substring(0,colon);
+            if (target != null && TargetKeys.TryGetValue(target, out key) && key.Value == expectedId)
+                return EditChecked(requested,target);
+            if (requested=="cancel" || requested.StartsWith("priority",StringComparison.Ordinal))
+            {
+                var order=Grid.Objects[cell,(int)ObjectLayer.DigPlacer] ?? SecondaryTarget(cell);
+                if (order!=null && TargetKeys.TryGetValue(order,out key) && key.Value==expectedId)
+                    return EditChecked(requested,order);
+            }
+            return "ERROR The selected order or building has changed";
         }
 
         private static string EditChecked(string edit, GameObject target)
@@ -397,9 +417,19 @@ namespace Queyang.Game
             {
                 case "cancel":
                     var sweep = target.GetComponent<Clearable>();
-                    if (sweep != null && NativeEntitySampler.IsMarked(sweep)) { sweep.CancelClearing(); return "OK Sweep cancelled"; }
+                    if (sweep != null && NativeEntitySampler.IsMarked(sweep))
+                    {
+                        sweep.CancelClearing();
+                        TargetKeys.Remove(target);
+                        return "OK Sweep cancelled";
+                    }
                     var harvest = target.GetComponent<HarvestDesignatable>();
-                    if (harvest != null && harvest.HarvestWhenReady) { harvest.SetHarvestWhenReady(false); return "OK Harvest cancelled"; }
+                    if (harvest != null && harvest.HarvestWhenReady)
+                    {
+                        harvest.SetHarvestWhenReady(false);
+                        TargetKeys.Remove(target);
+                        return "OK Harvest cancelled";
+                    }
                     if (target.GetComponent<Moppable>() != null) { target.Trigger((int)GameHashes.Cancel, null); return "OK Mop cancelled"; }
                     if (target.GetComponent<Constructable>() != null || target.GetComponent<Diggable>() != null)
                     {

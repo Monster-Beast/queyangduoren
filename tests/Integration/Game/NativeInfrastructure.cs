@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using HarmonyLib;
 using Queyang.Game;
 
 namespace Queyang.Integration
@@ -11,10 +12,11 @@ namespace Queyang.Integration
     {
         int cell = Grid.InvalidCell;
         bool finished;
+        readonly NativePipePorts ports = new NativePipePorts();
 
         internal bool Record(string folder, Action<string> log)
         {
-            if (finished || string.IsNullOrEmpty(folder)) return true;
+            if (finished || string.IsNullOrEmpty(folder)) return ports.Tick(folder, log);
             var game = global::Game.Instance;
             if (cell == Grid.InvalidCell)
             {
@@ -63,7 +65,7 @@ namespace Queyang.Integration
             File.WriteAllText(Path.Combine(folder,"utilities.cell"), cell.ToString(System.Globalization.CultureInfo.InvariantCulture));
             finished = true;
             log($"NATIVE_HOST_UTILITIES cell={cell} gas=0.65 liquid=4.5 germs=137/256 rail=7");
-            return true;
+            return ports.Tick(folder, log);
         }
 
         internal static void Replay(string folder, Action<string> log)
@@ -82,15 +84,37 @@ namespace Queyang.Integration
             var c = full.Cells[(y-full.Y)*ColonyView.Width+x-full.X];
             if (gas.mass != .65f || gas.diseaseCount != 137 || liquid.mass != 4.5f || liquid.diseaseCount != 256 ||
                 Grid.LightIntensity[cell] != c.Lux || Grid.Decor[cell] != c.Decor ||
-                Grid.DiseaseCount[cell] != c.Germs) throw new InvalidDataException("Guest utility/overlay readback mismatch");
+                Grid.DiseaseCount[cell] != c.Germs) throw new InvalidDataException(
+                    $"Guest cell={cell} pipes={game.gasConduitFlow.HasConduit(cell)}/{game.liquidConduitFlow.HasConduit(cell)} " +
+                    $"gas={gas.mass}/{gas.diseaseCount} liquid={liquid.mass}/{liquid.diseaseCount} " +
+                    $"lux={Grid.LightIntensity[cell]}/{c.Lux} decor={Grid.Decor[cell]}/{c.Decor} germs={Grid.DiseaseCount[cell]}/{c.Germs}");
             string cargo = NativeUtilityDisplay.GetOverlaySelectable(cell)?.GetName();
             if (cargo == null || !cargo.Contains("7 kg")) throw new InvalidDataException("Rail tooltip did not show cargo: " + cargo);
             NativeWorldMirror.Apply(ColonyView.Decode(File.ReadAllBytes(Path.Combine(folder,"utilities-empty.view"))));
             if (game.gasConduitFlow.GetContents(cell).mass != 0) throw new InvalidDataException("Guest retained drained pipe");
             string drained = NativeUtilityDisplay.GetOverlaySelectable(cell)?.GetName();
             if (drained == null || !drained.Contains("空")) throw new InvalidDataException("Rail tooltip retained cargo: " + drained);
+            overlay.ToggleOverlay(OverlayModes.Rooms.ID, true);
+            int index = Array.FindIndex(full.Cells, entry => entry.RoomType != 0);
+            if (index < 0 || !full.CoversEnvironment(index)) throw new InvalidDataException("Fixture contains no sampled room");
+            var room = full.Cells[index];
+            int roomCell = Grid.XYToCell(full.X + index % ColonyView.Width, full.Y + index / ColonyView.Width);
+            var type = Db.Get().RoomTypes.resources.First(t => new HashedString(t.Id).HashValue == room.RoomType);
+            var selectedCell = AccessTools.Field(typeof(SimDebugView), "selectedCell");
+            int previousCell = (int)selectedCell.GetValue(SimDebugView.Instance);
+            try
+            {
+                selectedCell.SetValue(SimDebugView.Instance, roomCell);
+                var color = (UnityEngine.Color)AccessTools.DeclaredMethod(typeof(SimDebugView), "GetRoomsColour")
+                    .Invoke(null, new object[] { SimDebugView.Instance, roomCell });
+                UnityEngine.Color expected = GlobalAssets.Instance.colorSet.GetColorByName(type.category.colorName);
+                expected.a = .75f;
+                if (color != expected) throw new InvalidDataException("Wrong native room overlay category or selection highlight");
+            }
+            finally { selectedCell.SetValue(SimDebugView.Instance, previousCell); }
             overlay.ToggleOverlay(previous, true);
             log("NATIVE_GUEST_UTILITIES gas=0.65->0 liquid=4.5 germs=137/256 railTooltip=7kg->empty gridReadback=True");
+            NativePipePorts.Replay(folder, log);
         }
     }
 }

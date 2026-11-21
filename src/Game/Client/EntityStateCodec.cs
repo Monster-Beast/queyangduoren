@@ -22,6 +22,10 @@ namespace Queyang.Game
         public ColonyEntityKind Kind;
         public ColonyItemPlace Place;
         public int OwnerId = -1;
+        public int WearBuild;
+        // Four build symbols per byte. Each pair is absent, hidden (1), or visible (2).
+        public byte[] WearSymbols = Array.Empty<byte>();
+        public bool IsWorn => Kind == ColonyEntityKind.Item && Place == ColonyItemPlace.Carried && (Flags & Worn) != 0;
         public float Mass, Temperature;
         public float Available, Reserved;
         // Item: units / reserved units. Food: kcal / freshness / reserved units.
@@ -48,7 +52,7 @@ namespace Queyang.Game
             using (var stream = new MemoryStream())
             using (var w = new BinaryWriter(stream))
             {
-                w.Write((byte)2); w.Write(page.From); w.Write(page.Through); w.Write((byte)page.Entities.Length);
+                w.Write((byte)3); w.Write(page.From); w.Write(page.Through); w.Write((byte)page.Entities.Length);
                 var ids = new HashSet<int>();
                 foreach (var e in page.Entities)
                 {
@@ -57,6 +61,7 @@ namespace Queyang.Game
                     w.Write(e.Element); w.Write(e.Mass); w.Write(e.Temperature);
                     w.Write((byte)e.Place); w.Write(e.OwnerId); w.Write(e.Available); w.Write(e.Reserved);
                     w.Write(e.Animation); w.Write(e.Frame); w.Write(e.Flags);
+                    if (e.IsWorn) { w.Write(e.WearBuild); w.Write((byte)e.WearSymbols.Length); w.Write(e.WearSymbols); }
                     w.Write(e.Value); w.Write(e.Limit); w.Write(e.Extra); w.Write(e.IngredientTypes); w.Write((byte)e.Contents.Length);
                     foreach (var row in e.Contents) { w.Write(row.Tag); w.Write(row.Stored); w.Write(row.Required); w.Write(row.Freshness); }
                 }
@@ -71,7 +76,7 @@ namespace Queyang.Game
             using (var r = new BinaryReader(stream))
             {
                 byte version = r.ReadByte();
-                if (version != 1 && version != 2) throw new InvalidDataException("Unknown entity payload version.");
+                if (version < 1 || version > 3) throw new InvalidDataException("Unknown entity payload version.");
                 var page = new ColonyEntityPage { From = r.ReadInt32(), Through = r.ReadInt32() };
                 int count = r.ReadByte();
                 int max = version == 1 ? 56 : MaxCount;
@@ -84,9 +89,16 @@ namespace Queyang.Game
                     var e = new ColonyEntity { Id = r.ReadInt32(), Kind = (ColonyEntityKind)r.ReadByte(), Prefab = r.ReadInt32(),
                         Cell = r.ReadUInt16(), SubX = r.ReadByte(), SubY = r.ReadByte(), Element = r.ReadInt32(),
                         Mass = r.ReadSingle(), Temperature = r.ReadSingle() };
-                    if (version == 2) { e.Place = (ColonyItemPlace)r.ReadByte(); e.OwnerId = r.ReadInt32();
+                    if (version >= 2) { e.Place = (ColonyItemPlace)r.ReadByte(); e.OwnerId = r.ReadInt32();
                         e.Available = r.ReadSingle(); e.Reserved = r.ReadSingle(); }
                     e.Animation = r.ReadInt32(); e.Frame = r.ReadByte(); e.Flags = r.ReadByte();
+                    if (version == 3 && e.IsWorn)
+                    {
+                        e.WearBuild = r.ReadInt32(); int length = r.ReadByte();
+                        if (length > 64) throw new InvalidDataException("Too many equipment symbols.");
+                        e.WearSymbols = r.ReadBytes(length);
+                        if (e.WearSymbols.Length != length) throw new EndOfStreamException();
+                    }
                     e.Value = r.ReadSingle(); e.Limit = r.ReadSingle(); e.Extra = r.ReadSingle(); e.IngredientTypes = r.ReadUInt16();
                     int n = r.ReadByte();
                     if (n > MaxIngredients) throw new InvalidDataException("Too many material rows.");
@@ -120,6 +132,12 @@ namespace Queyang.Game
             foreach (var row in e.Contents)
                 if (!Number(row.Stored) || !Number(row.Required) || !Number(row.Freshness, -1) || row.Freshness > 1)
                     throw new InvalidDataException("Invalid material quantity.");
+            if (e.WearSymbols == null || e.WearSymbols.Length > 64 ||
+                (e.IsWorn ? e.Contents.Length != 0 : e.WearBuild != 0 || e.WearSymbols.Length != 0) ||
+                (e.WearBuild == 0 && e.WearSymbols.Length != 0))
+                throw new InvalidDataException("Invalid worn equipment state.");
+            foreach (byte value in e.WearSymbols)
+                if ((value & (value >> 1) & 0x55) != 0) throw new InvalidDataException("Invalid equipment visibility.");
         }
     }
 }

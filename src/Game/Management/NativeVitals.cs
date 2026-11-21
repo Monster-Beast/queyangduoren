@@ -233,6 +233,15 @@ namespace Queyang.Game
                 if (NativeGuestScene.Ready && __0 != null && __0.GetComponent<NativeDupeIdentityMarker>() != null) __result = true;
             }
         }
+        [HarmonyPatch(typeof(DetailsScreen), "OnSelectObject")]
+        static class PrintedDupeTab
+        {
+            static void Postfix(DetailsScreen __instance, object __0)
+            {
+                if (NativeGuestScene.Ready && __0 is GameObject obj && obj != null && obj.GetComponent<NativeDupeIdentityMarker>() != null)
+                    __instance.SelectSideScreenTab(DetailsScreen.SidescreenTabTypes.Errands);
+            }
+        }
         [HarmonyPatch(typeof(MinionVitalsPanel), "Refresh")]
         static class PrintedDupeVitals
         {

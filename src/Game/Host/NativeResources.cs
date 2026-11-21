@@ -188,6 +188,7 @@ namespace Queyang.Game
             var collision = go.AddComponent<KBoxCollider2D>();
             collision.size = new Vector2(.75f, .7f); collision.offset = new Vector2(0, .3f);
             go.AddComponent<KPrefabID>().PrefabTag = e.tag;
+            go.AddComponent<NativeEntityIdentity>().SaveId=pile.SaveId;
             go.AddComponent<KSelectable>().SetName(e.name);
             var primary = go.AddComponent<PrimaryElement>();
             primary.SetElement(e.id, false); primary.KeepZeroMassObject = true;
@@ -208,7 +209,7 @@ namespace Queyang.Game
             pickup.GetComponent<KBatchedAnimController>()?.SetVisiblity(visible);
             var selectable = pickup.GetComponent<KSelectable>();
             if (selectable == null) return;
-            if (!visible && selectable.IsSelected && SelectTool.Instance != null) SelectTool.Instance.Select(null);
+            if (!visible && selectable.IsSelected) NativeWorldMirror.ClearSelection(selectable.gameObject);
             selectable.IsSelectable = visible;
         }
 

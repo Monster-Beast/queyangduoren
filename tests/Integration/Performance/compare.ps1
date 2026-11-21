@@ -43,14 +43,31 @@ $metrics=$metricRows[1..10]
 if (@($metrics|Where-Object {$_.seconds -lt 59 -or $_.seconds -gt 90}).Count) { throw 'Unexpected host metric interval.' }
 $slowdown=100*(1-$coop.simulatedSecondsPerWallSecond/$solo.simulatedSecondsPerWallSecond)
 $maxP95=($metrics|Measure-Object pumpP95ms -Maximum).Maximum
+$fullRunP95=($metricRows|Measure-Object pumpP95ms -Maximum).Maximum
+$completed=$clientLines -match '^PASS real host, three TCP guests, (\d+) seconds,'
+if (@($completed).Count -ne 1 -or $completed[0] -notmatch 'guests, (\d+) seconds,') {
+    throw 'Missing the completed run duration.'
+}
+$duration=[int]$matches[1]
+if ($duration -le 0) { throw 'Invalid connected run duration.' }
+$rates=@(foreach($line in $clientLines) {
+    if ($line -match '^SOAK peer=([01]) .* rxBytes=(\d+) ') {
+        [pscustomobject]@{peer=[int]$matches[1]; averageBytesPerSecond=[long]$matches[2]/$duration}
+    } elseif ($line -match '^SOAK reconnectTotal rxBytes=(\d+) ') {
+        [pscustomobject]@{peer=2; averageBytesPerSecond=[long]$matches[1]/$duration}
+    }
+})
+if (@($rates.peer|Sort-Object -Unique).Count -ne 3 -or $rates.Count -ne 3) { throw 'Incomplete per-peer byte counts.' }
 $manifest=Get-Content -LiteralPath (Join-Path $SoakRun 'soak-input.json') -Raw|ConvertFrom-Json
 $result=[ordered]@{
     source=$manifest; connectedRun=(Split-Path $SoakRun -Leaf);
     method='Same input, fixed 1x, 60 s warm-up and ten 60 s intervals. Simulation clock rate is a proxy for simulation speed.';
     solo=$solo; connected=$coop; slowdownPercent=$slowdown; maximumMinutePumpP95ms=$maxP95;
-    minuteHostMetrics=$metrics; throughputPass=($slowdown -le 15.0); pumpPass=($maxP95 -le 4.0)
+    minuteHostMetrics=$metrics; fullRunMinutePumpP95Max=$fullRunP95; peerDownstream=$rates;
+    throughputPass=($slowdown -le 15.0); pumpPass=($fullRunP95 -le 4.0);
+    downstreamPass=(@($rates|Where-Object {$_.averageBytesPerSecond -gt 2MB}).Count -eq 0)
 }
 [IO.File]::WriteAllText([IO.Path]::GetFullPath($OutputPath),($result|ConvertTo-Json -Depth 5))
 "Performance evidence: $([IO.Path]::GetFullPath($OutputPath))"
 "Simulation slowdown: $([math]::Round($slowdown,3))%; largest reported minute pump p95: $maxP95 ms"
-if (!$result.throughputPass -or !$result.pumpPass) { throw 'Performance budget exceeded; see comparison.json for measurements.' }
+if (!$result.throughputPass -or !$result.pumpPass -or !$result.downstreamPass) { throw 'Performance budget exceeded; see comparison.json for measurements.' }

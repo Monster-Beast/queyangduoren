@@ -64,7 +64,10 @@ namespace Queyang.Game
             var local = Grid.Objects[cell, (int)layers[active]] ?? Grid.Objects[cell, (int)tiles[active]];
             var localAnim = local == null ? null : local.GetComponent<KBatchedAnimController>();
             var connections = rail ? (UtilityConnections)data.RailConnections : (UtilityConnections)((data.Connections >> (active * 4)) & 15);
-            bool same = !rail && local != null && present && manager.GetDisplayConnections(cell) == connections;
+            // A cut outside this cell can split a power or automation network while
+            // its immediate connections stay identical. Use the host's per-cell
+            // readings there instead of the baseline's shared circuit object.
+            bool same = (active == 1 || active == 2) && local != null && present && manager.GetDisplayConnections(cell) == connections;
             if (localAnim != null)
             {
                 if (same && suppressed.Remove(localAnim)) localAnim.SetVisiblity(true);
@@ -117,6 +120,8 @@ namespace Queyang.Game
                 var element = pipe.Mass > 0 ? ElementLoader.FindElementByHash((SimHashes)pipe.Element) : null;
                 reading = element == null ? "0 kg" : string.Format(culture, "{0} {1:0.###} kg {2:0.#} K",
                     element.name, pipe.Mass, pipe.Temperature);
+                if (hasEnvironment && pipe.Germs > 0 && pipe.GermType < Db.Get().Diseases.resources.Count)
+                    reading += string.Format(culture, " · {0} {1}", Db.Get().Diseases[pipe.GermType].Name, pipe.Germs);
                 proxy.TintColour = element == null ? Color.white : element.substance.uiColour;
             }
             proxy.GetComponent<KSelectable>().SetName(proxy.gameObject.name + " · " + reading);

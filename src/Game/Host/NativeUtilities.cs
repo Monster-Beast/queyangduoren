@@ -74,8 +74,11 @@ namespace Queyang.Game
         internal static void Apply(int cell, ColonyCell data, bool hasEnvironment)
         {
             var game = global::Game.Instance;
-            if (game.gasConduitFlow.HasConduit(cell)) SetContents(game.gasConduitFlow, cell, data.GasPipe, ConduitFlow.MAX_GAS_MASS, hasEnvironment);
-            if (game.liquidConduitFlow.HasConduit(cell)) SetContents(game.liquidConduitFlow, cell, data.LiquidPipe, ConduitFlow.MAX_LIQUID_MASS, hasEnvironment);
+            // Klei's per-cell grid can hold contents before a conduit is registered.
+            // A pipe built after the join save has no simulation graph on the guest.
+            // Clear the same grid slot when a later sample removes the pipe.
+            SetContents(game.gasConduitFlow, cell, data.GasPipe, ConduitFlow.MAX_GAS_MASS, hasEnvironment);
+            SetContents(game.liquidConduitFlow, cell, data.LiquidPipe, ConduitFlow.MAX_LIQUID_MASS, hasEnvironment);
             ushort circuit = game.circuitManager.GetCircuitID(cell);
             if (circuit != CircuitManager.INVALID_ID && (data.Utilities & 1) != 0) circuits[circuit] = data;
             if (game.logicCircuitSystem.GetNetworkForCell(cell) is LogicCircuitNetwork logic)

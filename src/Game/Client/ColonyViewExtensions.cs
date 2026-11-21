@@ -20,8 +20,11 @@ namespace Queyang.Game
             foreach (var c in Cells)
             {
                 if ((c.Flags & 1) == 0) continue;
-                if (c.OrderPriority > 9) throw new InvalidDataException("Invalid order priority.");
-                w.Write((byte)(c.OrderPriority | (c.MopOrdered ? 16 : 0)));
+                if (c.OrderPriority > 9 || c.OrderTargetId < 0 || c.SeparateOrderPriority > 9 ||
+                    (c.OrderTargetId == 0 && c.SeparateOrderPriority != 0))
+                    throw new InvalidDataException("Invalid order status.");
+                w.Write((byte)(c.OrderPriority | (c.MopOrdered ? 16 : 0) | (c.OrderTargetId != 0 ? 32 : 0)));
+                if (c.OrderTargetId != 0) { w.Write(c.OrderTargetId); w.Write(c.SeparateOrderPriority); }
             }
         }
 
@@ -31,8 +34,13 @@ namespace Queyang.Game
             {
                 if ((Cells[i].Flags & 1) == 0) continue;
                 byte order = r.ReadByte();
-                if ((order & 0xe0) != 0 || (order & 15) > 9) throw new InvalidDataException("Invalid order status.");
+                if ((order & 0xc0) != 0 || (order & 15) > 9) throw new InvalidDataException("Invalid order status.");
                 Cells[i].OrderPriority = (byte)(order & 15); Cells[i].MopOrdered = (order & 16) != 0;
+                if ((order & 32) != 0)
+                {
+                    Cells[i].OrderTargetId=r.ReadInt32(); Cells[i].SeparateOrderPriority=r.ReadByte();
+                    if (Cells[i].OrderTargetId<=0 || Cells[i].SeparateOrderPriority>9) throw new InvalidDataException("Invalid co-located order.");
+                }
             }
         }
 

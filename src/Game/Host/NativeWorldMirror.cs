@@ -153,6 +153,16 @@ namespace Queyang.Game
             return mesh != null && mesh.enabled && mesh.sharedMaterial != null && marker.activeInHierarchy;
         }
 
+        internal static bool IsMopVisible(int cell)
+        {
+            if (!Grid.IsValidCell(cell)) return false;
+            var local=Grid.Objects[cell,(int)ObjectLayer.MopPlacer];
+            var renderer=local==null ? null : local.GetComponentInChildren<MeshRenderer>();
+            if (renderer!=null && renderer.enabled && renderer.gameObject.activeInHierarchy) return true;
+            return mopMarkers.TryGetValue(cell,out var proxy) && proxy!=null && proxy.activeInHierarchy &&
+                proxy.GetComponent<MeshRenderer>()?.enabled==true;
+        }
+
         static void ApplyBuilding(int cell, ColonyCell sample)
         {
             var local = HostWorld.FindBuilding(cell);
@@ -386,7 +396,7 @@ namespace Queyang.Game
             marker.AddComponent<KPrefabID>().PrefabTag = new Tag(MinionConfig.ID);
             marker.AddComponent<KSelectable>().SetName(dupe.Name);
             marker.AddComponent<NativeDupeIdentityMarker>().HostId = dupe.SaveId;
-            marker.AddComponent<SymbolOverrideController>();
+            SymbolOverrideControllerUtil.AddToPrefab(marker);
             var appearance = marker.AddComponent<Accessorizer>();
             marker.SetActive(true);
             appearance.ApplyMinionPersonality(personality);
@@ -400,7 +410,7 @@ namespace Queyang.Game
             {
                 var tool = SelectTool.Instance;
                 if (!visible && tool != null && tool.selected != null && tool.selected.gameObject == anim.gameObject)
-                    tool.Select(null, true);
+                    ClearSelection(anim.gameObject);
                 var selectable = anim.GetComponent<KSelectable>();
                 if (selectable != null) selectable.IsSelectable = visible;
                 anim.SetVisiblity(visible);
@@ -433,11 +443,22 @@ namespace Queyang.Game
             // KSelectable.OnCleanUp normally unselects itself. The transient proxy's
             // animator can already be destroyed at that point. Let ONI clear the live
             // highlight and close the details panel before releasing any components.
+            ClearSelection(target);
+            Object.Destroy(target);
+        }
+
+        internal static void ClearSelection(GameObject target)
+        {
+            var details = DetailsScreen.Instance;
+            if (details != null && details.target != null && details.target.transform.IsChildOf(target.transform))
+            {
+                details.DeselectAndClose();
+                return;
+            }
             var tool = SelectTool.Instance;
             var selected = tool == null ? null : tool.selected;
             if (selected != null && selected.transform.IsChildOf(target.transform))
                 tool.Select(null, true);
-            Object.Destroy(target);
         }
     }
 }

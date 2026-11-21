@@ -3,9 +3,11 @@
     <TargetFramework>net48</TargetFramework>
     <OutputType>Exe</OutputType>
     <LangVersion>latest</LangVersion>
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../../../src/Core/Core.csproj"/>
+    <Compile Include="../StockOrderTape.cs"/>
     <Compile Include="../GuestScenario.cs;../../../../src/Game/Client/ColonyView.cs;../../../../src/Game/Client/ColonyViewExtensions.cs;../../../../src/Game/Network/*.cs"/>
     <Reference Include="com.rlabrecque.steamworks.net" HintPath="$(ONI_GAME_DIR)/OxygenNotIncluded_Data/Managed/com.rlabrecque.steamworks.net.dll" Private="true"/>
   </ItemGroup>

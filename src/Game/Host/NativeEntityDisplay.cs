@@ -7,6 +7,11 @@ using UnityEngine;
 
 namespace Queyang.Game
 {
+    internal sealed class NativeEntityIdentity : MonoBehaviour
+    {
+        internal int SaveId;
+    }
+
     internal static class NativeEntityDisplay
     {
         sealed class Observation
@@ -31,6 +36,7 @@ namespace Queyang.Game
             internal readonly List<ColonyEntity> Items = new List<ColonyEntity>();
             internal Guid Status;
             internal KSelectable Carrier;
+            internal NativeWearDisplay Clothing;
         }
 
         internal static void Apply(ColonyView view, WorldContainer world, Transform parent)
@@ -46,6 +52,7 @@ namespace Queyang.Game
                 int cell = Grid.XYToCell(x, y);
                 if (!Grid.IsValidCell(cell) || Grid.WorldIdx[cell] != world.id) continue;
                 present.Add(e.Id);
+                if (e.Kind==ColonyEntityKind.Item && !e.IsWorn) NativeWearDisplay.HideBaseline(e.Id);
                 if (e.Place != ColonyItemPlace.Ground)
                 {
                     if (active.TryGetValue(e.Id, out var previous) && previous.State.Place == ColonyItemPlace.Ground) Forget(e.Id);
@@ -105,7 +112,11 @@ namespace Queyang.Game
             foreach (var pair in locals)
                 if (pair.Key >= page.From && pair.Key <= page.Through && !present.Contains(pair.Key) &&
                     pair.Value.Kind != ColonyEntityKind.Storage && pair.Value.Kind != ColonyEntityKind.Construction)
+                {
+                    if (pair.Value.Place==ColonyItemPlace.Carried && pair.Value.Kind==ColonyEntityKind.Item)
+                        NativeWearDisplay.HideBaseline(pair.Key);
                     SetVisible(pair.Value.Object.GetComponent<KSelectable>(), false);
+                }
             expired.Clear();
             foreach (var pair in active)
             {
@@ -131,6 +142,7 @@ namespace Queyang.Game
             if (original == null || original.PrefabTag.GetHash() != e.Prefab) return null;
             var pickup = original.GetComponent<Pickupable>();
             if (pickup != null && pickup.storage != null) return null;
+            if (e.Kind==ColonyEntityKind.Item && original.GetComponent<Equippable>()?.isEquipped==true) return null;
             return original.GetComponent<KSelectable>();
         }
 
@@ -146,6 +158,7 @@ namespace Queyang.Game
             obj.transform.SetParent(parent, false);
             obj.transform.position = Grid.CellToPosCBC(cell, source.sceneLayer);
             obj.AddComponent<KPrefabID>().PrefabTag = tag;
+            obj.AddComponent<NativeEntityIdentity>().SaveId=e.Id;
             var anim = obj.AddComponent<KBatchedAnimController>();
             anim.AnimFiles = source.AnimFiles; anim.sceneLayer = source.sceneLayer; anim.fgLayer = source.fgLayer;
             anim.initialAnim = source.initialAnim; anim.defaultAnim = source.defaultAnim;
@@ -233,7 +246,7 @@ namespace Queyang.Game
                 {
                     var carrier = NativeWorldMirror.GetDupeSelectable(e.OwnerId);
                     if (carrier == null) continue;
-                    c = new Cargo { Carrier = carrier };
+                    c = new Cargo { Carrier = carrier, Clothing = new NativeWearDisplay(carrier) };
                     if (cargoStatus == null)
                     {
                         cargoStatus = new StatusItem("QueyangHostCargo", "携带物和装备", "携带物和装备", "", StatusItem.IconType.Info,
@@ -248,7 +261,10 @@ namespace Queyang.Game
             }
             expired.Clear();
             foreach (var pair in cargo)
+            {
+                pair.Value.Clothing.Apply(pair.Value.Items);
                 if (pair.Value.Carrier == null || pair.Value.Items.Count == 0) expired.Add(pair.Key);
+            }
             foreach (int id in expired)
             {
                 var c = cargo[id];
@@ -273,7 +289,7 @@ namespace Queyang.Game
         static void SetVisible(KSelectable select, bool visible)
         {
             if (select == null || !(visible ? hidden.Remove(select) : hidden.Add(select))) return;
-            if (!visible && select.IsSelected && SelectTool.Instance != null) SelectTool.Instance.Select(null);
+            if (!visible && select.IsSelected) NativeWorldMirror.ClearSelection(select.gameObject);
             select.IsSelectable = visible; select.GetComponent<KBatchedAnimController>()?.SetVisiblity(visible);
         }
         static void Forget(int id)
@@ -291,8 +307,10 @@ namespace Queyang.Game
         {
             expired.Clear(); expired.AddRange(active.Keys);
             foreach (int id in expired) Forget(id);
-            foreach (var c in cargo.Values) if (c.Carrier != null) c.Carrier.RemoveStatusItem(c.Status);
+            foreach (var c in cargo.Values)
+                if (c.Carrier != null) { c.Clothing.Apply(null); c.Carrier.RemoveStatusItem(c.Status); }
             cargo.Clear();
+            NativeWearDisplay.RestoreBaseline();
             expired.Clear(); locals.Clear(); hidden.Clear(); present.Clear();
         }
     }

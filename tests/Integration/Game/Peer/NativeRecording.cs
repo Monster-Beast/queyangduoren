@@ -214,6 +214,9 @@ namespace Queyang.Integration
         private readonly string printedVitals, printedProfile;
         private readonly int printedId;
         private bool showingPrinted;
+        private readonly StockOrderTape[] stockOrders;
+        private int stockIndex = -1;
+        private bool stockIssued;
         private readonly string staleLadder;
         private readonly Dictionary<string,string> management=new Dictionary<string,string>();
         private double orderFirstSentAt=double.NaN;
@@ -221,6 +224,7 @@ namespace Queyang.Integration
         internal NativeReplay(string dir, Action<string> log, Func<double> now)
         {
             this.log=log; this.now=now; save=Path.Combine(dir,"baseline.sav");
+            stockOrders=StockOrderTape.Load(dir);
             long saveBytes=new FileInfo(save).Length;
             if (saveBytes<1 || saveBytes>Queyang.Core.Wire.MaxSnapshot) throw new InvalidDataException("Bad native recording save size.");
             first=ReadView(dir,"first.view");
@@ -298,6 +302,7 @@ namespace Queyang.Integration
         internal Stream OpenSave()
         {
             showingPrinted=false;
+            stockIndex=-1; stockIssued=false;
             ordered=false; completed=false; menuStep=0; menuRead=false; orderFirstSentAt=double.NaN;
             log("NATIVE_REPLAY_BASELINE");
             log("NATIVE_REPLAY_JOIN " + (++joins));
@@ -306,6 +311,18 @@ namespace Queyang.Integration
 
         internal string Command(string action,int x,int y)
         {
+            if (completed && stockOrders!=null)
+            {
+                int next=stockIndex+1;
+                if (next<stockOrders.Length && (stockIndex<0 || stockIssued) && action=="fixture/order/"+next)
+                { stockIndex=next; stockIssued=false; return "OK recorded stock tool viewport"; }
+                if (stockIndex>=0)
+                {
+                    var row=stockOrders[stockIndex];
+                    if (!stockIssued && action==row.Command && x==row.X && y==row.Y)
+                    { stockIssued=true; log("NATIVE_REPLAY_STOCK_TOOL "+action); return row.Reply; }
+                }
+            }
             if (management.TryGetValue(action,out var value)) return value;
             if (action=="nm/overview" || action=="nm/research" || action.StartsWith("nm/schedules/",StringComparison.Ordinal))
                 return "NM1/unrecorded";
@@ -345,6 +362,7 @@ namespace Queyang.Integration
 
         internal byte[] Capture(int x,int y)
         {
+            if (stockIndex>=0) return stockIssued ? stockOrders[stockIndex].After : stockOrders[stockIndex].Before;
             if (showingPrinted) return printedView;
             if (!ordered) return first;
             if (double.IsNaN(orderFirstSentAt))

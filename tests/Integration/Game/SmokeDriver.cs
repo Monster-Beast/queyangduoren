@@ -42,6 +42,7 @@ namespace Queyang.Integration
         private bool featuresRun;
         private NativeEcology ecology;
         private NativeFoodChain foodChain;
+        private GameObject printed;
         private NativeOrderChecks orderChecks;
         private bool readonlyFixture, steamLobby;
         private SteamSocketPairCheck steamPair;
@@ -174,7 +175,16 @@ namespace Queyang.Integration
                         if (!ecology.Tick()) return;
                         foodChain = new NativeFoodChain(recording,Log);
                     }
-                    if (!foodChain.Tick()) return;
+                    if (printed == null)
+                    {
+                        if (!foodChain.Tick()) return;
+                        var d = Components.LiveMinionIdentities.Items.First(person => person != null &&
+                            ClusterUtil.GetMyWorldId(person)==ClusterManager.Instance.activeWorldId);
+                        Grid.CellToXY(Grid.PosToCell(d),out int x,out int y);
+                        printed=NativePrintedDupe.Print(x,y);
+                        return;
+                    }
+                    if (orderChecks == null && !NativePrintedDupe.Record(printed,recording,Log)) return;
                 }
                 if (orderChecks==null) orderChecks=new NativeOrderChecks(Log);
                 if (!orderChecks.Tick()) return;

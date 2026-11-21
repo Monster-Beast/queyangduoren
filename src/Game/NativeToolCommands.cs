@@ -38,18 +38,36 @@ namespace Queyang.Game
             if (selected == null) return;
             var prefab = selected.GetComponent<KPrefabID>();
             var marker = selected.GetComponent<NativeBuildingIdentity>();
-            int id = marker != null ? marker.SaveId : prefab != null ? prefab.InstanceID : -1;
+            var entity = selected.GetComponent<NativeEntityIdentity>();
+            int id = marker != null ? marker.SaveId : entity != null ? entity.SaveId : prefab != null ? prefab.InstanceID : -1;
             if (id <= 0) { NativeGuestFeedback.Show("正在等待房主确认这个对象。"); return; }
             var building = selected.GetComponent<Building>();
             int cell = marker != null ? marker.Cell : building != null ? building.GetCell() : Grid.PosToCell(selected);
-            if (action.StartsWith("priority", StringComparison.Ordinal))
+            if (action != "sweep")
             {
-                var priority = selected.GetComponent<Prioritizable>();
-                if (priority == null || priority.GetMasterPriority().priority_class != PriorityScreen.PriorityClass.basic)
-                { NativeGuestFeedback.Show("请使用原版优先级工具为此处下单。"); return; }
-                action += "/" + priority.GetMasterPriority().priority_value;
+                if (!TrySample(cell, out var sample) || sample.TargetId <= 0)
+                { NativeGuestFeedback.Show("正在等待房主确认这个订单。"); return; }
+                bool separate=marker==null && building==null && sample.OrderTargetId>0;
+                int token=separate?sample.OrderTargetId:sample.TargetId;
+                int priority=separate?sample.SeparateOrderPriority:sample.OrderPriority;
+                if (action.StartsWith("priority", StringComparison.Ordinal))
+                {
+                    if (priority == 0) { NativeGuestFeedback.Show("此对象没有可修改的普通优先级。"); return; }
+                    action += "/" + priority;
+                }
+                action += ":" + token;
             }
             Enqueue("object/" + id + "/" + action, cell);
+        }
+        static bool TrySample(int cell, out ColonyCell sample)
+        {
+            sample = default;
+            if (!Grid.IsValidCell(cell)) return false;
+            Grid.CellToXY(cell, out int x, out int y);
+            var tile = lastTiles.Find(t => x >= t.X && y >= t.Y && x < t.X+ColonyView.Width && y < t.Y+ColonyView.Height);
+            if (tile == null) return false;
+            sample = tile.Cells[(y-tile.Y)*ColonyView.Width+x-tile.X];
+            return (sample.Flags & 1) != 0;
         }
         internal static void Enqueue(string action, int cell)
         {
@@ -59,13 +77,13 @@ namespace Queyang.Game
             Grid.CellToXY(cell, out int x, out int y);
             if (action == "cancel" || action == "deconstruct" || action.StartsWith("priority", StringComparison.Ordinal))
             {
-                var tile = lastTiles.Find(t => x >= t.X && y >= t.Y && x < t.X+ColonyView.Width && y < t.Y+ColonyView.Height);
-                if (tile == null) { NativeGuestFeedback.Show("正在等待这一区域的数据。"); return; }
-                var sample = tile.Cells[(y-tile.Y)*ColonyView.Width+x-tile.X];
-                int id = sample.TargetId;
+                if (!TrySample(cell, out var sample)) { NativeGuestFeedback.Show("正在等待这一区域的数据。"); return; }
+                bool separate=action!="deconstruct" && sample.OrderTargetId>0;
+                int id = separate?sample.OrderTargetId:sample.TargetId;
+                int priority=separate?sample.SeparateOrderPriority:sample.OrderPriority;
                 if (id < 1) { NativeGuestFeedback.Show("此处没有可修改的订单或建筑。"); return; }
-                if (action.StartsWith("priority", StringComparison.Ordinal) && sample.OrderPriority > 0)
-                    action += "/" + sample.OrderPriority;
+                if (action.StartsWith("priority", StringComparison.Ordinal) && priority > 0)
+                    action += "/" + priority;
                 action += ":" + id;
             }
             if (pending.Count >= 256) { NativeGuestFeedback.Show("已选格子过多，请等待当前订单发送后再试。"); return; }
