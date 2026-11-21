@@ -50,7 +50,7 @@ $copy=Get-CheckedPath $run (Join-Path $run 'GameCopy')
 Write-Output "Run directory: $run"
 $exe=Join-Path $copy OxygenNotIncluded.exe
 $processes=@()
-$scopedEnv=@('QY_NATIVE_RECORDING','QY_SMOKE_ROOT','QY_SMOKE_ROLE','QY_SMOKE_REPORT','QY_SMOKE_SAVE','QY_SMOKE_ENDPOINT','QY_SMOKE_FINGERPRINT','QY_SMOKE_PERSISTENCE','QY_SMOKE_STEAM_LOBBY','QY_SMOKE_SOAK','QY_SMOKE_CAPTURE','ONI_COOP_BIND','SteamAppId','SteamGameId')
+$scopedEnv=@('QY_NATIVE_RECORDING','QY_SMOKE_ROOT','QY_SMOKE_ROLE','QY_SMOKE_REPORT','QY_SMOKE_SAVE','QY_SMOKE_ENDPOINT','QY_SMOKE_FINGERPRINT','QY_SMOKE_PERSISTENCE','QY_SMOKE_STEAM_LOBBY','QY_SMOKE_SOAK','QY_SMOKE_CAPTURE','QY_SMOKE_HOST_CAPTURE','ONI_COOP_BIND','SteamAppId','SteamGameId')
 $previousEnv=@{}
 foreach ($name in $scopedEnv) { $previousEnv[$name]=[Environment]::GetEnvironmentVariable($name) }
 try {
@@ -96,6 +96,7 @@ try {
     $env:QY_SMOKE_STEAM_LOBBY=if($SteamLobby){'1'}else{'0'}
     $env:QY_SMOKE_PERSISTENCE=if($Persistence){'1'}else{'0'}
     $env:QY_SMOKE_CAPTURE=if($LifecycleScreenshot){'1'}else{'0'}
+    $env:QY_SMOKE_HOST_CAPTURE=if($SecondGame){'1'}else{'0'}
     if ($NativeRecord) { $env:QY_NATIVE_RECORDING=Join-Path $run 'native-recording'; [IO.Directory]::CreateDirectory($env:QY_NATIVE_RECORDING) | Out-Null }
     if ($NativeReplay) { $env:QY_NATIVE_RECORDING=Get-CheckedPath $qaRoot (Resolve-Path -LiteralPath $NativeReplay).Path }
     $roles=if ($NativeReplay -or $NativeEndpoint) { 'guest-native' } elseif ($Lifecycle) { 'guest-lifecycle' } elseif ($GuestOnly) { 'guest-readonly' } elseif ($SteamLobby) { 'host' } else { @('host','client') }
@@ -152,7 +153,7 @@ try {
             if ($NativeRecord) { $peerOptions.ArgumentList=@('--native-record') }; if ($SoakSeconds -gt 0) { $peerOptions.ArgumentList=@('--soak',"$SoakSeconds") }
             $process=Start-Process -FilePath $peerExe -WorkingDirectory $run -PassThru -WindowStyle Hidden @peerOptions
         } else {
-            $displayArgs=if ($LifecycleScreenshot -or $NativeReplay -or $NativeEndpoint -or ($SecondGame -and $role -eq 'client')) { @('-screen-width','1280','-screen-height','800') } else { @('-batchmode') }
+            $displayArgs=if ($LifecycleScreenshot -or $NativeReplay -or $NativeEndpoint -or $SecondGame -or ($NativeRecord -and $role -eq 'host')) { @('-screen-width','1280','-screen-height','800') } else { @('-batchmode') }
             $playerArgs=@($displayArgs) + @('-screen-fullscreen','0','-logFile',('"' + $log + '"'))
             $process=Start-Process -FilePath $exe -WorkingDirectory $copy -ArgumentList $playerArgs -PassThru -WindowStyle Hidden
         }
@@ -166,7 +167,7 @@ try {
             if (Test-Path -LiteralPath $env:QY_SMOKE_REPORT) {
                 $lines=Get-Content -LiteralPath $env:QY_SMOKE_REPORT
                 if ($lines -match '^FAIL ') { throw "Game smoke $role failed. See report in $run" }
-                if ($role -in @('guest-native','client') -and $lines -match '^NATIVE_RESTART_REQUIRED') {
+                if (($role -in @('guest-native','client') -or (($NativeRecord -or $SecondGame) -and $role -eq 'host')) -and $lines -match '^NATIVE_RESTART_REQUIRED') {
                     if ($restarted) { throw 'The fresh isolated profile requested a second restart.' }
                     if (!$process.WaitForExit(15000)) { throw 'Native restart requested but game did not quit.' }
                     $restarted=$true
@@ -179,10 +180,11 @@ try {
                     $entry[0].enabled=$true
                     $entry[0].enabledForDlc=@('')
                     [IO.File]::WriteAllText($isolatedDb,($settings | ConvertTo-Json -Depth 12))
-                    Move-Item -LiteralPath $env:QY_SMOKE_REPORT -Destination (Join-Path $run 'first-launch.report')
-                    Move-Item -LiteralPath $log -Destination (Join-Path $run 'first-launch.log')
+                    $firstLaunch=if($SecondGame){"$role-first-launch"}else{'first-launch'}
+                    Move-Item -LiteralPath $env:QY_SMOKE_REPORT -Destination (Join-Path $run "$firstLaunch.report")
+                    Move-Item -LiteralPath $log -Destination (Join-Path $run "$firstLaunch.log")
                     $process=Start-Process -FilePath $exe -WorkingDirectory $copy -ArgumentList $playerArgs -PassThru -WindowStyle Hidden
-                    $processes+=$process
+                    $processes[$processes.Count-1]=$process
                     continue
                 }
                 if ($SoakSeconds -and $role -eq 'client' -and $lines -match '^SOAK three concurrent guests Live') {

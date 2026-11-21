@@ -14,14 +14,15 @@ namespace Queyang.Integration
     {
         enum Stage { Join, Load, Pan, Overlay, Details, Screenshot, Order, Completion, ProxySelect, ProxyOrder, ProxyCancel, ProxyDone, Exit }
         readonly Action<string> log;
-        readonly string screenshot, recording;
+        readonly string recording;
         Stage stage;
         int target;
         float until, nextDialogCheck;
         Vector3 originalCamera;
         KSelectable dupe;
         HashedString originalOverlay;
-        bool restarting;
+        readonly FixtureDialogs dialogs;
+        readonly FixtureFrame guestFrame, ladderFrame;
         int ladderCell;
         NativeProxySettings proxy;
         string engineException;
@@ -29,7 +30,9 @@ namespace Queyang.Integration
         public NativeScenario(Action<string> log, string report)
         {
             this.log = log;
-            screenshot = Path.Combine(Path.GetDirectoryName(report), "native-guest.png");
+            dialogs = new FixtureDialogs(log);
+            guestFrame = new FixtureFrame(Path.Combine(Path.GetDirectoryName(report), "native-guest.png"));
+            ladderFrame = new FixtureFrame(Path.Combine(Path.GetDirectoryName(report), "native-guest-ladder.png"));
             recording = Environment.GetEnvironmentVariable("QY_NATIVE_RECORDING");
             Application.logMessageReceived += OnUnityLog;
         }
@@ -39,71 +42,15 @@ namespace Queyang.Integration
             if (level == LogType.Exception && engineException == null) engineException = message + "\n" + stack;
         }
 
-        // ConfirmDialogScreen stores these LocText references privately. Read the
-        // rendered text so a restart request or mixed mod errors cannot match.
-        static string DialogText(ConfirmDialogScreen dialog, string field)
-        {
-            object label = AccessTools.Field(typeof(ConfirmDialogScreen), field).GetValue(dialog);
-            return ((string)AccessTools.Property(label.GetType(), "text").GetValue(label, null)).Trim();
-        }
-
-        bool CheckDialogs()
-        {
-            if (UnityEngine.Object.FindAnyObjectByType<ReportErrorDialog>() != null)
-                throw new Exception("ONI opened its crash reporting dialog");
-            foreach (var screen in UnityEngine.Object.FindObjectsByType<KScreen>(FindObjectsSortMode.None))
-            {
-                if (!screen.gameObject.activeInHierarchy || !screen.IsActive()) continue;
-                if (screen is ConfirmDialogScreen dialog)
-                {
-                    string title = DialogText(dialog, "titleText");
-                    string message = DialogText(dialog, "popupMessage");
-                    const string fixture = "Queyang Co-op (Development)";
-                    string upgrade = STRINGS.UI.FRONTEND.MOD_EVENTS.VERSION_UPDATE + ": " + fixture + "\n" +
-                        STRINGS.UI.FRONTEND.MOD_EVENTS.REQUIRES_RESTART + ": " + fixture + "\n";
-                    string normalized = message.Replace("\r\n", "\n");
-                    if (title == STRINGS.UI.FRONTEND.MOD_DIALOGS.MOD_EVENTS.TITLE.text &&
-                        (normalized == string.Format(STRINGS.UI.FRONTEND.MOD_DIALOGS.RESTART.MESSAGE.text, upgrade).Trim() ||
-                         normalized == string.Format(STRINGS.UI.FRONTEND.MOD_DIALOGS.RESTART.DEV_MESSAGE.text, upgrade).Trim()))
-                    {
-                        restarting = true;
-                        if (CoopSession.IsClient) CoopSession.Disconnect();
-                        log("NATIVE_RESTART_REQUIRED");
-                        Application.Quit();
-                        return true;
-                    }
-                    string installed = STRINGS.UI.FRONTEND.MOD_EVENTS.INSTALLED + ": ";
-                    string template = STRINGS.UI.FRONTEND.MOD_DIALOGS.MOD_EVENTS.DEV_MESSAGE.text;
-                    string footer = template.StartsWith("{0}", StringComparison.Ordinal) ? template.Substring(3).Trim() : "";
-                    string events = message;
-                    int lastLine = message.LastIndexOf('\n');
-                    if (lastLine >= 0 && footer.Length > 0 && message.Substring(lastLine + 1).Trim() == footer)
-                        events = message.Substring(0, lastLine);
-                    string[] lines = events.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-                    var buttonObject = (GameObject)AccessTools.Field(typeof(ConfirmDialogScreen), "confirmButton").GetValue(dialog);
-                    var buttons = dialog.GetComponentsInChildren<KButton>().Where(b => b.gameObject.activeInHierarchy).ToArray();
-                    if (title != STRINGS.UI.FRONTEND.MOD_DIALOGS.MOD_EVENTS.TITLE.text || lines.Length == 0 ||
-                        !lines.All(s => s.StartsWith(installed, StringComparison.Ordinal) && s.Length > installed.Length) ||
-                        buttons.Length != 1 || buttons[0] != buttonObject.GetComponent<KButton>())
-                        throw new Exception("Unexpected confirmation dialog: " + title + " / " + message);
-                    buttons[0].SignalClick(KKeyCode.Mouse0);
-                    log("NATIVE_INSTALL_NOTIFICATION_CONFIRMED count=" + lines.Length);
-                    return true;
-                }
-                if (screen is CustomizableDialogScreen || screen is InfoDialogScreen)
-                    throw new Exception("Unexpected game dialog: " + screen.GetType().Name + " / " + screen.name);
-            }
-            return false;
-        }
-
         public bool Update()
         {
+            if (dialogs.Restarting) return false;
             if (engineException != null) throw new InvalidOperationException("Unity logged an exception during native play or teardown: " + engineException);
-            if (restarting) return false;
+
             if (Time.unscaledTime >= nextDialogCheck || stage == Stage.Join || stage == Stage.Details)
             {
                 nextDialogCheck = Time.unscaledTime + .25f;
-                if (CheckDialogs()) return false;
+                if (dialogs.Check()) return false;
             }
             if (stage != Stage.Join && stage != Stage.Exit && !CoopSession.IsNativeClient)
                 throw new Exception("Native join failed: " + CoopSession.Status);
@@ -159,11 +106,11 @@ namespace Queyang.Integration
                         break;
                     }
                     log("NATIVE_DUPLICANT_DETAILS target=" + dupe.GetProperName());
-                    ScreenCapture.CaptureScreenshot(screenshot);
+                    guestFrame.Capture();
                     stage = Stage.Screenshot;
                     break;
                 case Stage.Screenshot:
-                    if (!File.Exists(screenshot) || CoopSession.View == null) break;
+                    if (!guestFrame.Complete || CoopSession.View == null) break;
                     PlayerController.Instance.ActivateTool(DigTool.Instance);
                     Vector3 pos = Grid.CellToPosCCC(target, Grid.SceneLayer.Move);
                     DigTool.Instance.OnLeftClickDown(pos);
@@ -210,7 +157,15 @@ namespace Queyang.Integration
                     break;
                 case Stage.ProxyDone:
                     if (!ProxyButton("指派拆除建筑", false)) { CheckProxyTimeout(); break; }
+                    if (!ladderFrame.Requested)
+                    {
+                        if (dialogs.Check()) break;
+                        ladderFrame.Capture();
+                        break;
+                    }
+                    if (!ladderFrame.Complete) break;
                     log("NATIVE_PROXY_LADDER_STOCK_MENU hostConfirmedOrder=True hostConfirmedCancel=True");
+                    log("NATIVE_LADDER_HUD_SAVED");
                     Leave();
                     break;
                 case Stage.Exit:

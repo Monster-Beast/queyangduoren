@@ -41,10 +41,20 @@ namespace Queyang.Integration
         private SteamSocketPairCheck steamPair;
         private GuestLifecycle lifecycle;
         private NativeScenario native;
+        private FixtureDialogs hostDialogs;
+        private FixtureFrame hostFrame;
+        private float hostHudSince;
+        private bool hostPublished;
         private void Awake()
         {
             report = Environment.GetEnvironmentVariable("QY_SMOKE_REPORT");
             isHost = Environment.GetEnvironmentVariable("QY_SMOKE_ROLE") == "host";
+            if (isHost && (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("QY_NATIVE_RECORDING")) ||
+                           Environment.GetEnvironmentVariable("QY_SMOKE_HOST_CAPTURE") == "1"))
+            {
+                hostDialogs = new FixtureDialogs(Log);
+                hostFrame = new FixtureFrame(Path.Combine(Path.GetDirectoryName(report), "host-native.png"));
+            }
             readonlyFixture = Environment.GetEnvironmentVariable("QY_SMOKE_ROLE") == "guest-readonly";
             steamLobby = Environment.GetEnvironmentVariable("QY_SMOKE_STEAM_LOBBY") == "1";
             Application.runInBackground = true;
@@ -76,6 +86,7 @@ namespace Queyang.Integration
         {
             if (!loading)
             {
+                if (hostDialogs != null && hostDialogs.Check()) return;
                 loading = true;
                 KPlayerPrefs.SetString("SavesDefaultToCloud","Disabled");
                 SaveLoader.SetActiveSaveFilePath(Environment.GetEnvironmentVariable("QY_SMOKE_SAVE"));
@@ -92,7 +103,12 @@ namespace Queyang.Integration
                 hostReady = true;
                 SpeedControlScreen.Instance.SetSpeed(soak ? 0 : 2);
                 hostTime = GameClock.Instance.GetTime();
-                if (!steamLobby) Log("HOST_READY " + CoopSession.Endpoint);
+            }
+            if (!steamLobby && !hostPublished)
+            {
+                if (hostFrame != null && !CaptureHostHud()) return;
+                hostPublished = true;
+                Log("HOST_READY " + CoopSession.Endpoint);
             }
             if (steamLobby)
             {
@@ -137,6 +153,27 @@ namespace Queyang.Integration
                 step = 1;
                 Log("HOST_SIM_ADVANCED");
             }
+        }
+
+        private bool CaptureHostHud()
+        {
+            if (hostDialogs.Check(loadedVanillaHost: true)) { hostHudSince = 0; return false; }
+            if (hostFrame.Requested)
+            {
+                if (!hostFrame.Complete) return false;
+                var lens = CameraController.Instance;
+                Log("NATIVE_HOST_HUD " + Screen.width + "x" + Screen.height + " cycle=" + (1 + GameClock.Instance.GetCycle()) +
+                    " camera=" + lens.transform.position + " zoom=" + lens.OrthographicSize + " dupes=" + Components.LiveMinionIdentities.Items.Count);
+                return true;
+            }
+            if (!global::Game.Instance.GameStarted() || global::Game.Instance.IsLoading() || CameraController.Instance?.baseCamera == null ||
+                PlanScreen.Instance == null || !PlanScreen.Instance.gameObject.activeInHierarchy ||
+                SelectTool.Instance == null || ToolMenu.Instance == null || !ToolMenu.Instance.gameObject.activeInHierarchy ||
+                PauseScreen.Instance != null && PauseScreen.Instance.IsActive()) return false;
+            if (hostHudSince == 0) hostHudSince = Time.realtimeSinceStartup;
+            if (Time.realtimeSinceStartup - hostHudSince < .5f) return false;
+            hostFrame.Capture();
+            return false;
         }
         private void GuestStep()
         {
