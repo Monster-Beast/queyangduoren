@@ -1,6 +1,10 @@
 # 传输、安装与真实 ONI 运行记录
 
-2026-11-21，Windows 版 Steam，Steam depot build 24423041，Klei build 744825。开发目标为 net48。程序集指纹可通过 `tools/doctor.ps1` 重新采集，本轮 Assembly-CSharp.dll 的 SHA-256 为 `A58E04D0FFDF89B86FB28B71AD900625B3B539DB30D67F8C6269F73A9F5AE599`。
+2026-11-21 至 2026-11-22，Windows 版 Steam，Steam 安装清单 buildid 24423041，Klei build 744825。开发目标为 net48。程序集指纹可通过 `tools/doctor.ps1` 重新采集，本轮 Assembly-CSharp.dll 的 SHA-256 为 `A58E04D0FFDF89B86FB28B71AD900625B3B539DB30D67F8C6269F73A9F5AE599`。
+
+## 试玩使用的候选包
+
+仓库中的 `dist/QueyangCoop-0.1.0-dev.zip` 共 57,520 字节，SHA-256 为 `C1F5A7AEB6C039362C371D70C9E7FB9CD29DCFEB583DC578B2598B6CCAD1F92C`。以本次核对时的 `artifacts/QueyangCoop-dev.zip` 比对，两份文件哈希一致。两台机器使用相同 ZIP，在 Klei build 744825 启用基础游戏和本 Mod。手动安装时四个文件都放在同一个 Mod 目录下，或从仓库用安装脚本显式指定 dist 中的包。安装和双方的游戏菜单入口见[项目首页](../../../README.md)。
 
 ## 可复现的基础检查
 
@@ -35,7 +39,7 @@ $save = Read-Host '输入可复制的 Vanilla .sav 完整路径'
 
 使用真实 Unity 客机连接单独的测试夹具房主。夹具提供合成氧气网格和检查操作回执。客机从主菜单加入，生成生产面板的 `Co-op viewport` 纹理，显示 384 格，镜头从 (100,100) 重新订阅到 (108,102)，在 (110,104) 提交检查操作并收到确认。测试期间每帧检查 `Game.Instance` 为空，断开后客户角色清理通过。这一轮测到了实际游戏内的视图、命令和退房路径；网络另一端提供的是合成世界。
 
-视图协议 v4 复跑通过，包 SHA-256 为 `A99D2EDD8DE84AA6DF88B520A3EB4D3A9BE4B32D1B38E334785BBAC8EF4E8956`。引擎日志中的角色退出计数为 `guest-closed simStep=0 findChore=0 setChore=0 saveAttempts=0 worldStarts=0 views=2`，两次成功应用的视图分别来自初次订阅和移动镜头后的订阅。
+视图协议 v4 的一轮早期复测通过，该轮测试包 SHA-256 为 `A99D2EDD8DE84AA6DF88B520A3EB4D3A9BE4B32D1B38E334785BBAC8EF4E8956`。引擎日志中的角色退出计数为 `guest-closed simStep=0 findChore=0 setChore=0 saveAttempts=0 worldStarts=0 views=2`，两次成功应用的视图分别来自初次订阅和移动镜头后的订阅。当前候选包与其他复测结果见[验收汇总](../status.md)。
 
 ## 真实 Steam 单账户建房
 
@@ -44,5 +48,7 @@ $save = Read-Host '输入可复制的 Vanilla .sav 完整路径'
 ~~~
 
 授权 Steam 客户端中的真实游戏副本调用生产 `Host(true)` 成功。API 返回有效的 Lobby ID，房主身份与当前 Steam 用户相同，人数上限为 4，当前人数为 1，房间元数据匹配。测试随后调用生产 Disconnect 清理房间。全程没有发送好友邀请。
+
+2026-11-22 用最终候选包复测。真实游戏内的 `CreateSocketPair` 选用了原生网络回环（`nativeNetworkLoopback=True`）。两个句柄分别收到了 44 字节的 QYMP Ping 和 Pong，双向校验成功。随后关闭两个句柄并退出好友房，运行器返回 0，原始文件哈希检查通过。本地报告位于 `artifacts/qa/game-ab0e62bd42f240d3b894ea5acadd87f5/host.report`。跨账号邀请、远端身份和跨机 P2P 路径各需单独验收。
 
 当前机器上曾通过 `-SecondGame` 尝试并行启动第二个 Unity 实例，第二个进程在产生引擎日志前已退出，因此未取得“双 Unity 客机经 Steam 好友邀请加入”的证据。T07 仍需两台具备独立 Steam 账号的测试环境完成邀请、P2P 建连和重新邀请。四个 TCP 端点和真实 Steam 四人会话应分别记录。首次实测还发现快照中的复制人 ID 未填充导致握手后断开，修正后上述真实挖掘与建造流程通过。

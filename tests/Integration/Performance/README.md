@@ -2,7 +2,7 @@
 
 此测试复用一轮已完成的三客机长稳数据，另启一个原版单人游戏进程作为对照。两边使用同一台机器、相同 Steam 游戏构建、同一个初始存档、相同游戏速度（原版索引 0，即 1×）和 Unity batchmode。单人过程中只加载测试采样驱动。对照期间关闭其他游戏、基准和重负载程序。
 
-**保存输入指纹。** 在长稳运行中、三个 TCP 客机均已到达 Live 时执行下方命令。它对 QA 目录里的原始存档副本和游戏程序集取 SHA-256，生成同目录的 `soak-input.json`。长稳结束时其测试副本会自动清理。2026-11-21 这一轮已保存指纹，可直接进入第二步。
+**保存输入指纹。** 使用 `-SoakSeconds` 的运行器在三个 TCP 客机到达 Live 后，自动为存档副本和游戏程序集生成 `soak-input.json`，并在 `host-memory.csv` 记录 Windows 房主进程内存。仍使用旧运行器时可在长稳运行中执行下方命令补录输入指纹。长稳结束时其游戏和存档副本会自动清理。
 
 ~~~powershell
 .\tests\Integration\Performance\record-soak-input.ps1 -SoakRun .\artifacts\qa\game-857794fa46744b599f4df0e584dab06d

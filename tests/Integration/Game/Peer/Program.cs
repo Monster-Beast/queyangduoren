@@ -67,13 +67,7 @@ namespace Queyang.Integration
                 id => { room.Remove(id); log("READONLY_FIXTURE_DISCONNECTED " + id); }))
             {
                 room = new RoomHost(Environment.GetEnvironmentVariable("QY_SMOKE_FINGERPRINT"), transport.Send,
-                    transport.Drop, (x,y) => {
-                        var v = new ColonyView { X=Math.Max(100,x), Y=Math.Max(100,y) };
-                        for (int i=0;i<v.Cells.Length;i++) v.Cells[i]=new ColonyCell {
-                            Element="Oxygen", Flags=65, Mass=2f, Temperature=300f
-                        };
-                        return v.Encode();
-                    }, (action,x,y) => {
+                    transport.Drop, FixtureViewport, (action,x,y) => {
                         log("READONLY_FIXTURE_COMMAND " + action + " " + x + "," + y);
                         return action=="inspect" ? "OK Test inspect" : "ERROR Unsupported fixture command";
                     }, () => clock.Elapsed.TotalSeconds);
@@ -87,6 +81,31 @@ namespace Queyang.Integration
                 }
             }
             return 0;
+        }
+
+        // Fixed, synthetic colony for observing UI layers. All objects keep their
+        // world coordinates and target IDs when a guest pans or joins again.
+        private static byte[] FixtureViewport(int x,int y)
+        {
+            var v = new ColonyView { X=Math.Min(140, Math.Max(100,x)), Y=Math.Min(125, Math.Max(100,y)),
+                Cycle=4, CycleFraction=.3f, Speed=1 };
+            for (int i=0; i<v.Cells.Length; i++)
+            {
+                int cx=v.X+i%ColonyView.Width, cy=v.Y+i/ColonyView.Width;
+                var cell=new ColonyCell { Flags=65, Element="Oxygen", R=117, G=168, B=203, Mass=2, Temperature=300 };
+                if (cy<105 || cx<=102 && cy<111)
+                    cell=new ColonyCell { Flags=3, Element="Sandstone", R=183, G=139, B=95, Mass=700, Temperature=295 };
+                else if (cx>=106 && cx<=110 && cy<107)
+                    cell=new ColonyCell { Flags=5, Element="Water", R=53, G=132, B=205, Mass=650, Temperature=291 };
+                if (cx==113 && cy>=105 && cy<113)
+                { cell.Flags |= 16; cell.Building="梯子"; cell.BuildingStyle=1; cell.TargetId=cy; }
+                if (cy==105 && cx>=115 && cx<121)
+                { cell.Flags |= 32; cell.Building="砖块"; cell.BuildingStyle=2; cell.Progress=45; cell.TargetId=1000+cx; }
+                v.Cells[i]=cell;
+            }
+            if (114>=v.X && 114<v.X+ColonyView.Width && 106>=v.Y && 106<v.Y+ColonyView.Height)
+                v.Dupes=new[] { new ColonyDupe { Id=1, X=114, Y=106, SubX=128, Name="测试复制人", Activity="搬运" } };
+            return v.Encode();
         }
     }
 }

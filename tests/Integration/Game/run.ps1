@@ -143,15 +143,37 @@ try {
             if ($SoakSeconds -gt 0) { $peerOptions.ArgumentList=@('--soak',"$SoakSeconds") }
             $process=Start-Process -FilePath $peerExe -WorkingDirectory $run -PassThru -WindowStyle Hidden @peerOptions
         } else {
-            $process=Start-Process -FilePath $exe -WorkingDirectory $copy -ArgumentList @('-batchmode','-screen-fullscreen','0','-logFile',('"' + $log + '"')) -PassThru -WindowStyle Hidden
+            $displayArgs=if ($LifecycleScreenshot) { @('-screen-width','1280','-screen-height','800') } else { @('-batchmode') }
+            $playerArgs=@($displayArgs) + @('-screen-fullscreen','0','-logFile',('"' + $log + '"'))
+            $process=Start-Process -FilePath $exe -WorkingDirectory $copy -ArgumentList $playerArgs -PassThru -WindowStyle Hidden
         }
         $processes += $process
         $timer=[Diagnostics.Stopwatch]::StartNew()
+        $sampleAt=0
+        $savedManifest=$false
         $done=if($role -eq 'host' -and !$SteamLobby) { '^HOST_READY' } else { '^PASS ' }
         while ($timer.Elapsed.TotalSeconds -lt $TimeoutSeconds -and !$process.HasExited) {
             if (Test-Path -LiteralPath $env:QY_SMOKE_REPORT) {
                 $lines=Get-Content -LiteralPath $env:QY_SMOKE_REPORT
                 if ($lines -match '^FAIL ') { throw "Game smoke $role failed. See report in $run" }
+                if ($SoakSeconds -and $role -eq 'client' -and $lines -match '^SOAK three concurrent guests Live') {
+                    if (!$savedManifest) {
+                        & (Join-Path $PSScriptRoot '../Performance/record-soak-input.ps1') -SoakRun $run | Out-Null
+                        $savedManifest=$true
+                    }
+                    if ($timer.Elapsed.TotalSeconds -ge $sampleAt) {
+                        $hostProcess=$processes[0]
+                        $hostProcess.Refresh()
+                        $sample=[pscustomobject]@{
+                            seconds=[int]([DateTime]::Now-$hostProcess.StartTime).TotalSeconds
+                            workingSetBytes=$hostProcess.WorkingSet64
+                            privateBytes=$hostProcess.PrivateMemorySize64
+                            cpuSeconds=[int]$hostProcess.TotalProcessorTime.TotalSeconds
+                        }
+                        $sample | Export-Csv -LiteralPath (Join-Path $run 'host-memory.csv') -Append -NoTypeInformation
+                        $sampleAt=$timer.Elapsed.TotalSeconds+50
+                    }
+                }
                 if ($lines -match $done) { break }
             }
             Start-Sleep -Milliseconds 500
@@ -172,7 +194,23 @@ try {
             }
             if ($LifecycleScreenshot) {
                 $image=Join-Path $run 'guest-lifecycle.png'
-                if (Test-Path -LiteralPath $image) { Write-Output "Unity framebuffer candidate for visual inspection: $image" }
+                if (Test-Path -LiteralPath $image) {
+                    Add-Type -AssemblyName System.Drawing
+                    $frame=[Drawing.Bitmap]::FromFile($image)
+                    try {
+                        $colors=[Collections.Generic.HashSet[int]]::new()
+                        for ($y=3;$y -lt $frame.Height -and $colors.Count -lt 8;$y+=11) {
+                            for ($x=3;$x -lt $frame.Width -and $colors.Count -lt 8;$x+=11) {
+                                [void]$colors.Add($frame.GetPixel($x,$y).ToArgb())
+                            }
+                        }
+                        if ($frame.Width -eq 1280 -and $frame.Height -eq 800 -and $colors.Count -ge 8) {
+                            Write-Output "1280x800 Unity framebuffer candidate for visual inspection: $image"
+                        } else {
+                            Write-Output "Inconclusive framebuffer: $($frame.Width)x$($frame.Height), sampled colors=$($colors.Count). Visual verification remains pending."
+                        }
+                    } finally { $frame.Dispose() }
+                }
                 else { Write-Output 'Unity did not produce a framebuffer image in this mode. Visual inspection remains pending.' }
             }
         }

@@ -38,6 +38,7 @@ namespace Queyang.Integration
         private float lastCheck;
         private bool featuresRun;
         private bool readonlyFixture, steamLobby;
+        private SteamSocketPairCheck steamPair;
         private GuestLifecycle lifecycle;
         private void Awake()
         {
@@ -91,12 +92,20 @@ namespace Queyang.Integration
             if (steamLobby)
             {
                 if (!CoopSession.IsHosting) throw new Exception(CoopSession.Status);
-                if (!ulong.TryParse(CoopSession.Endpoint,out ulong value)) return;
-                var lobby=new CSteamID(value);
-                if (!lobby.IsLobby() || SteamMatchmaking.GetLobbyOwner(lobby)!=SteamUser.GetSteamID() ||
-                    SteamMatchmaking.GetLobbyMemberLimit(lobby)!=4 || SteamMatchmaking.GetNumLobbyMembers(lobby)!=1 ||
-                    SteamMatchmaking.GetLobbyData(lobby,"queyang_coop")!="1") throw new Exception("Steam lobby metadata mismatch.");
-                Log("STEAM_HOST_READY ownerVerified=True memberLimit=4 members=1 metadata=1");
+                if (steamPair == null)
+                {
+                    if (!ulong.TryParse(CoopSession.Endpoint,out ulong value)) return;
+                    var lobby=new CSteamID(value);
+                    if (!lobby.IsLobby() || SteamMatchmaking.GetLobbyOwner(lobby)!=SteamUser.GetSteamID() ||
+                        SteamMatchmaking.GetLobbyMemberLimit(lobby)!=4 || SteamMatchmaking.GetNumLobbyMembers(lobby)!=1 ||
+                        SteamMatchmaking.GetLobbyData(lobby,"queyang_coop")!="1") throw new Exception("Steam lobby metadata mismatch.");
+                    Log("STEAM_HOST_READY ownerVerified=True memberLimit=4 members=1 metadata=1");
+                    steamPair = new SteamSocketPairCheck(Log);
+                }
+                try { if (!steamPair.Poll()) return; }
+                catch { steamPair.Dispose(); CoopSession.Disconnect(); throw; }
+                steamPair.Dispose();
+                Log("STEAM_PAIR_CLOSED");
                 CoopSession.Disconnect();
                 if (CoopSession.IsHosting) throw new Exception("Steam transport not closed.");
                 finished = true;
@@ -155,6 +164,7 @@ namespace Queyang.Integration
             }
         }
         private GuestScenario scenario;
+        private void OnDestroy() { steamPair?.Dispose(); }
 
         private void ReadonlyStep()
         {

@@ -20,7 +20,11 @@ namespace Queyang.Integration
         private readonly string save, initialHash, screenshot;
         private Stage stage;
         private int round = 1, firstViewFrame;
-        private float since, initialClock;
+        private float since, initialClock, paintReady;
+        private static GuestLifecycle waitingForLoad;
+        private int completedLoads;
+        private string loadedFile;
+        private bool loadSucceeded;
         public bool Done => stage == Stage.Done;
 
         public GuestLifecycle(Action<string> log, string report)
@@ -74,6 +78,21 @@ namespace Queyang.Integration
             if (count != 1) throw new Exception("Expected one active guest panel, found " + count);
         }
 
+        // An autosave can redirect GetActiveSaveFilePath to the original colony's next save
+        // destination. Observe the actual disk loader argument and completion for this request.
+        [HarmonyPatch(typeof(SaveLoader), "Load", typeof(string))]
+        private static class FileLoadObservation
+        {
+            private static void Postfix(string __0, bool __result)
+            {
+                var request = waitingForLoad;
+                if (request == null) return;
+                request.completedLoads++;
+                request.loadedFile = __0;
+                request.loadSucceeded = __result;
+            }
+        }
+
         public void Update()
         {
             if (Time.realtimeSinceStartup - since > 140)
@@ -89,6 +108,8 @@ namespace Queyang.Integration
                     CheckOffline();
                     CheckSave();
                     if (HasPanelTexture()) throw new Exception("Stale viewport before joining.");
+                    if (round == 1 && screenshot != null && (Screen.width != 1280 || Screen.height != 800))
+                        Screen.SetResolution(1280, 800, FullScreenMode.Windowed);
                     CoopSession.Join(Environment.GetEnvironmentVariable("QY_SMOKE_ENDPOINT"), false);
                     firstViewFrame = -1;
                     Set(Stage.FirstView);
@@ -97,11 +118,12 @@ namespace Queyang.Integration
                     if (CoopSession.View == null || !HasPanelTexture()) return;
                     var first = ColonyView.Decode(CoopSession.View);
                     if (first.X != 100 || first.Y != 100) throw new Exception("Stale subscription on fresh join.");
-                    if (firstViewFrame < 0) firstViewFrame = Time.frameCount;
+                    if (firstViewFrame < 0) { firstViewFrame = Time.frameCount; paintReady = Time.realtimeSinceStartup; }
                     if (Time.frameCount - firstViewFrame < 3) return;
                     if (round == 1 && screenshot != null)
                     {
-                        try { ScreenCapture.CaptureScreenshot(screenshot); log("SCREENSHOT_REQUESTED"); }
+                        if (Time.realtimeSinceStartup - paintReady < 1f) return;
+                        try { ScreenCapture.CaptureScreenshot(screenshot); log("SCREENSHOT_REQUESTED " + Screen.width + "x" + Screen.height); }
                         catch (Exception e) { log("SCREENSHOT_UNAVAILABLE " + e.GetType().Name); }
                     }
                     CoopSession.Subscribe(100 + round, 102 + round);
@@ -125,16 +147,26 @@ namespace Queyang.Integration
                     CheckSave();
                     KPlayerPrefs.SetString("SavesDefaultToCloud", "Disabled");
                     SaveLoader.SetActiveSaveFilePath(save);
+                    completedLoads = 0;
+                    loadedFile = null;
+                    loadSucceeded = false;
+                    waitingForLoad = this;
                     Set(Stage.Loading);
                     LoadingOverlay.Load(SaveLoader.LoadScene);
                     break;
                 case Stage.Loading:
                     CheckOffline();
+                    if (completedLoads == 0) return;
+                    if (completedLoads != 1 || !loadSucceeded || string.IsNullOrEmpty(loadedFile) ||
+                        !string.Equals(Path.GetFullPath(loadedFile), save, StringComparison.OrdinalIgnoreCase))
+                        throw new IOException("Lifecycle round " + round + ": expected one successful Fixture.sav load, observed " +
+                            completedLoads + "; success=" + loadSucceeded + "; file=" + Path.GetFileName(loadedFile));
                     if (global::Game.Instance == null || !global::Game.Instance.GameStarted() ||
                         ClusterManager.Instance?.activeWorld == null || GameClock.Instance == null || SpeedControlScreen.Instance == null ||
                         Components.LiveMinionIdentities.Items.Count == 0) return;
-                    if (!string.Equals(Path.GetFullPath(SaveLoader.GetActiveSaveFilePath()), save, StringComparison.OrdinalIgnoreCase))
-                        throw new Exception("Loaded a different save.");
+                    waitingForLoad = null;
+                    CheckSave();
+                    log("LIFECYCLE_LOAD_VERIFIED round=" + round + " file=Fixture.sav success=True hashUnchanged=True");
                     initialClock = GameClock.Instance.GetTime();
                     Set(Stage.Advancing);
                     break;

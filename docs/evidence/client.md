@@ -38,3 +38,18 @@
 T04/T05/T07/T08/T09 的真机结论取决于实际执行的场景。单元测试无法验证鼠标命中、画面颜色、Steam 真实邀请或长时间多人操作。性能预算需要真实殖民地测量。候选实现采用 24×16 格固定采样视口，视觉插值只用于复制人标记；网格温度、质量、建筑目标和订单均读取最后确认的房主样本。传输和游戏内实测的其他证据见同目录的会话记录。
 
 离开客机后，Player.log 中的 `[QueyangCoop] guest-closed` 行包含 simStep、findChore、setChore、saveAttempts、worldStarts 和 views。正常游戏内加入、施工和退出应看到前五项均为 0，views 大于 0。它们分别观测实际 Sim 步、复制人决策、任务分配、尝试写档、启动本地世界和应用的显示样本数。若通过外部操作启动本地世界，Mod 会在 Game.OnPrefabInit 结束客机会话，并在日志记录 worldStarts。
+
+## 同一进程连续切换三轮
+
+2026-11-22，最终候选包在 Klei 744825 的真实 Unity 客机通过三轮回归。每轮从主菜单连接 TCP 测试房主，取得显示状态，平移并检查格子，退出时五个模拟及存档计数均为零，views 为 2。随后原生加载器成功读取同一个 Fixture.sav 副本，3 名复制人所在世界的时钟推进，正常返回主菜单。每轮检查会话、视口纹理和副本哈希，运行器最终返回 0。本机报告目录为 `artifacts/qa/game-9df733a6112547e88dd037c017c00bef`。
+
+自动存档载入后，游戏可能按原始殖民地名更新后续写档路径。测试直接核对本轮原生磁盘加载的文件名、返回值和文件哈希。复测命令如下。
+
+~~~powershell
+$fixtureSave = Read-Host '输入可读的 Vanilla 存档完整路径'
+.\tests\Integration\Game\run.ps1 -Lifecycle -LifecycleScreenshot -SavePath $fixtureSave -TimeoutSeconds 420
+~~~
+
+下图是 1280×800 客机从测试房主取得合成地形、梯子、蓝图和复制人标记后的实际画面。可见此分辨率下“自动化”按钮文字有裁切。测试驱动通过生产会话接口触发操作，鼠标点选及其他分辨率仍需按上表实测。
+
+![真实 Unity 客机显示测试房主提供的区域](qa/guest-view.png)
