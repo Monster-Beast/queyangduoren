@@ -122,4 +122,32 @@ public class RoomTests
         while (p.Down.TryDequeue(out var b)) p.Client.Receive(b);
         Assert.Null(p.Client.View); p.Live(); Assert.Equal(p.Colony, p.Client.View);
     }
+
+    [Fact]
+    public void CommandFromPreviousViewCannotChangeWorldDuringSubscription()
+    {
+        var p = new Pair(); p.Live();
+        p.Client.Command("dig", 3, 4);
+        var delayed = p.Up.Dequeue();
+        p.Client.Subscribe(50, 50);
+        p.Host.Receive(1, p.Up.Dequeue());
+        p.Host.Receive(1, delayed);
+        p.Client.Receive(p.Down.Dequeue());
+        Assert.Contains("View not ready", p.Client.Status);
+        Assert.Equal(0, p.Calls);
+    }
+
+    [Fact]
+    public void ExcessCommandsAreRejectedBeforeExecution()
+    {
+        var p = new Pair(); p.Live(); p.Time += 1;
+        for (int i=0; i<32; ++i)
+        {
+            p.Client.Command("dig", i, 1);
+            p.Host.Receive(1, p.Up.Dequeue());
+        }
+        p.Client.Command("dig", 33, 1);
+        Assert.Throws<InvalidDataException>(() => p.Host.Receive(1, p.Up.Dequeue()));
+        Assert.Equal(32, p.Calls);
+    }
 }

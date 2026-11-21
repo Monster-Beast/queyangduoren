@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <SteamRoot>$(registry:HKEY_CURRENT_USER\Software\Valve\Steam@SteamPath)</SteamRoot>
+    <ONI_GAME_DIR Condition="'$(ONI_GAME_DIR)' == ''">$(SteamRoot)/steamapps/common/OxygenNotIncluded</ONI_GAME_DIR>
+    <Managed>$(ONI_GAME_DIR)/OxygenNotIncluded_Data/Managed</Managed>
+  </PropertyGroup>
+  <ItemGroup>
+    <GameAssembly Include="Assembly-CSharp;Assembly-CSharp-firstpass;0Harmony;UnityEngine;UnityEngine.CoreModule;UnityEngine.UI"/>
+    <Reference Include="@(GameAssembly->'$(Managed)/%(Identity).dll')" Private="false"/>
+  </ItemGroup>
+</Project>

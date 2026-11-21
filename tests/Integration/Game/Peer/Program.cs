@@ -15,7 +15,13 @@ namespace Queyang.Integration
             Action<string> log = line => File.AppendAllText(report,line + Environment.NewLine);
             try
             {
-                if (args.Length == 1 && args[0] == "--serve-readonly") return ServeReplica(log);
+                if (args.Length >= 1 && args[0] == "--serve-readonly")
+                {
+                    int seconds = 300;
+                    if (args.Length > 2 || args.Length == 2 && (!int.TryParse(args[1], out seconds) || seconds < 1))
+                        throw new ArgumentException("Expected --serve-readonly [durationSeconds]");
+                    return ServeReplica(log, seconds);
+                }
                 if (args.Length == 2 && args[0] == "--soak")
                 {
                     SoakPeers.Run(log,int.Parse(args[1],System.Globalization.CultureInfo.InvariantCulture));
@@ -52,11 +58,13 @@ namespace Queyang.Integration
         }
 
         // Only used to exercise the actual Unity guest on a machine allowing one game process.
-        private static int ServeReplica(Action<string> log)
+        private static int ServeReplica(Action<string> log, int seconds)
         {
             RoomHost room = null;
             var clock = Stopwatch.StartNew();
-            using (var transport = new CoopTransport((id,p) => room.Receive(id,p),id => room.Connect(id),id => room.Remove(id)))
+            using (var transport = new CoopTransport((id,p) => room.Receive(id,p),
+                id => { room.Connect(id); log("READONLY_FIXTURE_CONNECTED " + id); },
+                id => { room.Remove(id); log("READONLY_FIXTURE_DISCONNECTED " + id); }))
             {
                 room = new RoomHost(Environment.GetEnvironmentVariable("QY_SMOKE_FINGERPRINT"), transport.Send,
                     transport.Drop, (x,y) => {
@@ -71,7 +79,7 @@ namespace Queyang.Integration
                     }, () => clock.Elapsed.TotalSeconds);
                 transport.Host(false);
                 log("READONLY_FIXTURE_READY");
-                while (clock.Elapsed.TotalMinutes < 5)
+                while (clock.Elapsed.TotalSeconds < seconds)
                 {
                     transport.Poll();
                     room.Tick();

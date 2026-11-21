@@ -9,7 +9,7 @@
   <ItemGroup>
     <Compile Remove="Peer/**/*.cs"/>
     <ProjectReference Include="../../../src/Game/Game.csproj" />
-    <GameAssembly Include="Assembly-CSharp;Assembly-CSharp-firstpass;UnityEngine;UnityEngine.CoreModule;UnityEngine.UI;0Harmony;com.rlabrecque.steamworks.net"/>
+    <GameAssembly Include="Assembly-CSharp;Assembly-CSharp-firstpass;UnityEngine;UnityEngine.CoreModule;UnityEngine.ScreenCaptureModule;UnityEngine.UI;0Harmony;com.rlabrecque.steamworks.net"/>
     <Reference Include="@(GameAssembly->'$(Managed)/%(Identity).dll')" Private="false"/>
   </ItemGroup>
 </Project>

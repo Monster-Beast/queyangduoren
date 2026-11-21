@@ -28,6 +28,8 @@ namespace Queyang.Integration
 
     public sealed class SmokeDriver : MonoBehaviour
     {
+        private readonly bool soak = Environment.GetEnvironmentVariable("QY_SMOKE_SOAK") == "1";
+        private float nextSample;
         private string report;
         private bool isHost, hostReady, loading, guestStarted, finished;
         private float start, hostTime;
@@ -36,6 +38,7 @@ namespace Queyang.Integration
         private float lastCheck;
         private bool featuresRun;
         private bool readonlyFixture, steamLobby;
+        private GuestLifecycle lifecycle;
         private void Awake()
         {
             report = Environment.GetEnvironmentVariable("QY_SMOKE_REPORT");
@@ -45,12 +48,22 @@ namespace Queyang.Integration
             Application.runInBackground = true;
             start = Time.realtimeSinceStartup;
             Log("MENU " + (isHost ? "host" : "client") + " worldLoaded=" + (global::Game.Instance != null));
+            if (Environment.GetEnvironmentVariable("QY_SMOKE_ROLE") == "guest-lifecycle")
+            {
+                try { lifecycle = new GuestLifecycle(Log, report); }
+                catch (Exception error) { finished = true; Log("FAIL " + error); }
+            }
         }
         private void Log(string line) { File.AppendAllText(report, line + Environment.NewLine); }
         private void Update()
         {
             if (finished || Time.realtimeSinceStartup - start < 2) return;
-            try { if (isHost) HostStep(); else GuestStep(); }
+            try
+            {
+                if (lifecycle != null) { lifecycle.Update(); finished = lifecycle.Done; }
+                else if (isHost) HostStep();
+                else GuestStep();
+            }
             catch (Exception ex) { finished = true; Log("FAIL " + ex); }
         }
         private void HostStep()
@@ -71,7 +84,7 @@ namespace Queyang.Integration
                 CoopSession.Host(steamLobby);
                 if (!CoopSession.IsHosting) throw new Exception(CoopSession.Status);
                 hostReady = true;
-                SpeedControlScreen.Instance.SetSpeed(2);
+                SpeedControlScreen.Instance.SetSpeed(soak ? 0 : 2);
                 hostTime = GameClock.Instance.GetTime();
                 if (!steamLobby) Log("HOST_READY " + CoopSession.Endpoint);
             }
@@ -91,6 +104,14 @@ namespace Queyang.Integration
                 return;
             }
             if (SpeedControlScreen.Instance.IsPaused) SpeedControlScreen.Instance.Unpause(false);
+            if (soak && Time.realtimeSinceStartup >= nextSample)
+            {
+                nextSample=Time.realtimeSinceStartup+60;
+                using(var process=System.Diagnostics.Process.GetCurrentProcess())
+                    Log("SOAK_HOST uptime="+Time.realtimeSinceStartup+" simTime="+GameClock.Instance.GetTime()+
+                        " speed="+SpeedControlScreen.Instance.GetSpeed()+" workingSet="+process.WorkingSet64+
+                        " managed="+GC.GetTotalMemory(false));
+            }
             if (!featuresRun && File.Exists(Path.Combine(Path.GetDirectoryName(report),"features.flag")))
             {
                 featuresRun = true;

@@ -1,6 +1,6 @@
 # Opt-in integration fixture. Build a private game copy; never point the patcher at the Steam install.
 [CmdletBinding()]
-param([string]$SavePath,[string]$GameDir=$env:ONI_GAME_DIR,[int]$TimeoutSeconds=160,[switch]$SecondGame,[switch]$GuestOnly,[switch]$SteamLobby,[switch]$Persistence,[ValidateRange(0,86400)][int]$SoakSeconds=0)
+param([string]$SavePath,[string]$GameDir=$env:ONI_GAME_DIR,[int]$TimeoutSeconds=160,[switch]$SecondGame,[switch]$GuestOnly,[switch]$SteamLobby,[switch]$Persistence,[ValidateRange(0,86400)][int]$SoakSeconds=0,[switch]$Lifecycle,[switch]$LifecycleScreenshot,[switch]$SoloPerformance)
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 . (Join-Path $repo 'tools/dev-common.ps1')
@@ -17,6 +17,11 @@ if (!$GuestOnly) {
 if ($SecondGame -and $GuestOnly) { throw 'Select either a simultaneous second game or the guest-only test.' }
 if ($SteamLobby -and ($GuestOnly -or $SecondGame -or $Persistence)) { throw '-SteamLobby runs only the real single-host Steam test.' }
 if ($Persistence -and $GuestOnly) { throw '-Persistence needs a host save.' }
+if ($LifecycleScreenshot -and !$Lifecycle) { throw 'Use -LifecycleScreenshot together with -Lifecycle.' }
+if ($Lifecycle -and ($SecondGame -or $GuestOnly -or $SteamLobby -or $Persistence -or $SoakSeconds)) { throw '-Lifecycle requires its own disposable guest and save.' }
+if ($SoloPerformance -and ($SecondGame -or $GuestOnly -or $SteamLobby -or $Persistence -or $Lifecycle -or $SoakSeconds)) { throw '-SoloPerformance runs only the isolated single-player measurement.' }
+if ($Lifecycle) { $TimeoutSeconds=[Math]::Max($TimeoutSeconds,360) }
+$guestFixture=$GuestOnly -or $Lifecycle
 if ($SoakSeconds -and ($GuestOnly -or $SteamLobby -or $SecondGame -or $Persistence)) { throw '-SoakSeconds uses one real host and three TCP guest processes/peers.' }
 if ($SoakSeconds -gt 0) { $TimeoutSeconds=[Math]::Max($TimeoutSeconds,$SoakSeconds + 90) }
 if (!(Test-Path -LiteralPath (Join-Path $GameDir OxygenNotIncluded.exe))) { throw 'Set ONI_GAME_DIR to your Steam install.' }
@@ -43,7 +48,7 @@ $copy=Get-CheckedPath $run (Join-Path $run 'GameCopy')
 Write-Output "Run directory: $run"
 $exe=Join-Path $copy OxygenNotIncluded.exe
 $processes=@()
-$scopedEnv=@('QY_SMOKE_ROOT','QY_SMOKE_ROLE','QY_SMOKE_REPORT','QY_SMOKE_SAVE','QY_SMOKE_ENDPOINT','QY_SMOKE_FINGERPRINT','QY_SMOKE_PERSISTENCE','QY_SMOKE_STEAM_LOBBY','ONI_COOP_BIND','SteamAppId','SteamGameId')
+$scopedEnv=@('QY_SMOKE_ROOT','QY_SMOKE_ROLE','QY_SMOKE_REPORT','QY_SMOKE_SAVE','QY_SMOKE_ENDPOINT','QY_SMOKE_FINGERPRINT','QY_SMOKE_PERSISTENCE','QY_SMOKE_STEAM_LOBBY','QY_SMOKE_SOAK','QY_SMOKE_CAPTURE','ONI_COOP_BIND','SteamAppId','SteamGameId')
 $previousEnv=@{}
 foreach ($name in $scopedEnv) { $previousEnv[$name]=[Environment]::GetEnvironmentVariable($name) }
 try {
@@ -71,6 +76,10 @@ try {
         $module.Write("$firstpass.isolated")
     } finally { $module.Dispose(); $resolver.Dispose() }
     [IO.File]::Replace("$firstpass.isolated",$firstpass,[System.Management.Automation.Language.NullString]::Value)
+    if ($SoloPerformance) {
+        & (Join-Path $PSScriptRoot '../Performance/measure-solo.ps1') -RunRoot $run -GameCopy $copy -SavePath $SavePath -TimeoutSeconds $TimeoutSeconds
+        return
+    }
     $gamePackage=Join-Path $repo 'artifacts/QueyangCoop-dev.zip'
     $fixture=Join-Path $PSScriptRoot 'bin/Release/net48/SmokeDriver.dll'
     $selector=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
@@ -81,9 +90,11 @@ try {
     $env:SteamGameId='457140'
     $env:ONI_COOP_BIND=$endpoint
     $env:QY_SMOKE_ENDPOINT=$endpoint
+    $env:QY_SMOKE_SOAK=if($SoakSeconds){'1'}else{'0'}
     $env:QY_SMOKE_STEAM_LOBBY=if($SteamLobby){'1'}else{'0'}
     $env:QY_SMOKE_PERSISTENCE=if($Persistence){'1'}else{'0'}
-    $roles=if ($GuestOnly) { 'guest-readonly' } elseif ($SteamLobby) { 'host' } else { @('host','client') }
+    $env:QY_SMOKE_CAPTURE=if($LifecycleScreenshot){'1'}else{'0'}
+    $roles=if ($Lifecycle) { 'guest-lifecycle' } elseif ($GuestOnly) { 'guest-readonly' } elseif ($SteamLobby) { 'host' } else { @('host','client') }
     foreach ($role in $roles) {
         $klei=Join-Path $run "$role/Klei"
         $gameProfile=Join-Path $klei 'OxygenNotIncluded'
@@ -101,22 +112,22 @@ try {
         $env:QY_SMOKE_ROLE=$role
         $env:QY_SMOKE_REPORT=Join-Path $run "$role.report"
         $env:QY_SMOKE_SAVE=Join-Path $gameProfile 'save_files/Fixture/Fixture.sav'
-        if ($role -eq 'host') {
+        if ($role -eq 'host' -or $Lifecycle) {
             [IO.Directory]::CreateDirectory((Split-Path $env:QY_SMOKE_SAVE)) | Out-Null
             Copy-Item -LiteralPath $SavePath -Destination $env:QY_SMOKE_SAVE
         }
         $log=Join-Path $run "$role.log"
         $peerExe=Join-Path $PSScriptRoot 'Peer/bin/Release/net48/Peer.exe'
-        if (($role -eq 'client' -and !$SecondGame) -or $GuestOnly) {
+        if (($role -eq 'client' -and !$SecondGame) -or $guestFixture) {
             $ids=foreach($modulePath in @((Join-Path $managed 'Assembly-CSharp.dll'),(Join-Path $mod 'QueyangCoop.dll'),(Join-Path $mod 'Queyang.Core.dll'))) {
                 $image=[Mono.Cecil.ModuleDefinition]::ReadModule($modulePath)
                 try { $image.Mvid.ToString() } finally { $image.Dispose() }
             }
             $env:QY_SMOKE_FINGERPRINT=($ids -join '/')
         }
-        if ($GuestOnly) {
+        if ($guestFixture) {
             $env:QY_SMOKE_REPORT=Join-Path $run 'fixture.report'
-            $server=Start-Process -FilePath $peerExe -ArgumentList '--serve-readonly' -WorkingDirectory $run -PassThru -WindowStyle Hidden
+            $server=Start-Process -FilePath $peerExe -ArgumentList @('--serve-readonly',([string]($TimeoutSeconds + 30))) -WorkingDirectory $run -PassThru -WindowStyle Hidden
             $processes+=$server
             $timer=[Diagnostics.Stopwatch]::StartNew()
             while ($timer.Elapsed.TotalSeconds -lt 10 -and !$server.HasExited -and !(Test-Path -LiteralPath $env:QY_SMOKE_REPORT)) {
@@ -149,6 +160,22 @@ try {
             throw "Game smoke $role did not reach $done. See $log"
         }
         Get-Content -LiteralPath $env:QY_SMOKE_REPORT
+        if ($Lifecycle) {
+            $layers=@(Select-String -LiteralPath $log -Pattern '\[QueyangCoop\] guest-closed simStep=0 findChore=0 setChore=0 saveAttempts=0 worldStarts=0 views=[1-9]\d*')
+            $rounds=@(Select-String -LiteralPath $env:QY_SMOKE_REPORT -Pattern '^LIFECYCLE_ROUND_PASS round=[123]$')
+            $fixtureLog=Join-Path $run 'fixture.report'
+            $joins=@(Select-String -LiteralPath $fixtureLog -Pattern '^READONLY_FIXTURE_CONNECTED \d+$' | ForEach-Object Line | Sort-Object -Unique)
+            $leaves=@(Select-String -LiteralPath $fixtureLog -Pattern '^READONLY_FIXTURE_DISCONNECTED \d+$' | ForEach-Object Line | Sort-Object -Unique)
+            $inspects=@(Select-String -LiteralPath $fixtureLog -Pattern '^READONLY_FIXTURE_COMMAND inspect \d+,\d+$')
+            if ($layers.Count -ne 3 -or $rounds.Count -ne 3 -or $joins.Count -ne 3 -or $leaves.Count -ne 3 -or $inspects.Count -ne 3) {
+                throw "Incomplete lifecycle evidence: rounds=$($rounds.Count), counts=$($layers.Count), joins=$($joins.Count), leaves=$($leaves.Count), inspections=$($inspects.Count)"
+            }
+            if ($LifecycleScreenshot) {
+                $image=Join-Path $run 'guest-lifecycle.png'
+                if (Test-Path -LiteralPath $image) { Write-Output "Unity framebuffer candidate for visual inspection: $image" }
+                else { Write-Output 'Unity did not produce a framebuffer image in this mode. Visual inspection remains pending.' }
+            }
+        }
     }
 } finally {
     $hostReport=Join-Path $run 'host.report'
@@ -182,7 +209,7 @@ try {
         (Get-FileHash -LiteralPath $sourceDll).Hash -ne $initialDllHash -or
         ($initialDbHash -and (Get-FileHash -LiteralPath $realDb).Hash -ne $initialDbHash)) { throw 'Unexpected change to original test inputs.' }
     # Keep reports and raw, private engine logs locally; remove the copied game and save files.
-    foreach ($child in 'GameCopy','host','client','guest-readonly') {
+    foreach ($child in 'GameCopy','host','client','guest-readonly','guest-lifecycle') {
         $owned=Get-CheckedPath $run (Join-Path $run $child)
         if (Test-Path -LiteralPath $owned) { Remove-Item -LiteralPath $owned -Recurse -Force }
     }

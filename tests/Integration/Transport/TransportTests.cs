@@ -23,8 +23,9 @@ internal static class TransportSmoke
     }
 
     private static void Check(bool result, string message) { if (!result) throw new Exception(message); }
-    public static int Main()
+    public static int Main(string[] args)
     {
+        if(args.Length == 1 && args[0] == "--late-join") return LateJoin.Run();
         // Ask the OS for a test port to avoid interfering with a real game session.
         var selector = new TcpListener(IPAddress.Loopback, 0);
         selector.Start();
