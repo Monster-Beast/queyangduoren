@@ -171,12 +171,13 @@ namespace Queyang.Game
 
         void ValidateNativeIdentities()
         {
+            if (DupeFrom<0 || DupeThrough<DupeFrom) throw new InvalidDataException("Invalid duplicant coverage.");
             if (Dupes.Length == 0) return;
             var saves = new HashSet<int>();
             foreach (var dupe in Dupes)
             {
                 long dx = (long)dupe.X - X, dy = (long)dupe.Y - Y;
-                if (dupe.SaveId < 0 || !saves.Add(dupe.SaveId) || dx < 0 || dx >= Width || dy < 0 || dy >= Height ||
+                if (!CoversDupeId(dupe.SaveId) || !saves.Add(dupe.SaveId) || dx < 0 || dx >= Width || dy < 0 || dy >= Height ||
                     (Cells[(int)dy * Width + (int)dx].Flags & 1) == 0)
                     throw new InvalidDataException("Invalid native duplicant identity or visibility.");
             }

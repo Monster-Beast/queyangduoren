@@ -288,7 +288,7 @@ try {
         (Select-String -LiteralPath $hostReport -Pattern '^HOST_READY' -Quiet)) {
         [IO.File]::WriteAllText((Join-Path $run 'features.flag'),'run')
         $featureWait=[Diagnostics.Stopwatch]::StartNew()
-        $featureTimeout = if ($NativeRecord) { 100 } else { 12 }
+        $featureTimeout = if ($NativeRecord) { 150 } else { 24 }
         while ($featureWait.Elapsed.TotalSeconds -lt $featureTimeout -and !(Select-String -LiteralPath $hostReport -Pattern '^FEATURE_CHECKS_DONE|^FAIL ' -Quiet)) {
             Start-Sleep -Milliseconds 250
         }

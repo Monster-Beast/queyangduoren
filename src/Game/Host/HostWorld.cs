@@ -107,9 +107,8 @@ namespace Queyang.Game
                     SubY = (byte)Mathf.RoundToInt(255 * Mathf.Clamp01(pos.y - dupeY)),
                     Activity = chore == null ? "Idle" : chore.choreType.Id
                 });
-                if (dupes.Count == 64) break;
             }
-            view.Dupes = dupes.ToArray();
+            view.SetDupePage(dupes,sample>=0 ? sample : Mathf.FloorToInt(Time.unscaledTime));
             NativeResources.Capture(view, world,sample);
             return view.Encode();
         }

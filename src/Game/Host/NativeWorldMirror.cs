@@ -319,7 +319,7 @@ namespace Queyang.Game
                 KBatchedAnimController anim;
                 if (localDupes.TryGetValue(d.SaveId, out var dupe))
                 {
-                    if (dupe.GetProperName() != d.Name) dupe.SetName(d.Name);
+                    if (!string.IsNullOrEmpty(d.Name) && dupe.GetProperName() != d.Name) dupe.SetName(d.Name);
                     anim = dupe.GetComponent<KBatchedAnimController>();
                 }
                 else if (!spawnedDupes.TryGetValue(d.SaveId, out anim))
@@ -329,7 +329,7 @@ namespace Queyang.Game
                     spawnedDupes.Add(d.SaveId, anim);
                 }
                 if (anim == null) continue;
-                if (dupe == null && anim.gameObject.name != d.Name)
+                if (dupe == null && !string.IsNullOrEmpty(d.Name) && anim.gameObject.name != d.Name)
                 {
                     anim.gameObject.name = d.Name;
                     anim.GetComponent<KSelectable>().SetName(d.Name);
@@ -343,7 +343,9 @@ namespace Queyang.Game
             }
             foreach (var dupe in Components.LiveMinionIdentities.Items)
             {
-                if (dupe == null || visibleDupes.Contains(dupe.GetComponent<KPrefabID>().InstanceID)) continue;
+                if (dupe == null) continue;
+                int id=dupe.GetComponent<KPrefabID>().InstanceID;
+                if (!view.CoversDupeId(id) || visibleDupes.Contains(id)) continue;
                 var pos = dupe.transform.position;
                 if (pos.x >= view.X && pos.x < view.X + ColonyView.Width && pos.y >= view.Y &&
                     pos.y < view.Y + ColonyView.Height) SetVisible(dupe.GetComponent<KBatchedAnimController>(), false);
@@ -360,7 +362,7 @@ namespace Queyang.Game
                 bool offCamera = camera != null && (Mathf.Abs(pos.x - camera.transform.position.x) >
                     camera.orthographicSize * camera.aspect + 2 || Mathf.Abs(pos.y - camera.transform.position.y) >
                     camera.orthographicSize + 2);
-                if (sampled || offCamera) expiredDupes.Add(pair.Key);
+                if (sampled ? view.CoversDupeId(pair.Key) : offCamera) expiredDupes.Add(pair.Key);
             }
             foreach (int id in expiredDupes)
             {

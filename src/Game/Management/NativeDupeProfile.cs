@@ -59,7 +59,7 @@ namespace Queyang.Game
         static void PollProfile()
         {
             var who = ProfileSelection();
-            if (profileTarget != who) { profileDigest = null; currentProfile = null; nextProfile = 0f; profileTarget = who; }
+            if (!ReferenceEquals(profileTarget,who)) { profileDigest = null; currentProfile = null; nextProfile = 0f; profileTarget = who; }
             if (who == null || Time.unscaledTime < nextProfile) return;
             nextProfile = Time.unscaledTime + 1.4f;
             int id = SaveId(who);
@@ -162,7 +162,10 @@ namespace Queyang.Game
             }
             p.SkillLabels = string.Join("、",p.Learned.Concat(p.Granted).Distinct().Select(i => Db.Get().Skills.TryGet(new HashedString(i))?.Name).Where(s=>s!=null));
             p.EffectLabels = string.Join("、",effectLabels);
-            p.RestrictionLabels = string.Join("、",p.Forbidden.Concat(p.Diet).Distinct().Select(i => new Tag(i).ProperName()));
+            p.RestrictionLabels = string.Join("、",p.Forbidden.Concat(p.Diet).Distinct().Select(i => {
+                string label=new Tag(i).ProperName();
+                return string.IsNullOrEmpty(label) ? "#" + i.ToString("X8") : label;
+            }));
             var resume = selected.GetComponent<MinionResume>();
             if (resume != null)
             {
@@ -200,10 +203,16 @@ namespace Queyang.Game
         internal static bool DisplayedProfile(int id,string expected,out string summary)
         {
             summary = null;
-            if (currentProfile == null || SaveId(profileTarget) != id || expected != null && profileDigest != expected) return false;
+            if (currentProfile == null || SaveId(profileTarget) != id || expected != null && profileDigest != expected)
+            { summary="profileLoaded="+(currentProfile!=null)+" target="+SaveId(profileTarget)+" digest="+profileDigest; return false; }
             var p = currentProfile;
             var resume = profileTarget.GetComponent<MinionResume>();
             var c = profileTarget.GetComponent<ConsumableConsumer>();
+            if (profileTarget.GetComponent<NativeDupeIdentityMarker>() != null)
+            {
+                var panel=DetailsScreen.Instance.GetComponentInChildren<GuestVitalsDisplay>();
+                if (panel == null || !panel.DisplaysProfile(p,out summary)) return false;
+            }
             if (resume != null && (resume.TotalExperienceGained != p.XP || resume.SkillsMastered != p.Learned.Length)) return false;
             if (c != null && (c.forbiddenTagSet.Count != p.Forbidden.Length || c.dietaryRestrictionTagSet.Count != p.Diet.Length)) return false;
             summary = "skills=" + p.Learned.Length + " effects=" + p.Effects.Count + " forbidden=" + p.Forbidden.Length;

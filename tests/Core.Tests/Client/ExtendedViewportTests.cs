@@ -43,6 +43,36 @@ namespace Queyang.Core.Tests
         }
 
         [Fact]
+        public void ThreeCrowdedDuplicantPagesRetainOthersAndRemoveMissingStableIdentities()
+        {
+            var world=View(); world.HasEnvironment=true; world.Cells[0].Flags=1;
+            var visible=Enumerable.Range(1,150).Reverse().Select(n=>new ColonyDupe { Id=n, SaveId=n*3, Name="d"+n }).ToList();
+            ColonyDupe[] displayed=null;
+            ColonyView Sample(int page)
+            {
+                world.SetDupePage(visible,page);
+                var v=ColonyView.Decode(world.Encode());
+                Assert.All(v.Dupes,d=>Assert.True(v.CoversDupeId(d.SaveId)));
+                Assert.InRange(v.Dupes.Length,1,64);
+                displayed=v.DisplayDupes(displayed);
+                return v;
+            }
+            Sample(0); Sample(1); Sample(2);
+            Assert.Equal(150,displayed.Length);
+            int gone=visible[80].SaveId; visible.RemoveAt(80);
+            var first=Sample(0); Assert.False(first.CoversDupeId(gone));
+            Assert.Contains(displayed,d=>d.SaveId==gone);
+            var second=Sample(1); Assert.True(second.CoversDupeId(gone));
+            Assert.DoesNotContain(displayed,d=>d.SaveId==gone);
+            Sample(2);
+            Assert.Equal(visible.Select(d=>d.SaveId).OrderBy(i=>i),displayed.Select(d=>d.SaveId).OrderBy(i=>i));
+            // After a crowd disperses, the default full range retires all absent projected identities.
+            visible.RemoveRange(5,visible.Count-5); world.HasEnvironment=false;
+            var full=Sample(3); Assert.Equal(7,BitConverter.ToUInt16(world.Encode()));
+            Assert.Equal(5,displayed.Length); Assert.True(full.CoversDupeId(gone));
+        }
+
+        [Fact]
         public void OverlappingBuildingAndOrderIdentitiesHaveIndependentPriorityBounds()
         {
             var v=View(); v.HasEnvironment=true;

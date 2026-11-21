@@ -44,6 +44,9 @@ namespace Queyang.Integration
         private NativeFoodChain foodChain;
         private GameObject printed;
         private NativeOrderChecks orderChecks;
+        private NativeFacilityChecks facilityChecks;
+        private NativePrintedDeath printedDeath;
+        private bool facilitiesDone;
         private bool readonlyFixture, steamLobby;
         private SteamSocketPairCheck steamPair;
         private GuestLifecycle lifecycle;
@@ -175,7 +178,7 @@ namespace Queyang.Integration
                         if (!ecology.Tick()) return;
                         foodChain = new NativeFoodChain(recording,Log);
                     }
-                    if (printed == null)
+                    if (printed == null && orderChecks == null)
                     {
                         if (!foodChain.Tick()) return;
                         var d = Components.LiveMinionIdentities.Items.First(person => person != null &&
@@ -186,8 +189,19 @@ namespace Queyang.Integration
                     }
                     if (orderChecks == null && !NativePrintedDupe.Record(printed,recording,Log)) return;
                 }
-                if (orderChecks==null) orderChecks=new NativeOrderChecks(Log);
-                if (!orderChecks.Tick()) return;
+                if (facilityChecks==null)
+                {
+                    if (orderChecks==null) orderChecks=new NativeOrderChecks(Log);
+                    if (!orderChecks.Tick()) return;
+                    facilityChecks=new NativeFacilityChecks(Log);
+                }
+                if (!facilitiesDone) facilitiesDone=facilityChecks.Tick();
+                if (!facilitiesDone) return;
+                if (!string.IsNullOrEmpty(recording))
+                {
+                    if (printedDeath==null) printedDeath=new NativePrintedDeath(printed,recording,Log);
+                    if (!printedDeath.Tick()) return;
+                }
                 featuresRun = true;
                 Log("FEATURE native management " + NativeManagementChecks.Run());
                 HostFeatureChecks.Run(Log);

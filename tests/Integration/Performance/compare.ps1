@@ -69,5 +69,5 @@ $result=[ordered]@{
 }
 [IO.File]::WriteAllText([IO.Path]::GetFullPath($OutputPath),($result|ConvertTo-Json -Depth 5))
 "Performance evidence: $([IO.Path]::GetFullPath($OutputPath))"
-"Simulation slowdown: $([math]::Round($slowdown,3))%; largest reported minute pump p95: $maxP95 ms"
+"Simulation slowdown: $([math]::Round($slowdown,3))%; largest minute pump p95 over the connected run: $fullRunP95 ms"
 if (!$result.throughputPass -or !$result.pumpPass -or !$result.downstreamPass) { throw 'Performance budget exceeded; see comparison.json for measurements.' }

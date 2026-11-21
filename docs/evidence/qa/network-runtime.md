@@ -53,6 +53,14 @@ $save = Read-Host '输入可复制的 Vanilla .sav 完整路径'
 
 当前机器上曾通过 `-SecondGame` 尝试并行启动第二个 Unity 实例，第二个进程在产生引擎日志前已退出，因此未取得“双 Unity 客机经 Steam 好友邀请加入”的证据。T07 仍需两台具备独立 Steam 账号的测试环境完成邀请、P2P 建连和重新邀请。四个 TCP 端点和真实 Steam 四人会话应分别记录。首次实测还发现快照中的复制人 ID 未填充导致握手后断开，修正后上述真实挖掘与建造流程通过。
 
+2026-11-22 另以 build 764025 和候选包 `0DFFFBC33942BD82478B367309F8D7D0A71842A6590E01B6E7E182DAA4848BD2` 复测。Steam 的房主身份、房间元数据、人数上限 4 和实际人数 1 均符合预期，原生网络回环 socket pair 双向传送 44 字节 Ping/Pong，随后关闭，脚本退出 0。报告位于 `artifacts/qa/game-679b91903ef3480d9afb3aee488b5a35/host.report`。跨账号异机邀请及 P2P 路径仍待实测。
+
 ## 地形与线路的独立游戏夹具
 
 `tests/Integration/Game/run.ps1 -TerrainNetworks -SavePath $save` 在独立资料目录加载 Vanilla 存档副本，在未揭示区域布置密封冰室、氧气室、温度传感器、气密门及并行的电线和逻辑线。房主使用游戏的热量消息融冰、开挖消息打通两间气室；测试改变温度传感器阈值和电网连接，由原生模拟更新门和电路。一个走实际回环 TCP 的只读 RoomClient 校验传来的可见性、物态、扩散后的氧气、逻辑信号、门动画和电线方向，房主端另查实际 circuit ID 的分离和重合。运行成功时 host.report 留下分阶段的 `TERRAIN` 行及最后的 `PASS terrain and networks`。此模式和三轮原版重新入房均独占当前游戏进程，需串行运行。
+
+2026-11-22 在 build 764025 上运行通过，候选包 SHA-256 为 `2D821695994C722487958627E79E38460CD7FCDDA0DE459B2A3A9857A15767D6`。隐藏基线首次揭示后出现冰，1000 kg 冰受热转为水。挖掉两室之间的岩石后，原真空格收到 1.228954 kg 氧气。传感器先开门后关门，TCP 端收到变化后的信号和当前门动画。拆去中间电线后，原版房主的两端 circuit ID 分离，客机收到断点；重建后两端接回同一原版电网。另在该独立世界验证房主完成 FarmingTech 后，数据回放使客户端使用的原版建造科技判定解锁 AlgaeHabitat。完整房主报告位于 `artifacts/qa/game-ca8bb51d9e6b404cb73f09879c21966d/host.report`。
+
+### 三轮原版客机与单人保存
+
+同机顺序运行 `tests/Integration/Game/run.ps1 -NativeReplay $recording -NativeLifecycle -SavePath $save`，其中录像取自真实房主的 `game-f0f25b5244c44a308331d32934a7a15f`。在 build 764025、候选包 `60046C4145D402DBB7C49281EEA746A078330777605BFE9721904A736477A796` 上，三轮均加载新接收并校验的原生存档，完成原版挖掘交互并退回主菜单，检查临时文件夹已删除。每轮客机 simStep、findChore、setChore、saveAttempts、worldStarts 均为 0。随后同一 Unity 进程以单人模式推进至少一秒并另存为 769796、770109、770017 字节的三个独立文件，重新加载时找到该轮写入的随机排班标记。原始输入的 SHA-256 复核通过。日志在 `artifacts/qa/game-1d59704095414cf5bf0cc7c754d2c6b0/native-lifecycle.report`，网络对端是通过真实 TCP 重放房主观测的独立进程。

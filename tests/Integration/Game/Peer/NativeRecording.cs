@@ -211,9 +211,10 @@ namespace Queyang.Integration
         private string[] operations;
         private string buildingReadings;
         private readonly byte[] printedView;
+        private readonly byte[] printedDead, printedLastAlive;
         private readonly string printedVitals, printedProfile;
         private readonly int printedId;
-        private bool showingPrinted;
+        private bool showingPrinted, showingDead, showingLastAlive;
         private readonly StockOrderTape[] stockOrders;
         private int stockIndex = -1;
         private bool stockIssued;
@@ -258,6 +259,13 @@ namespace Queyang.Integration
                 }
                 if (!ColonyView.Decode(printedView).Dupes.Any(d=>d.SaveId==printedId) || ColonyView.Decode(first).Dupes.Any(d=>d.SaveId==printedId))
                     throw new InvalidDataException("Invalid post-baseline duplicant");
+                if (File.Exists(Path.Combine(dir,"printed-dead.view")))
+                {
+                    printedDead=ReadView(dir,"printed-dead.view");
+                    printedLastAlive=ReadView(dir,"printed-last-alive.view");
+                    if (!ColonyView.Decode(printedLastAlive).Dupes.Any(d=>d.SaveId==printedId)) throw new InvalidDataException("Missing duplicant immediately before recorded death");
+                    if (ColonyView.Decode(printedDead).Dupes.Any(d=>d.SaveId==printedId)) throw new InvalidDataException("Dead duplicant in recorded live list");
+                }
             }
             string readingPath = Path.Combine(dir,"ladder-state.txt");
             string stalePath = Path.Combine(dir,"ladder-stale.txt");
@@ -301,7 +309,7 @@ namespace Queyang.Integration
 
         internal Stream OpenSave()
         {
-            showingPrinted=false;
+            showingPrinted=showingDead=showingLastAlive=false;
             stockIndex=-1; stockIssued=false;
             ordered=false; completed=false; menuStep=0; menuRead=false; orderFirstSentAt=double.NaN;
             log("NATIVE_REPLAY_BASELINE");
@@ -328,8 +336,12 @@ namespace Queyang.Integration
                 return "NM1/unrecorded";
             if (printedView!=null && completed && action=="fixture/printed")
             { showingPrinted=true; return "OK post-baseline recorded view"; }
-            if (showingPrinted && action=="nm/vitals/"+printedId) return printedVitals;
-            if (showingPrinted && action=="nm/profile/"+printedId) return printedProfile;
+            if (showingPrinted && printedLastAlive!=null && action=="fixture/printed-alive")
+            { showingLastAlive=true; return "OK recorded last live position"; }
+            if (showingLastAlive && printedDead!=null && action=="fixture/printed-dead")
+            { showingDead=true; return "OK post-death recorded view"; }
+            if (!showingDead && showingPrinted && action=="nm/vitals/"+printedId) return printedVitals;
+            if (!showingDead && showingPrinted && action=="nm/profile/"+printedId) return printedProfile;
             if (action == vitalsQuery) return vitalsReply;
             if (action == profileQuery) return profileReply;
             // Tapes produced before these optional selected-object replies have no such observations.
@@ -363,6 +375,8 @@ namespace Queyang.Integration
         internal byte[] Capture(int x,int y)
         {
             if (stockIndex>=0) return stockIssued ? stockOrders[stockIndex].After : stockOrders[stockIndex].Before;
+            if (showingDead) return printedDead;
+            if (showingLastAlive) return printedLastAlive;
             if (showingPrinted) return printedView;
             if (!ordered) return first;
             if (double.IsNaN(orderFirstSentAt))

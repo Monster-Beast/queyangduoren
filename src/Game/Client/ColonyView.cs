@@ -94,6 +94,32 @@ namespace Queyang.Game
         public byte Speed;
         public ColonyCell[] Cells = new ColonyCell[Width * Height];
         public ColonyDupe[] Dupes = Array.Empty<ColonyDupe>();
+        public int DupeFrom, DupeThrough = int.MaxValue;
+        public bool CoversDupeId(int id) => id>=DupeFrom && id<=DupeThrough;
+
+        internal void SetDupePage(List<ColonyDupe> visible,int sample)
+        {
+            DupeFrom=0; DupeThrough=int.MaxValue;
+            if (visible.Count<=64) { Dupes=visible.ToArray(); return; }
+            visible.Sort((a,b)=>a.SaveId.CompareTo(b.SaveId));
+            int pages=(visible.Count+63)/64, first=(sample%pages)*64, count=Math.Min(64,visible.Count-first);
+            if (first>0) DupeFrom=visible[first-1].SaveId+1;
+            if (first+count<visible.Count) DupeThrough=visible[first+count-1].SaveId;
+            Dupes=visible.GetRange(first,count).ToArray();
+        }
+
+        internal ColonyDupe[] DisplayDupes(ColonyDupe[] previous)
+        {
+            if (previous==null || (DupeFrom==0 && DupeThrough==int.MaxValue)) return Dupes;
+            var merged=new List<ColonyDupe>(Dupes);
+            foreach (var d in previous)
+            {
+                long dx=(long)d.X-X, dy=(long)d.Y-Y;
+                if (!CoversDupeId(d.SaveId) && dx>=0 && dx<Width && dy>=0 && dy<Height &&
+                    (Cells[(int)dy*Width+(int)dx].Flags&1)!=0) merged.Add(d);
+            }
+            return merged.ToArray();
+        }
 
         public byte[] Encode() => Encode(Native ? 50 : MaxNameBytes, false);
 
@@ -118,11 +144,12 @@ namespace Queyang.Game
             {
                 if (Detailed && !Native) throw new InvalidDataException("Detailed view requires native state.");
                 if (HasResources && !Detailed) throw new InvalidDataException("Resource state requires detailed view.");
-                bool extended = HasEnvironment || EntityPayload != null;
+                bool dupeRange = DupeFrom!=0 || DupeThrough!=int.MaxValue;
+                bool extended = HasEnvironment || EntityPayload != null || dupeRange;
                 if (extended && !HasResources) throw new InvalidDataException("Extended state requires native resource state.");
                 w.Write(extended ? (ushort)8 : HasResources ? (ushort)7 : Detailed ? (ushort)6 : Native ? NativeVersion : (ushort)4);
                 bool orders = extended && Array.Exists(Cells,c=>c.MopOrdered || c.OrderPriority!=0 || c.OrderTargetId!=0 || c.SeparateOrderPriority!=0);
-                if (extended) w.Write((byte)((HasEnvironment ? 1 : 0) | (EntityPayload != null ? 2 : 0) | (orders ? 4 : 0)));
+                if (extended) w.Write((byte)((HasEnvironment ? 1 : 0) | (EntityPayload != null ? 2 : 0) | (orders ? 4 : 0) | (dupeRange ? 8 : 0)));
                 w.Write(X); w.Write(Y);
                 w.Write(Cycle); w.Write(CycleFraction); w.Write(Paused); w.Write(Speed);
                 w.Write((ushort)names.Count);
@@ -178,6 +205,7 @@ namespace Queyang.Game
                 if (HasResources) WriteResources(w);
                 if (extended) WriteExtensions(w, pageEnvironment);
                 if (orders) WriteOrders(w);
+                if (dupeRange) { w.Write(DupeFrom); w.Write(DupeThrough); }
                 if (extended && stream.Length > MaxViewport)
                 {
                     // Keep all readings and stock labels when a dense full tile compresses well.
@@ -225,7 +253,7 @@ namespace Queyang.Game
                 if (version < 4 || version > 8 || (inflated && version != 8)) throw new InvalidDataException("Unknown viewport version.");
                 byte extensions = version == 8 ? r.ReadByte() : (byte)0;
                 if (extensions == 128 && !inflated) return InflateViewport(r);
-                if (version == 8 && ((extensions & 3) == 0 || (extensions & ~7) != 0)) throw new InvalidDataException("Invalid viewport extensions.");
+                if (version == 8 && ((extensions & 11) == 0 || (extensions & ~15) != 0)) throw new InvalidDataException("Invalid viewport extensions.");
                 var v = new ColonyView { Native = version >= 5, Detailed = version >= 6, HasResources = version >= 7,
                     X = r.ReadInt32(), Y = r.ReadInt32() };
                 if (v.X < 0 || v.Y < 0 || v.X > int.MaxValue - Width || v.Y > int.MaxValue - Height)
@@ -307,6 +335,11 @@ namespace Queyang.Game
                 if (v.HasResources) v.ReadResources(r);
                 if (version == 8) v.ReadExtensions(r, extensions);
                 if ((extensions & 4) != 0) v.ReadOrders(r);
+                if ((extensions & 8) != 0)
+                {
+                    v.DupeFrom=r.ReadInt32(); v.DupeThrough=r.ReadInt32();
+                    v.ValidateNativeIdentities();
+                }
                 if (stream.Position != stream.Length) throw new InvalidDataException("Trailing viewport bytes.");
                 return v;
             }

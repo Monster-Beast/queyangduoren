@@ -100,6 +100,7 @@ namespace Queyang.Game
                         try
                         {
                             var replacement = ColonyView.Decode(next);
+                            replacement.Dupes=replacement.DisplayDupes(view?.Dupes);
                             map.Paint(replacement, (ColonyMap.Overlay)overlay);
                             motion.Apply(replacement, Time.unscaledTime);
                             view = replacement;

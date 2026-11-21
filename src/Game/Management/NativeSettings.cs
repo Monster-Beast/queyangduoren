@@ -49,6 +49,7 @@ namespace Queyang.Game
             if (f == null && machine == null) return Conflict;
             var tags = HostWorld.EditableTags(f);
             var recipes = machine == null ? Array.Empty<ComplexRecipe>() : machine.GetRecipes().Where(HostWorld.RecipeAvailable).ToArray();
+            if (tags.Count * 5L + recipes.Length * 8L > 5950) return "ERROR Building settings exceed message limit";
             if (p[1] == "filter")
             {
                 if (f == null || p.Length != 5 || (p[3] != "1" && p[3] != "0") || p[4].Length == 0 ||
@@ -86,7 +87,6 @@ namespace Queyang.Game
             using (var s = new MemoryStream())
             using (var w = new BinaryWriter(s))
             {
-                if (tags.Count * 5L + recipes.Length * 8L > 5950) return "ERROR Building settings exceed message limit";
                 w.Write((ushort)tags.Count);
                 foreach (var tag in tags) { w.Write(Hash(tag.ToString())); w.Write(f.ContainsTag(tag)); }
                 w.Write((ushort)recipes.Length);

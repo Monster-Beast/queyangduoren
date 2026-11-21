@@ -25,6 +25,14 @@ namespace Queyang.Integration
             var bytes = HostWorld.Capture(x,y);
             if (!ColonyView.Decode(bytes).Dupes.Any(d=>d.SaveId==id))
                 return false;
+            var resume=obj.GetComponent<MinionResume>();
+            var diet=obj.GetComponent<ConsumableConsumer>();
+            var skill=Db.Get().Skills.Mining1.Id;
+            if (!resume.HasMasteredSkill(skill)) resume.MasterSkill(skill);
+            diet.SetPermitted(BasicPlantFoodConfig.ID,false);
+            diet.SetPermitted(BasicCureConfig.ID,false);
+            if (!resume.HasMasteredSkill(skill) || diet.IsPermitted(BasicPlantFoodConfig.ID) || diet.IsPermitted(BasicCureConfig.ID))
+                throw new InvalidDataException("Host failed to set printed duplicant skill and food/medicine rules");
             var vitals = HostWorld.Execute("nm/vitals/"+id,x,y);
             var profile = HostWorld.Execute("nm/profile/"+id,x,y);
             if (!vitals.StartsWith("NM1/v/"+id+"/",StringComparison.Ordinal) || vitals.EndsWith("/-") ||
@@ -33,7 +41,7 @@ namespace Queyang.Integration
             File.WriteAllBytes(Path.Combine(dir,"printed.view"),bytes);
             using(var w=new BinaryWriter(File.Create(Path.Combine(dir,"printed.bin"))))
             { w.Write(id); Packet.Text(w,vitals,8192); Packet.Text(w,profile,8192); }
-            log("NATIVE_PRINTED_HOST afterBaseline=true id="+id);
+            log("NATIVE_PRINTED_HOST afterBaseline=true skill="+skill+" foodAndMedicineRestricted=true id="+id);
             return true;
         }
     }

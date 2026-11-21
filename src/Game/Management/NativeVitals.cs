@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Text.RegularExpressions;
 using HarmonyLib;
 using Klei.AI;
 using Packet = Queyang.Core.Wire;
@@ -57,7 +58,7 @@ namespace Queyang.Game
         static void PollVitals()
         {
             var selected = SelectedDupe();
-            if (selected != selectedIdentity) { ResetVitals(); selectedIdentity = selected; }
+            if (!ReferenceEquals(selected,selectedIdentity)) { ResetVitals(); selectedIdentity = selected; }
             if (selected != null) Send("vitals/" + SaveId(selected));
         }
         static Amount[] Vitals()
@@ -278,6 +279,8 @@ namespace Queyang.Game
             if (display == null) display = screen.gameObject.AddComponent<GuestErrandsDisplay>();
             display.Render(screen, selectedIdentity != null && selectedIdentity == SelectedDupe() ? details : null);
         }
+        internal static bool SelectionDetailsCleared => ReferenceEquals(selectedIdentity,null) && details==null &&
+            selectedValues.Count==0 && ReferenceEquals(profileTarget,null) && currentProfile==null;
         internal static bool DisplayedVitals(int id, string expectedDigest, out string summary)
         {
             summary = null;
@@ -322,6 +325,25 @@ namespace Queyang.Game
                 if (label.label != null && label.label.text == text) return true;
             return false;
         }
+        internal bool DisplaysProfile(NativeManagement.Profile expected, out string observation)
+        {
+            observation="visible="+visible+" profileSet="+(lastProfile!=null);
+            if (!visible || !ReferenceEquals(lastProfile,expected)) return false;
+            bool skills=false, effects=false, diet=false;
+            foreach (var label in GetComponentsInChildren<DetailLabel>())
+            {
+                string value=Plain(label.label == null ? "" : label.label.text);
+                if (label.gameObject.name.StartsWith("Coop") && !label.gameObject.name.StartsWith("CoopVital"))
+                    observation+=" "+label.gameObject.name+"="+value;
+                if (value == "技能 · " + Plain(expected.SkillLabels.Length>0 ? expected.SkillLabels : "无")) skills=true;
+                if (value == "状态效果 · " + Plain(expected.EffectLabels.Length>0 ? expected.EffectLabels : "无")) effects=true;
+                if (value == "禁用食物与药物 · " + Plain(expected.RestrictionLabels.Length>0 ? expected.RestrictionLabels : "无")) diet=true;
+            }
+            observation+=" matches="+skills+"/"+effects+"/"+diet;
+            return skills && effects && diet;
+        }
+        // LocText expands link markup into nested KLink style/bold tags.
+        static string Plain(string rich) => Regex.Replace(rich,"<[^>]*>","");
         internal void Restore(MinionVitalsPanel panel)
         {
             if (!visible) return;

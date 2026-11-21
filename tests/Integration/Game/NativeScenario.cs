@@ -12,7 +12,7 @@ namespace Queyang.Integration
     // The peer replays observations previously made by a separate real hosting game.
     internal sealed class NativeScenario
     {
-        enum Stage { Join, Load, Pan, Overlay, Details, Screenshot, Order, Completion, ProxySelect, ProxyOrder, ProxyCancel, ProxyDone, Printed, StockTools, Exit }
+        enum Stage { Join, Load, Pan, Overlay, Details, Screenshot, Order, Completion, ProxySelect, ProxyOrder, ProxyCancel, ProxyDone, Printed, PrintedAlive, PrintedDeath, StockTools, Exit }
         readonly Action<string> log;
         readonly string recording;
         Stage stage;
@@ -29,6 +29,7 @@ namespace Queyang.Integration
         int selectedSaveId;
         string expectedVitals, expectedProfile;
         NativeStockTools stockTools;
+        byte[] lastAliveView;
         System.Action staleClick;
         string staleError;
 
@@ -245,16 +246,44 @@ namespace Queyang.Integration
                     StartStockTools();
                     break;
                 case Stage.Printed:
-                    if (Time.unscaledTime>until) throw new TimeoutException("Newly printed duplicant details did not match its host");
+                    if (Time.unscaledTime>until)
+                    {
+                        bool vit=NativeManagement.DisplayedVitals(selectedSaveId,expectedVitals,out var whyVital);
+                        bool prof=NativeManagement.DisplayedProfile(selectedSaveId,expectedProfile,out var whyProfile);
+                        throw new TimeoutException("Printed duplicant vitals="+vit+" "+whyVital+" profile="+prof+" "+whyProfile);
+                    }
                     var printed=NativeWorldMirror.GetDupeSelectable(selectedSaveId);
                     if (printed==null) break;
                     if (printed.GetComponent<NativeDupeIdentityMarker>()==null || printed.GetComponent<MinionIdentity>()!=null)
                         throw new InvalidDataException("Expected a render-only post-baseline duplicant");
                     if (SelectTool.Instance.selected!=printed) { SelectTool.Instance.Select(printed,false); break; }
                     if (!NativeManagement.DisplayedVitals(selectedSaveId,expectedVitals,out _) ||
-                        !NativeManagement.DisplayedProfile(selectedSaveId,expectedProfile,out _)) break;
-                    log("NATIVE_PRINTED_GUEST renderOnly=true selected=true vitals=true profile=true");
+                        !NativeManagement.DisplayedProfile(selectedSaveId,expectedProfile,out var printedInfo)) break;
+                    log("NATIVE_PRINTED_GUEST renderOnly=true selected=true vitals=true profile=true "+printedInfo);
+                    if (File.Exists(Path.Combine(recording,"printed-dead.view")))
+                    {
+                        lastAliveView=File.ReadAllBytes(Path.Combine(recording,"printed-last-alive.view"));
+                        CoopSession.Command("fixture/printed-alive",0,0);
+                        stage=Stage.PrintedAlive; until=Time.unscaledTime+12; break;
+                    }
                     NativeInfrastructure.Replay(recording, log);
+                    StartStockTools();
+                    break;
+                case Stage.PrintedAlive:
+                    if (Time.unscaledTime>until) throw new TimeoutException("Missing selected live duplicant immediately before recorded death");
+                    if (CoopSession.View==null || !CoopSession.View.SequenceEqual(lastAliveView)) break;
+                    var dying=NativeWorldMirror.GetDupeSelectable(selectedSaveId);
+                    if (dying==null || SelectTool.Instance.selected!=dying || DetailsScreen.Instance.target!=dying.gameObject)
+                        throw new InvalidDataException("Last live update lost the selected duplicant");
+                    CoopSession.Command("fixture/printed-dead",0,0);
+                    stage=Stage.PrintedDeath; until=Time.unscaledTime+12;
+                    break;
+                case Stage.PrintedDeath:
+                    if (Time.unscaledTime>until) throw new TimeoutException("Printed duplicant still selected or details retained after recorded death");
+                    if (NativeWorldMirror.GetDupeSelectable(selectedSaveId)!=null || SelectTool.Instance.selected!=null ||
+                        DetailsScreen.Instance.target!=null || DetailsScreen.Instance.IsActive() || !NativeManagement.SelectionDetailsCleared) break;
+                    log("NATIVE_PRINTED_DEATH_GUEST proxyGone=true sidebarClosed=true detailsCleared=true");
+                    NativeInfrastructure.Replay(recording,log);
                     StartStockTools();
                     break;
                 case Stage.StockTools:
