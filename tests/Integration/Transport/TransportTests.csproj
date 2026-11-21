@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <LangVersion>latest</LangVersion>
+    <SteamRoot Condition="'$(OS)' == 'Windows_NT'">$(registry:HKEY_CURRENT_USER\Software\Valve\Steam@SteamPath)</SteamRoot>
+    <ONI_GAME_DIR Condition="'$(ONI_GAME_DIR)' == '' and '$(SteamRoot)' != ''">$(SteamRoot)/steamapps/common/OxygenNotIncluded</ONI_GAME_DIR>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../src/Game/Network/*.cs" Link="Network/%(Filename)%(Extension)" />
+    <Reference Include="com.rlabrecque.steamworks.net" HintPath="$(ONI_GAME_DIR)/OxygenNotIncluded_Data/Managed/com.rlabrecque.steamworks.net.dll" Private="true"/>
+  </ItemGroup>
+</Project>

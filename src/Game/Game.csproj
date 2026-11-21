@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>QueyangCoop</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <Version>0.1.0</Version>
+    <SteamRoot Condition="'$(OS)' == 'Windows_NT'">$(registry:HKEY_CURRENT_USER\Software\Valve\Steam@SteamPath)</SteamRoot>
+    <ONI_GAME_DIR Condition="'$(ONI_GAME_DIR)' == '' and '$(SteamRoot)' != ''">$(SteamRoot)/steamapps/common/OxygenNotIncluded</ONI_GAME_DIR>
+    <Managed>$(ONI_GAME_DIR)/OxygenNotIncluded_Data/Managed</Managed>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Core/Core.csproj"/>
+    <GameAssembly Include="Assembly-CSharp;Assembly-CSharp-firstpass;0Harmony;com.rlabrecque.steamworks.net;UnityEngine;UnityEngine.CoreModule;UnityEngine.IMGUIModule;UnityEngine.TextRenderingModule;UnityEngine.InputLegacyModule;UnityEngine.UIModule;UnityEngine.UI;UnityEngine.Physics2DModule;UnityEngine.PhysicsModule"/>
+    <Reference Include="@(GameAssembly->'$(Managed)/%(Identity).dll')" Private="false"/>
+  </ItemGroup>
+  <Target Name="CheckGame" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(Managed)/Assembly-CSharp.dll')" Text="Set ONI_GAME_DIR to the installed OxygenNotIncluded directory."/>
+  </Target>
+</Project>
