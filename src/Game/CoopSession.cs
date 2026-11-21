@@ -78,6 +78,7 @@ namespace Queyang.Game
                 client.CommandLatencyMs += metrics.RecordCommand;
                 client.ResultReceived += result => CommandResult?.Invoke(result);
                 nextPing = lastIncoming = joinTime = Time();
+                GuestDiagnostics.Start();
                 link.Join(endpoint, steam);
             }
             catch (Exception e) { Close(e.Message); }
@@ -90,6 +91,7 @@ namespace Queyang.Game
         static void Close(string reason)
         {
             var old = link;
+            if (client != null) GuestDiagnostics.End();
             link = null; host = null; client = null; colony = null; closing = null;
             old?.Dispose();
             if (old != null) UnityEngine.Application.runInBackground = previousBackgroundMode;

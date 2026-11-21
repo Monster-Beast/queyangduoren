@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../../src/Core/Core.csproj"/>
+    <Compile Include="../GuestScenario.cs;../../../../src/Game/Client/ColonyView.cs;../../../../src/Game/Network/*.cs"/>
+    <Reference Include="com.rlabrecque.steamworks.net" HintPath="$(ONI_GAME_DIR)/OxygenNotIncluded_Data/Managed/com.rlabrecque.steamworks.net.dll" Private="true"/>
+  </ItemGroup>
+</Project>

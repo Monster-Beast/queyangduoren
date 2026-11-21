@@ -11,6 +11,9 @@ namespace Queyang.Game
     {
         private const int VirtualPort = 24714;
         private const string RoomKey = "queyang_coop", RoomValue = "1";
+        // JoinLobby completes asynchronously even if its caller has returned to the menu.
+        // Track ownership so a late completion cannot eject a newer session from the same room.
+        private static readonly Dictionary<CSteamID,SteamBackend> Memberships = new Dictionary<CSteamID,SteamBackend>();
         private readonly Stopwatch clock = Stopwatch.StartNew();
         private sealed class Peer
         {
@@ -55,6 +58,7 @@ namespace Queyang.Game
                 if (!ulong.TryParse(endpoint, out id) || !new CSteamID(id).IsLobby())
                     throw new ArgumentException("Steam join requires a lobby ID from an invite.");
                 lobby = new CSteamID(id);
+                Memberships[lobby] = this;
                 entered = CallResult<LobbyEnter_t>.Create(OnEntered);
                 call = SteamMatchmaking.JoinLobby(lobby);
                 entered.Set(call);
@@ -77,6 +81,7 @@ namespace Queyang.Game
                 return;
             }
             lobby = new CSteamID(result.m_ulSteamIDLobby);
+            Memberships[lobby] = this;
             ownerAccount = SteamUser.GetSteamID();
             listener = SteamNetworkingSockets.CreateListenSocketP2P(VirtualPort, 0, null);
             if (listener == HSteamListenSocket.Invalid || !SteamMatchmaking.SetLobbyData(lobby, RoomKey, RoomValue))
@@ -90,8 +95,15 @@ namespace Queyang.Game
 
         private void OnEntered(LobbyEnter_t result, bool failed)
         {
-            if (disposed) return;
             var response = (EChatRoomEnterResponse)result.m_EChatRoomEnterResponse;
+            if (disposed)
+            {
+                var joined = new CSteamID(result.m_ulSteamIDLobby);
+                if (!failed && response == EChatRoomEnterResponse.k_EChatRoomEnterResponseSuccess && !Memberships.ContainsKey(joined))
+                    SteamMatchmaking.LeaveLobby(joined);
+                entered?.Dispose();
+                return;
+            }
             if (failed || response != EChatRoomEnterResponse.k_EChatRoomEnterResponseSuccess ||
                 result.m_ulSteamIDLobby != (ulong)lobby || SteamMatchmaking.GetLobbyData(lobby, RoomKey) != RoomValue)
             {
@@ -262,12 +274,16 @@ namespace Queyang.Game
         {
             disposed = true;
             stateCallback?.Dispose();
-            entered?.Dispose();
+            if (entered != null && !entered.IsActive()) entered.Dispose();
             // A pending CreateLobby may still succeed after cancellation. Its callback leaves the room.
             if (created != null && !created.IsActive()) created.Dispose();
             foreach (var id in new List<int>(peers.Keys)) Drop(id);
             if (listener != HSteamListenSocket.Invalid) SteamNetworkingSockets.CloseListenSocket(listener);
-            if (lobby != CSteamID.Nil) SteamMatchmaking.LeaveLobby(lobby);
+            if (lobby != CSteamID.Nil && Memberships.TryGetValue(lobby,out var active) && active == this)
+            {
+                Memberships.Remove(lobby);
+                SteamMatchmaking.LeaveLobby(lobby);
+            }
         }
     }
 

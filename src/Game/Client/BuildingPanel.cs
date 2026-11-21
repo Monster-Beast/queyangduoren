@@ -18,7 +18,7 @@ namespace Queyang.Game
         {
             this.x = x; this.y = y;
             target = cell.TargetId;
-            title = cell.Building ?? "";
+            title = STRINGS.UI.StripLinkFormatting(cell.Building ?? "");
             IsOpen = true;
             pages = 1;
             Query(0);

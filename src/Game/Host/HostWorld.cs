@@ -57,6 +57,14 @@ namespace Queyang.Game
                 X = Math.Max(origin.x, Math.Min(origin.x + size.x - ColonyView.Width, x)),
                 Y = Math.Max(origin.y, Math.Min(origin.y + size.y - ColonyView.Height, y))
             };
+            var clock = GameClock.Instance;
+            var speed = SpeedControlScreen.Instance;
+            view.Cycle = clock.GetCycle() + 1;
+            view.CycleFraction = Mathf.Clamp01(clock.GetCurrentCycleAsPercentage());
+            view.Paused = speed.IsPaused;
+            float selectedSpeed = speed.GetSpeed() == 0 ? speed.normalSpeed :
+                speed.GetSpeed() == 1 ? speed.fastSpeed : speed.ultraSpeed;
+            view.Speed = (byte)Mathf.Clamp(Mathf.RoundToInt(selectedSpeed), 0, 10);
             for (int dy = 0; dy < ColonyView.Height; dy++)
             {
                 for (int dx = 0; dx < ColonyView.Width; dx++)
@@ -130,14 +138,34 @@ namespace Queyang.Game
                 Temperature = Grid.Temperature[cell],
                 TargetId = target == null ? 0 : TargetKeys.GetValue(target, CreateKey).Value
             };
+            var colour = element.substance.uiColour;
+            result.R = colour.r;
+            result.G = colour.g;
+            result.B = colour.b;
             if (Grid.Solid[cell]) result.Flags |= 2;
             if (element.IsLiquid) result.Flags |= 4;
             if (element.id == SimHashes.Oxygen || element.id == SimHashes.ContaminatedOxygen) result.Flags |= 64;
             if (dig != null) result.Flags |= 8;
             if (building != null)
             {
-                result.Building = building.GetComponent<Building>().Def.Name;
-                result.Flags |= building.GetComponent<Constructable>() != null ? (byte)32 : (byte)16;
+                var item = building.GetComponent<Building>();
+                result.Building = item.Def.Name;
+                result.BuildingStyle = (byte)(((int)item.Orientation & 7) << 4);
+                switch (item.Def.PrefabID)
+                {
+                    case LadderConfig.ID: result.BuildingStyle |= 1; break;
+                    case TileConfig.ID: result.BuildingStyle |= 2; break;
+                    case DoorConfig.ID: result.BuildingStyle |= 3; break;
+                    case StorageLockerConfig.ID: result.BuildingStyle |= 4; break;
+                    case MineralDeoxidizerConfig.ID: result.BuildingStyle |= 5; break;
+                    case ManualGeneratorConfig.ID: result.BuildingStyle |= 6; break;
+                }
+                var deconstruct = building.GetComponent<Deconstructable>();
+                if (deconstruct != null && deconstruct.IsMarkedForDeconstruction()) result.BuildingStyle |= 128;
+                var construct = building.GetComponent<Constructable>();
+                result.Flags |= construct != null ? (byte)32 : (byte)16;
+                if (construct != null && construct.GetWorkTime() > 0)
+                    result.Progress = (byte)Mathf.RoundToInt(100f * Mathf.Clamp01(construct.GetPercentComplete()));
             }
             ReadConnections(ref result, cell);
             return result;

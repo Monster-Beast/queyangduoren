@@ -45,7 +45,6 @@ namespace Queyang.Game
         private Rect screenBlock;
         private bool gateInput;
         internal static bool BlockMenuKeys { get; private set; }
-        internal static int PreventedGuestSteps { get; private set; }
 
         private static bool MenuReady() => global::Game.Instance == null &&
             MainMenu.Instance != null && MainMenu.Instance.IsActive();
@@ -78,7 +77,6 @@ namespace Queyang.Game
             {
                 if (!hadClient)
                 {
-                    PreventedGuestSteps = 0;
                     expanded = true;
                     localMessage = "";
                 }
@@ -95,6 +93,7 @@ namespace Queyang.Game
                             map.Paint(replacement, (ColonyMap.Overlay)overlay);
                             motion.Apply(replacement, Time.unscaledTime);
                             view = replacement;
+                            GuestDiagnostics.AppliedView();
                             if (buildings.IsOpen && !buildings.TargetExists(view))
                             {
                                 buildings.Close();
@@ -321,7 +320,7 @@ namespace Queyang.Game
             }
             if (showResult)
             {
-                string text = Status() + "\n\n客机模拟步拦截计数：" + PreventedGuestSteps;
+                string text = Status() + "\n\n客机运行统计\n" + GuestDiagnostics.Summary;
                 float contentWidth = w - 74f;
                 float contentHeight = GUI.skin.label.CalcHeight(new GUIContent(text), contentWidth) + 16f;
                 resultScroll = GUI.BeginScrollView(new Rect(16, 56, w - 32f, h - 70f), resultScroll,
@@ -395,11 +394,11 @@ namespace Queyang.Game
                 string detail = selectedX + ", " + selectedY;
                 if ((cell.Flags & 1) != 0)
                 {
-                    detail += "\n" + cell.Element + "  " + cell.Mass.ToString("0.##") + " kg  " +
+                    detail += "\n" + STRINGS.UI.StripLinkFormatting(cell.Element) + "  " + cell.Mass.ToString("0.##") + " kg  " +
                               (cell.Temperature - 273.15f).ToString("0.0") + " °C";
                     if (!string.IsNullOrEmpty(cell.Building))
                     {
-                        detail += "\n" + cell.Building;
+                        detail += "\n" + STRINGS.UI.StripLinkFormatting(cell.Building);
                         if ((cell.Flags & 32) != 0) detail += " · 施工 " + cell.Progress + "%";
                         if ((cell.BuildingStyle & 128) != 0) detail += " · 待拆除";
                     }
@@ -537,15 +536,5 @@ namespace Queyang.Game
             private static bool Prefix() => !BlockMenuKeys;
         }
 
-        [HarmonyPatch(typeof(global::Game), "StepTheSim")]
-        private static class GuestSimulationGuard
-        {
-            private static bool Prefix()
-            {
-                if (!CoopSession.IsClient) return true;
-                PreventedGuestSteps++;
-                return false;
-            }
-        }
     }
 }

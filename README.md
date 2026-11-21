@@ -4,7 +4,16 @@
 
 ## 构建和安装
 
-需要 Windows、Steam 版《缺氧》和 .NET SDK 9。项目按本机 ONI 构建号 744825 编译。若 Steam 不在默认库，先将环境变量 ONI_GAME_DIR 指向包含 OxygenNotIncluded.exe 的目录。两端使用同一个候选包并启用 Vanilla，关闭其他 Mod、DLC 后重启游戏。
+已有游戏的试玩者可直接使用仓库中的 [0.1.0 开发包](dist/QueyangCoop-0.1.0-dev.zip)。在仓库根目录运行以下命令，可先预览安装目录，再安装同一份已测包。SHA-256 为 `A99D2EDD8DE84AA6DF88B520A3EB4D3A9BE4B32D1B38E334785BBAC8EF4E8956`。
+
+~~~powershell
+.\tools\install-dev.ps1 -Package .\dist\QueyangCoop-0.1.0-dev.zip -WhatIf
+.\tools\install-dev.ps1 -Package .\dist\QueyangCoop-0.1.0-dev.zip
+~~~
+
+好友只下载 ZIP 时，可退出游戏，将四个包文件解压到个人“文档”下的 `Klei\OxygenNotIncluded\mods\Local\QueyangCoop\`，然后在游戏 Mods 菜单启用。同一台机器选用一种安装方式即可，避免重复加载。
+
+自行编译需要 Windows、Steam 版《缺氧》和 .NET SDK 9。项目按本机 ONI 构建号 744825 编译。若 Steam 不在默认库，先将环境变量 ONI_GAME_DIR 指向包含 OxygenNotIncluded.exe 的目录。两端使用同一个候选包并启用 Vanilla，关闭其他 Mod、DLC 后重启游戏。
 
 1. 在仓库根目录运行环境检查和核心测试。预期 doctor 打印游戏库、程序集哈希和 SDK，测试全部通过。
 

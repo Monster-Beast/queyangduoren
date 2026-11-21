@@ -89,6 +89,16 @@ internal static class TransportSmoke
             }
             finally { foreach(var s in simultaneous) s.Close(); }
             Until(() => Peers.Count == 1);
+            int healthyPeer = Peers.Single();
+            using(var stalled = new TcpClient("127.0.0.1",port))
+            {
+                Until(() => Peers.Count == 2);
+                int slowPeer = Peers.Single(id => id != healthyPeer);
+                // A guest that cannot drain its reliable queue must not stall the colony.
+                for (int n=0; n<65; n++) host.Send(slowPeer,packet);
+                Until(() => Peers.Count == 1);
+                Check(Peers.Contains(healthyPeer) && host.LastError.Contains("queue limit"), "Backpressure isolation failed");
+            }
             response = null;
             client.Send(0, new byte[] { 42 });
             Until(() => response != null);
@@ -101,7 +111,7 @@ internal static class TransportSmoke
                 Until(() => Peers.Count == 1);
                 Check(Peers.Single() > previous, "Reused peer generation");
             }
-            Console.WriteLine("PASS: loopback round trip; 65536-byte frame; fragmented header/body; invalid length isolation; room cap; disconnect/rejoin.");
+            Console.WriteLine("PASS: loopback round trip; 65536-byte frame; fragmented header/body; invalid length isolation; room cap; bounded queue isolation; disconnect/rejoin.");
             return 0;
         }
         finally { foreach (var node in Nodes) node.Dispose(); }
