@@ -40,6 +40,7 @@ namespace Queyang.Integration
         private bool readonlyFixture, steamLobby;
         private SteamSocketPairCheck steamPair;
         private GuestLifecycle lifecycle;
+        private NativeScenario native;
         private void Awake()
         {
             report = Environment.GetEnvironmentVariable("QY_SMOKE_REPORT");
@@ -49,6 +50,9 @@ namespace Queyang.Integration
             Application.runInBackground = true;
             start = Time.realtimeSinceStartup;
             Log("MENU " + (isHost ? "host" : "client") + " worldLoaded=" + (global::Game.Instance != null));
+            if (Environment.GetEnvironmentVariable("QY_SMOKE_ROLE") == "guest-native" ||
+                Environment.GetEnvironmentVariable("QY_SMOKE_ROLE") == "client")
+                native = new NativeScenario(Log, report);
             if (Environment.GetEnvironmentVariable("QY_SMOKE_ROLE") == "guest-lifecycle")
             {
                 try { lifecycle = new GuestLifecycle(Log, report); }
@@ -61,7 +65,8 @@ namespace Queyang.Integration
             if (finished || Time.realtimeSinceStartup - start < 2) return;
             try
             {
-                if (lifecycle != null) { lifecycle.Update(); finished = lifecycle.Done; }
+                if (native != null) finished = native.Update();
+                else if (lifecycle != null) { lifecycle.Update(); finished = lifecycle.Done; }
                 else if (isHost) HostStep();
                 else GuestStep();
             }
@@ -124,6 +129,7 @@ namespace Queyang.Integration
             if (!featuresRun && File.Exists(Path.Combine(Path.GetDirectoryName(report),"features.flag")))
             {
                 featuresRun = true;
+                Log("FEATURE native management " + NativeManagementChecks.Run());
                 HostFeatureChecks.Run(Log);
             }
             if (step == 0 && Math.Abs(GameClock.Instance.GetTime() - hostTime) > 2)
@@ -138,7 +144,7 @@ namespace Queyang.Integration
             if (!guestStarted)
             {
                 guestStarted = true;
-                CoopSession.Join(Environment.GetEnvironmentVariable("QY_SMOKE_ENDPOINT"),false);
+                CoopSession.JoinDiagnostic(Environment.GetEnvironmentVariable("QY_SMOKE_ENDPOINT"),false);
                 Log("JOIN " + CoopSession.Status);
             }
             if (CoopSession.Status != lastStatus)

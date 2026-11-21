@@ -1,6 +1,6 @@
 # Opt-in integration fixture. Build a private game copy; never point the patcher at the Steam install.
 [CmdletBinding()]
-param([string]$SavePath,[string]$GameDir=$env:ONI_GAME_DIR,[int]$TimeoutSeconds=160,[switch]$SecondGame,[switch]$GuestOnly,[switch]$SteamLobby,[switch]$Persistence,[ValidateRange(0,86400)][int]$SoakSeconds=0,[switch]$Lifecycle,[switch]$LifecycleScreenshot,[switch]$SoloPerformance)
+param([string]$SavePath,[string]$GameDir=$env:ONI_GAME_DIR,[int]$TimeoutSeconds=160,[switch]$SecondGame,[switch]$GuestOnly,[switch]$SteamLobby,[switch]$Persistence,[ValidateRange(0,86400)][int]$SoakSeconds=0,[switch]$Lifecycle,[switch]$LifecycleScreenshot,[switch]$SoloPerformance,[switch]$NativeRecord,[string]$NativeReplay,[string]$NativeEndpoint)
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 . (Join-Path $repo 'tools/dev-common.ps1')
@@ -9,7 +9,7 @@ if (!$GameDir) {
     $GameDir=Join-Path $steamRoot 'steamapps/common/OxygenNotIncluded'
 }
 $GameDir = (Resolve-Path -LiteralPath $GameDir).Path
-if (!$GuestOnly) {
+if (!$GuestOnly -and !$NativeReplay -and !$NativeEndpoint) {
     if (!$SavePath) { throw 'Provide -SavePath for the disposable host, or -GuestOnly for the Unity guest check.' }
     $SavePath = (Resolve-Path -LiteralPath $SavePath).Path
     if ([IO.Path]::GetExtension($SavePath) -ine '.sav') { throw 'Select a Vanilla .sav for the disposable host.' }
@@ -21,12 +21,14 @@ if ($LifecycleScreenshot -and !$Lifecycle) { throw 'Use -LifecycleScreenshot tog
 if ($Lifecycle -and ($SecondGame -or $GuestOnly -or $SteamLobby -or $Persistence -or $SoakSeconds)) { throw '-Lifecycle requires its own disposable guest and save.' }
 if ($SoloPerformance -and ($SecondGame -or $GuestOnly -or $SteamLobby -or $Persistence -or $Lifecycle -or $SoakSeconds)) { throw '-SoloPerformance runs only the isolated single-player measurement.' }
 if ($Lifecycle) { $TimeoutSeconds=[Math]::Max($TimeoutSeconds,360) }
-$guestFixture=$GuestOnly -or $Lifecycle
+if ($NativeEndpoint -and ($NativeRecord -or $NativeReplay -or $Lifecycle -or $SoakSeconds -or $Persistence -or $SoloPerformance -or $SecondGame -or $GuestOnly -or $SteamLobby)) { throw 'NativeEndpoint uses only the isolated guest and a running external LAN host.' }
+if (($NativeRecord -or $NativeReplay) -and ($GuestOnly -or $SteamLobby -or $SecondGame -or ($NativeReplay -and $Persistence) -or $Lifecycle -or $SoakSeconds -or $SoloPerformance -or ($NativeRecord -and $NativeReplay))) { throw 'Run native recording and replay separately.' }
+$guestFixture=$GuestOnly -or $Lifecycle -or $NativeReplay
 if ($SoakSeconds -and ($GuestOnly -or $SteamLobby -or $SecondGame -or $Persistence)) { throw '-SoakSeconds uses one real host and three TCP guest processes/peers.' }
 if ($SoakSeconds -gt 0) { $TimeoutSeconds=[Math]::Max($TimeoutSeconds,$SoakSeconds + 90) }
 if (!(Test-Path -LiteralPath (Join-Path $GameDir OxygenNotIncluded.exe))) { throw 'Set ONI_GAME_DIR to your Steam install.' }
 if (Get-Process OxygenNotIncluded -ErrorAction SilentlyContinue) { throw 'Close active ONI sessions before this test.' }
-$initialSaveHash = if (!$GuestOnly) { (Get-FileHash -LiteralPath $SavePath).Hash }
+$initialSaveHash = if (!$GuestOnly -and !$NativeReplay -and !$NativeEndpoint) { (Get-FileHash -LiteralPath $SavePath).Hash }
 $realDb=Join-Path (Get-DefaultModsRoot) 'mods.json'
 $initialDbHash=if (Test-Path -LiteralPath $realDb) { (Get-FileHash -LiteralPath $realDb).Hash }
 $sourceDll=Join-Path $GameDir 'OxygenNotIncluded_Data/Managed/Assembly-CSharp-firstpass.dll'
@@ -48,7 +50,7 @@ $copy=Get-CheckedPath $run (Join-Path $run 'GameCopy')
 Write-Output "Run directory: $run"
 $exe=Join-Path $copy OxygenNotIncluded.exe
 $processes=@()
-$scopedEnv=@('QY_SMOKE_ROOT','QY_SMOKE_ROLE','QY_SMOKE_REPORT','QY_SMOKE_SAVE','QY_SMOKE_ENDPOINT','QY_SMOKE_FINGERPRINT','QY_SMOKE_PERSISTENCE','QY_SMOKE_STEAM_LOBBY','QY_SMOKE_SOAK','QY_SMOKE_CAPTURE','ONI_COOP_BIND','SteamAppId','SteamGameId')
+$scopedEnv=@('QY_NATIVE_RECORDING','QY_SMOKE_ROOT','QY_SMOKE_ROLE','QY_SMOKE_REPORT','QY_SMOKE_SAVE','QY_SMOKE_ENDPOINT','QY_SMOKE_FINGERPRINT','QY_SMOKE_PERSISTENCE','QY_SMOKE_STEAM_LOBBY','QY_SMOKE_SOAK','QY_SMOKE_CAPTURE','ONI_COOP_BIND','SteamAppId','SteamGameId')
 $previousEnv=@{}
 foreach ($name in $scopedEnv) { $previousEnv[$name]=[Environment]::GetEnvironmentVariable($name) }
 try {
@@ -89,12 +91,14 @@ try {
     $env:SteamAppId='457140'
     $env:SteamGameId='457140'
     $env:ONI_COOP_BIND=$endpoint
-    $env:QY_SMOKE_ENDPOINT=$endpoint
+    $env:QY_SMOKE_ENDPOINT=if ($NativeEndpoint) {$NativeEndpoint} else {$endpoint}
     $env:QY_SMOKE_SOAK=if($SoakSeconds){'1'}else{'0'}
     $env:QY_SMOKE_STEAM_LOBBY=if($SteamLobby){'1'}else{'0'}
     $env:QY_SMOKE_PERSISTENCE=if($Persistence){'1'}else{'0'}
     $env:QY_SMOKE_CAPTURE=if($LifecycleScreenshot){'1'}else{'0'}
-    $roles=if ($Lifecycle) { 'guest-lifecycle' } elseif ($GuestOnly) { 'guest-readonly' } elseif ($SteamLobby) { 'host' } else { @('host','client') }
+    if ($NativeRecord) { $env:QY_NATIVE_RECORDING=Join-Path $run 'native-recording'; [IO.Directory]::CreateDirectory($env:QY_NATIVE_RECORDING) | Out-Null }
+    if ($NativeReplay) { $env:QY_NATIVE_RECORDING=Get-CheckedPath $qaRoot (Resolve-Path -LiteralPath $NativeReplay).Path }
+    $roles=if ($NativeReplay -or $NativeEndpoint) { 'guest-native' } elseif ($Lifecycle) { 'guest-lifecycle' } elseif ($GuestOnly) { 'guest-readonly' } elseif ($SteamLobby) { 'host' } else { @('host','client') }
     foreach ($role in $roles) {
         $klei=Join-Path $run "$role/Klei"
         $gameProfile=Join-Path $klei 'OxygenNotIncluded'
@@ -127,23 +131,25 @@ try {
         }
         if ($guestFixture) {
             $env:QY_SMOKE_REPORT=Join-Path $run 'fixture.report'
-            $server=Start-Process -FilePath $peerExe -ArgumentList @('--serve-readonly',([string]($TimeoutSeconds + 30))) -WorkingDirectory $run -PassThru -WindowStyle Hidden
+            $serveArgs=if ($NativeReplay) { @('--native-replay') } else { @('--serve-readonly',([string]($TimeoutSeconds + 30))) }
+            $readyMark=if ($NativeReplay) { '^NATIVE_REPLAY_READY' } else { '^READONLY_FIXTURE_READY' }
+            $server=Start-Process -FilePath $peerExe -ArgumentList $serveArgs -WorkingDirectory $run -PassThru -WindowStyle Hidden
             $processes+=$server
             $timer=[Diagnostics.Stopwatch]::StartNew()
             while ($timer.Elapsed.TotalSeconds -lt 10 -and !$server.HasExited -and !(Test-Path -LiteralPath $env:QY_SMOKE_REPORT)) {
                 Start-Sleep -Milliseconds 100
             }
-            if ($server.HasExited -or !(Select-String -LiteralPath $env:QY_SMOKE_REPORT -Pattern '^READONLY_FIXTURE_READY' -Quiet)) {
+            if ($server.HasExited -or !(Select-String -LiteralPath $env:QY_SMOKE_REPORT -Pattern $readyMark -Quiet)) {
                 throw 'Cannot start the synthetic test fixture host.'
             }
             $env:QY_SMOKE_REPORT=Join-Path $run "$role.report"
         }
         if ($role -eq 'client' -and !$SecondGame) {
             $peerOptions=@{}
-            if ($SoakSeconds -gt 0) { $peerOptions.ArgumentList=@('--soak',"$SoakSeconds") }
+            if ($NativeRecord) { $peerOptions.ArgumentList=@('--native-record') }; if ($SoakSeconds -gt 0) { $peerOptions.ArgumentList=@('--soak',"$SoakSeconds") }
             $process=Start-Process -FilePath $peerExe -WorkingDirectory $run -PassThru -WindowStyle Hidden @peerOptions
         } else {
-            $displayArgs=if ($LifecycleScreenshot) { @('-screen-width','1280','-screen-height','800') } else { @('-batchmode') }
+            $displayArgs=if ($LifecycleScreenshot -or $NativeReplay -or $NativeEndpoint -or ($SecondGame -and $role -eq 'client')) { @('-screen-width','1280','-screen-height','800') } else { @('-batchmode') }
             $playerArgs=@($displayArgs) + @('-screen-fullscreen','0','-logFile',('"' + $log + '"'))
             $process=Start-Process -FilePath $exe -WorkingDirectory $copy -ArgumentList $playerArgs -PassThru -WindowStyle Hidden
         }
@@ -151,11 +157,31 @@ try {
         $timer=[Diagnostics.Stopwatch]::StartNew()
         $sampleAt=0
         $savedManifest=$false
+        $restarted=$false
         $done=if($role -eq 'host' -and !$SteamLobby) { '^HOST_READY' } else { '^PASS ' }
-        while ($timer.Elapsed.TotalSeconds -lt $TimeoutSeconds -and !$process.HasExited) {
+        while ($timer.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
             if (Test-Path -LiteralPath $env:QY_SMOKE_REPORT) {
                 $lines=Get-Content -LiteralPath $env:QY_SMOKE_REPORT
                 if ($lines -match '^FAIL ') { throw "Game smoke $role failed. See report in $run" }
+                if ($role -in @('guest-native','client') -and $lines -match '^NATIVE_RESTART_REQUIRED') {
+                    if ($restarted) { throw 'The fresh isolated profile requested a second restart.' }
+                    if (!$process.WaitForExit(15000)) { throw 'Native restart requested but game did not quit.' }
+                    $restarted=$true
+                    # A freshly installed dev mod can be disabled until the player explicitly
+                    # enables it. Preserve the ONI-generated version and all other mod entries.
+                    $isolatedDb=Join-Path $mods 'mods.json'
+                    $settings=Get-Content -LiteralPath $isolatedDb -Raw -Encoding UTF8 | ConvertFrom-Json
+                    $entry=@($settings.mods | Where-Object { $_.label.id -ceq 'QueyangCoop' -and $_.label.distribution_platform -eq 4 })
+                    if ($entry.Count -ne 1) { throw 'Missing isolated development mod entry after restart.' }
+                    $entry[0].enabled=$true
+                    $entry[0].enabledForDlc=@('')
+                    [IO.File]::WriteAllText($isolatedDb,($settings | ConvertTo-Json -Depth 12))
+                    Move-Item -LiteralPath $env:QY_SMOKE_REPORT -Destination (Join-Path $run 'first-launch.report')
+                    Move-Item -LiteralPath $log -Destination (Join-Path $run 'first-launch.log')
+                    $process=Start-Process -FilePath $exe -WorkingDirectory $copy -ArgumentList $playerArgs -PassThru -WindowStyle Hidden
+                    $processes+=$process
+                    continue
+                }
                 if ($SoakSeconds -and $role -eq 'client' -and $lines -match '^SOAK three concurrent guests Live') {
                     if (!$savedManifest) {
                         & (Join-Path $PSScriptRoot '../Performance/record-soak-input.ps1') -SoakRun $run | Out-Null
@@ -176,6 +202,7 @@ try {
                 }
                 if ($lines -match $done) { break }
             }
+            if ($process.HasExited) { break }
             Start-Sleep -Milliseconds 500
         }
         if (!(Test-Path -LiteralPath $env:QY_SMOKE_REPORT) -or !(Select-String -LiteralPath $env:QY_SMOKE_REPORT -Pattern $done -Quiet)) {
@@ -217,6 +244,7 @@ try {
     }
 } finally {
     $hostReport=Join-Path $run 'host.report'
+    $featureFailed=$false
     if ($processes.Count -gt 0 -and !$processes[0].HasExited -and (Test-Path -LiteralPath $hostReport) -and
         (Select-String -LiteralPath $hostReport -Pattern '^HOST_READY' -Quiet)) {
         [IO.File]::WriteAllText((Join-Path $run 'features.flag'),'run')
@@ -225,6 +253,7 @@ try {
             Start-Sleep -Milliseconds 250
         }
         Get-Content -LiteralPath $hostReport
+        $featureFailed=!(Select-String -LiteralPath $hostReport -Pattern '^FEATURE_CHECKS_DONE' -Quiet)
     }
     foreach ($p in $processes) {
         if (!$p.HasExited) {
@@ -247,10 +276,11 @@ try {
         (Get-FileHash -LiteralPath $sourceDll).Hash -ne $initialDllHash -or
         ($initialDbHash -and (Get-FileHash -LiteralPath $realDb).Hash -ne $initialDbHash)) { throw 'Unexpected change to original test inputs.' }
     # Keep reports and raw, private engine logs locally; remove the copied game and save files.
-    foreach ($child in 'GameCopy','host','client','guest-readonly','guest-lifecycle') {
+    foreach ($child in 'GameCopy','host','client','guest-readonly','guest-lifecycle','guest-native') {
         $owned=Get-CheckedPath $run (Join-Path $run $child)
         if (Test-Path -LiteralPath $owned) { Remove-Item -LiteralPath $owned -Recurse -Force }
     }
     Write-Output "Original input hashes checked. Reports and local logs: $run"
     if ($persistenceError) { throw $persistenceError }
+    if ($featureFailed) { throw "Host feature checks failed or timed out. See $hostReport" }
 }

@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using Queyang.Core;
 
@@ -16,6 +17,13 @@ namespace Queyang.Game
         static global::Game colony;
         static string notice = "Offline";
         static string closing;
+        static string replicaDirectory;
+        internal static bool CapturingJoinSave { get; private set; }
+        static string closedReplica;
+        static bool nativeClient, sceneAnnounced;
+        static byte[] appliedNativeView;
+        internal static ColonyView NativeView { get; private set; }
+        public static bool IsNativeClient => client != null && nativeClient;
         static double joinTime, lastIncoming, nextPing;
         public static bool IsHosting => host != null;
         public static bool IsClient => client != null;
@@ -58,24 +66,79 @@ namespace Queyang.Game
                 colony = global::Game.Instance;
                 link = Open();
                 metrics = new SessionMetrics("host",Time());
-                host = new RoomHost(version, Send, link.Drop, HostWorld.Capture, HostWorld.Execute, Time);
+                host = new RoomHost(version, Send, link.Drop, HostWorld.Capture, HostWorld.Execute, Time, CaptureNativeSave);
+                host.NativeCaptureFailed += error => UnityEngine.Debug.LogWarning("[QueyangCoop] Failed to capture colony: " + error.Message);
                 link.Host(steam);
                 notice = "Hosting";
             }
             catch (Exception e) { Close(e.Message); }
         }
 
-        public static void Join(string endpoint, bool steam)
+        static Stream CaptureNativeSave()
         {
-            if (link != null) return;
+            var dir = Path.Combine(Path.GetTempPath(), "QueyangCoop", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "Baseline.sav");
+            var crashPath = KCrashReporter.MOST_RECENT_SAVEFILE;
+            try
+            {
+                CapturingJoinSave = true;
+                var written = SaveLoader.Instance.Save(path, false, false);
+                if (string.IsNullOrEmpty(written) || !string.Equals(Path.GetFullPath(written), path, StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("Host could not create the multiplayer save copy");
+                return new SnapshotFile(path, dir);
+            }
+            catch { RemoveSessionDirectory(dir); throw; }
+            finally { KCrashReporter.MOST_RECENT_SAVEFILE = crashPath; CapturingJoinSave = false; }
+        }
+
+        sealed class SnapshotFile : FileStream
+        {
+            readonly string directory;
+            public SnapshotFile(string path, string directory) : base(path, FileMode.Open, FileAccess.Read, FileShare.Read)
+            { this.directory = directory; }
+            protected override void Dispose(bool disposing)
+            {
+                base.Dispose(disposing);
+                if (disposing && Directory.Exists(directory)) RemoveSessionDirectory(directory);
+            }
+        }
+
+        static void RemoveSessionDirectory(string directory)
+        {
+            if (directory == null) return;
+            try { Directory.Delete(directory, true); }
+            catch (IOException error) { UnityEngine.Debug.LogWarning("[QueyangCoop] Temporary files: " + error.Message); }
+            catch (UnauthorizedAccessException error) { UnityEngine.Debug.LogWarning("[QueyangCoop] Temporary files: " + error.Message); }
+        }
+
+        public static void Join(string endpoint, bool steam) => Join(endpoint, steam, true);
+        internal static void JoinDiagnostic(string endpoint, bool steam) => Join(endpoint, steam, false);
+        internal static void CleanupClosedReplica()
+        {
+            if (closedReplica == null || (NativeGuestScene.Active && !NativeGuestScene.ApplicationQuitting)) return;
+            RemoveSessionDirectory(closedReplica);
+            closedReplica = null;
+        }
+
+        static void Join(string endpoint, bool steam, bool native)
+        {
+            if (link != null || NativeGuestScene.Active) return;
+            CleanupClosedReplica();
             try
             {
                 if (global::Game.Instance != null) throw new InvalidOperationException("Join from the main menu");
                 var version = Fingerprint();
                 link = Open();
                 metrics = new SessionMetrics("guest",Time());
-                client = new RoomClient(version, data => Send(0, data));
+                nativeClient = native;
+                if (native) replicaDirectory = Path.Combine(Path.GetTempPath(), "QueyangCoop", Guid.NewGuid().ToString("N"));
+                client = new RoomClient(version, data => Send(0, data), replicaDirectory,
+                    native ? (Action<string>)NativeGuestScene.Load : null);
                 client.CommandLatencyMs += metrics.RecordCommand;
+                client.PeripheralReceived += bytes => {
+                    if (NativeGuestScene.Ready) ApplyNativeTile(ColonyView.Decode(bytes),false);
+                };
                 client.ResultReceived += result => CommandResult?.Invoke(result);
                 nextPing = lastIncoming = joinTime = Time();
                 GuestDiagnostics.Start();
@@ -88,10 +151,21 @@ namespace Queyang.Game
             try { link?.Invite(); } catch (Exception e) { notice = e.Message; }
         }
         public static void Disconnect() => Close("Offline");
+        internal static void Disconnect(string reason) => Close(reason);
         static void Close(string reason)
         {
             var old = link;
+            if (nativeClient) NativeGuestScene.End();
+            NativeWorldMirror.Reset();
+            NativeToolCommands.Reset();
+            NativeManagement.Reset();
             if (client != null) GuestDiagnostics.End();
+            client?.Dispose();
+            host?.Dispose();
+            if (replicaDirectory != null) closedReplica = replicaDirectory;
+            CleanupClosedReplica();
+            replicaDirectory = null; nativeClient = sceneAnnounced = false;
+            appliedNativeView = null; NativeView = null;
             link = null; host = null; client = null; colony = null; closing = null;
             old?.Dispose();
             if (old != null) UnityEngine.Application.runInBackground = previousBackgroundMode;
@@ -99,6 +173,14 @@ namespace Queyang.Game
             notice = reason;
         }
         public static void Subscribe(int x, int y) => WithClient(c => c.Subscribe(x, y));
+        internal static bool RequestPeripheral(int x,int y) => client?.RequestPeripheral(x,y) == true;
+        static void ApplyNativeTile(ColonyView tile, bool center)
+        {
+            if (!tile.Native) throw new InvalidDataException("Expected native world state");
+            NativeWorldMirror.Apply(tile);
+            NativeToolCommands.Observe(tile);
+            if (center) NativeView = tile;
+        }
         public static void Command(string action, int x, int y) => WithClient(c => c.Command(action, x, y));
         static void WithClient(Action<RoomClient> operation)
         {
@@ -143,20 +225,42 @@ namespace Queyang.Game
             {
                 if (host != null && (colony == null || colony != global::Game.Instance))
                 { Close("Colony closed"); return; }
-                if (client != null && global::Game.Instance != null)
+                if (client != null && global::Game.Instance != null && !NativeGuestScene.Active)
                 { Close("Left main menu"); return; }
                 link.Poll();
                 if (closing != null) { Close(closing); return; }
                 host?.Tick();
                 if (client?.Live == true) joinTime = Time();
                 if (client == null) return;
+                if (nativeClient)
+                {
+                    if (NativeGuestScene.Ready && !sceneAnnounced)
+                    {
+                        client.NativeWorldReady();
+                        sceneAnnounced = true;
+                        lastIncoming = joinTime = Time();
+                    }
+                    if (sceneAnnounced && client.View != null && !ReferenceEquals(appliedNativeView, client.View))
+                    {
+                        var next = ColonyView.Decode(client.View);
+                        ApplyNativeTile(next,true);
+                        appliedNativeView = client.View;
+                        GuestDiagnostics.AppliedView();
+                    }
+                    if (sceneAnnounced && client.Live)
+                    {
+                        NativeToolCommands.Tick();
+                        NativeManagement.Tick();
+                    }
+                }
                 var time = Time();
                 if (time >= nextPing)
                 {
                     client.Ping(Clock.ElapsedMilliseconds);
                     nextPing = time + 3;
                 }
-                if (time - lastIncoming > 30 || (!client.Live && time - joinTime > 60)) Close("Host timed out");
+                if (time - lastIncoming > (nativeClient && !sceneAnnounced ? 180 : 30) ||
+                    (!client.Live && time - joinTime > (nativeClient ? 360 : 60))) Close("Host timed out");
             }
             catch (Exception e)
             {

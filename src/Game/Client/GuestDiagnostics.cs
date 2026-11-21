@@ -8,17 +8,18 @@ namespace Queyang.Game
     internal static class GuestDiagnostics
     {
         private static volatile bool active;
-        private static int steps, decisions, chores, saves, views, nativeWorlds;
+        private static int steps, decisions, chores, saves, views, nativeWorlds, replicaStarts, gridBindings;
 
         public static void Start()
         {
             if (active) return;
-            steps = decisions = chores = saves = views = nativeWorlds = 0;
+            steps = decisions = chores = saves = views = nativeWorlds = replicaStarts = gridBindings = 0;
             active = true;
         }
 
         public static string Summary => "simStep=" + steps + " findChore=" + decisions + " setChore=" + chores +
-            " saveAttempts=" + saves + " worldStarts=" + nativeWorlds + " views=" + views;
+            " saveAttempts=" + saves + " worldStarts=" + nativeWorlds + " views=" + views +
+            " replicaStarts=" + replicaStarts + " gridBindings=" + gridBindings;
 
         public static void End()
         {
@@ -37,6 +38,7 @@ namespace Queyang.Game
             private static void Prefix()
             {
                 if (!active) return;
+                if (NativeGuestScene.Active) { replicaStarts++; return; }
                 nativeWorlds++;
                 CoopSession.Disconnect();
             }
@@ -46,7 +48,13 @@ namespace Queyang.Game
         [HarmonyPatch(typeof(global::Game), "StepTheSim", typeof(float))]
         private static class SimStep
         {
-            private static void Prefix() { if (active) Interlocked.Increment(ref steps); }
+            private static void Prefix(float __0)
+            {
+                if (!active) return;
+                if (NativeGuestScene.Active && !NativeGuestScene.Ready && __0 == 0f)
+                    Interlocked.Increment(ref gridBindings);
+                else Interlocked.Increment(ref steps);
+            }
         }
 
         [HarmonyPatch(typeof(ChoreConsumer), "FindNextChore", new[] { typeof(Chore.Precondition.Context) }, new[] { ArgumentType.Out })]
@@ -66,7 +74,7 @@ namespace Queyang.Game
         {
             private static bool Prefix()
             {
-                if (!active) return true;
+                if (!active && !NativeGuestScene.Active) return true;
                 Interlocked.Increment(ref saves);
                 return false;
             }

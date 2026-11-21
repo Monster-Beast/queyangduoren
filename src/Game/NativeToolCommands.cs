@@ -1,0 +1,122 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
+using HarmonyLib;
+using UnityEngine;
+
+namespace Queyang.Game
+{
+    // Only intercept the guest's native input path. World updates from the host do not enter these tools.
+    internal static class NativeToolCommands
+    {
+        sealed class Order { public string Action; public int X, Y; }
+        static readonly Queue<Order> pending = new Queue<Order>();
+        static readonly List<ColonyView> lastTiles = new List<ColonyView>();
+        static float nextDispatch;
+        static readonly Dictionary<Type,string> tools = new Dictionary<Type,string> {
+            { typeof(DigTool), "dig" }, { typeof(MopTool), "mop" }, { typeof(ClearTool), "sweep" },
+            { typeof(HarvestTool), "harvest" }, { typeof(CancelTool), "cancel" },
+            { typeof(DeconstructTool), "deconstruct" }, { typeof(PrioritizeTool), "priority" }
+        };
+        internal static void Reset() { pending.Clear(); lastTiles.Clear(); nextDispatch = 0; }
+        internal static void Observe(ColonyView view)
+        {
+            lastTiles.RemoveAll(tile => tile.X == view.X && tile.Y == view.Y);
+            lastTiles.Insert(0,view);
+            if (lastTiles.Count > 64) lastTiles.RemoveAt(lastTiles.Count-1);
+        }
+        internal static void Tick()
+        {
+            if (pending.Count == 0 || Time.unscaledTime < nextDispatch) return;
+            var cmd = pending.Dequeue();
+            CoopSession.Command(cmd.Action, cmd.X, cmd.Y);
+            nextDispatch = Time.unscaledTime + 0.055f;
+        }
+        internal static void Enqueue(string action, int cell)
+        {
+            var view = CoopSession.NativeView;
+            if (view == null || !Grid.IsValidCell(cell))
+            { NativeGuestFeedback.Show("该格子的联机数据尚未就绪。"); return; }
+            Grid.CellToXY(cell, out int x, out int y);
+            if (action == "cancel" || action == "deconstruct" || action.StartsWith("priority", StringComparison.Ordinal))
+            {
+                var tile = lastTiles.Find(t => x >= t.X && y >= t.Y && x < t.X+ColonyView.Width && y < t.Y+ColonyView.Height);
+                if (tile == null) { NativeGuestFeedback.Show("正在等待这一区域的数据。"); return; }
+                int id = tile.Cells[(y-tile.Y)*ColonyView.Width+x-tile.X].TargetId;
+                if (id < 1) { NativeGuestFeedback.Show("此处没有可修改的订单或建筑。"); return; }
+                action += ":" + id;
+            }
+            if (pending.Count >= 256) { NativeGuestFeedback.Show("已选格子过多，请等待当前订单发送后再试。"); return; }
+            pending.Enqueue(new Order { Action = action, X = x, Y = y });
+        }
+
+        [HarmonyPatch]
+        static class Drag
+        {
+            static IEnumerable<MethodBase> TargetMethods()
+            {
+                foreach (var type in tools.Keys) yield return AccessTools.DeclaredMethod(type, "OnDragTool");
+            }
+            static bool Prefix(DragTool __instance, int __0)
+            {
+                if (!NativeGuestScene.Active) return true;
+                if (!NativeGuestScene.Ready || !tools.TryGetValue(__instance.GetType(), out var action)) return false;
+                if (action == "priority")
+                {
+                    var selected = ToolMenu.Instance.PriorityScreen.GetLastSelectedPriority();
+                    if (selected.priority_class != PriorityScreen.PriorityClass.basic)
+                    { NativeGuestFeedback.Show("紧急优先级由房主设置。"); return false; }
+                    action += selected.priority_value;
+                }
+                Enqueue(action, __0);
+                return false;
+            }
+        }
+        [HarmonyPatch(typeof(BuildTool), "TryBuild")]
+        static class Build
+        {
+            static bool Prefix(int __0, BuildingDef ___def, Orientation ___buildingOrientation, IList<Tag> ___selectedElements,
+                ref int ___lastDragCell, ref Orientation ___lastDragOrientation)
+            {
+                if (!NativeGuestScene.Active) return true;
+                if (!NativeGuestScene.Ready || ___def == null || ___selectedElements == null || ___selectedElements.Count == 0 ||
+                    (__0 == ___lastDragCell && ___buildingOrientation == ___lastDragOrientation)) return false;
+                ___lastDragCell = __0; ___lastDragOrientation = ___buildingOrientation;
+                var materials = new string[___selectedElements.Count];
+                for (int i = 0; i < materials.Length; ++i) materials[i] = ___selectedElements[i].ToString();
+                Enqueue("plan/" + ___def.PrefabID + "/" + (int)___buildingOrientation + "/" +
+                    string.Join(",",materials), __0);
+                return false;
+            }
+        }
+
+        // The vanilla path list also contains the corners of a bent pipe or wire.
+        // Send straight segments so the host can run its own network placement checks.
+        [HarmonyPatch(typeof(BaseUtilityBuildTool), "BuildPath")]
+        static class Utility
+        {
+            static bool Prefix(BuildingDef ___def, IList ___path, IList<Tag> ___selectedElements)
+            {
+                if (!NativeGuestScene.Active) return true;
+                if (!NativeGuestScene.Ready || ___def == null || ___path == null || ___path.Count == 0) return false;
+                string tool = ___def.PrefabID == WireConfig.ID ? "wire" : ___def.PrefabID == GasConduitConfig.ID ? "gaspipe" :
+                    ___def.PrefabID == LiquidConduitConfig.ID ? "liquidpipe" : null;
+                if (tool == null) { NativeGuestFeedback.Show("这种管线请由房主铺设。"); return false; }
+                if (___selectedElements == null || ___selectedElements.Count != 1)
+                { NativeGuestFeedback.Show("请重新选择管线材料。"); return false; }
+                tool += "/" + ___selectedElements[0];
+                var cellField = AccessTools.Field(___path[0].GetType(), "cell");
+                int previous = (int)cellField.GetValue(___path[0]);
+                for (int i = 0; i < ___path.Count; i++)
+                {
+                    int cell = (int)cellField.GetValue(___path[i]);
+                    Grid.CellToXY(previous, out int x, out int y);
+                    Enqueue(tool + "@" + x + "," + y, cell);
+                    previous = cell;
+                }
+                return false;
+            }
+        }
+    }
+}

@@ -39,4 +39,17 @@ namespace Queyang.Game
             Debug.Log("[QueyangCoop] menu ready");
         }
     }
+
+    // Joining uses ONI's normal serializer without generating a new entry in the player's
+    // colony gallery or scheduling an asynchronous preview for a temporary network file.
+    [HarmonyPatch(typeof(RetireColonyUtility), "SaveColonySummaryData")]
+    internal static class SkipJoinSummary
+    {
+        static bool Prefix() => !CoopSession.CapturingJoinSave;
+    }
+    [HarmonyPatch(typeof(Timelapser), "SaveColonyPreview")]
+    internal static class SkipJoinPreview
+    {
+        static bool Prefix() => !CoopSession.CapturingJoinSave;
+    }
 }

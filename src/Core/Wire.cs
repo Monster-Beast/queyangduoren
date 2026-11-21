@@ -7,7 +7,8 @@ namespace Queyang.Core
     public enum Message : ushort
     {
         Hello = 1, Welcome, Reject, Subscribe, Begin, Chunk, Applied, Resync,
-        Command, Result, Ping, Pong, Window
+        Command, Result, Ping, Pong, Window,
+        NativeBegin, NativeChunk, NativeWindow, NativeEnd, NativeReady, NativeError, PeripheralRequest, PeripheralChunk
     }
 
     public static class Wire

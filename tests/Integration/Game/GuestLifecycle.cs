@@ -110,7 +110,7 @@ namespace Queyang.Integration
                     if (HasPanelTexture()) throw new Exception("Stale viewport before joining.");
                     if (round == 1 && screenshot != null && (Screen.width != 1280 || Screen.height != 800))
                         Screen.SetResolution(1280, 800, FullScreenMode.Windowed);
-                    CoopSession.Join(Environment.GetEnvironmentVariable("QY_SMOKE_ENDPOINT"), false);
+                    CoopSession.JoinDiagnostic(Environment.GetEnvironmentVariable("QY_SMOKE_ENDPOINT"), false);
                     firstViewFrame = -1;
                     Set(Stage.FirstView);
                     break;

@@ -37,20 +37,21 @@ namespace Queyang.Game
         {
             var parts = action.Split('/');
             int id, index;
-            bool edit = parts[0] == "b";
+            bool proxy = parts[0] == "proxy" || parts[0] == "setproxy";
+            bool edit = parts[0] == "b" || parts[0] == "setproxy";
             if (parts.Length != (edit ? 4 : 3) || !Natural(parts[1], out id) || !Natural(parts[2], out index))
                 return "ERROR Invalid building request";
             var target = GetTarget(cell);
             TargetKey key;
             if (target == null || !TargetKeys.TryGetValue(target, out key) || key.Value != id ||
                 target.GetComponent<BuildingComplete>() == null) return "ERROR Building changed or unfinished";
-            var options = Settings(target);
+            var options = Settings(target, proxy);
             if (edit)
             {
                 if (index >= options.Count || !string.Equals(options[index].Token(), parts[3], StringComparison.Ordinal))
                     return "ERROR Setting changed; refresh this building";
                 options[index].Apply();
-                options = Settings(target);
+                options = Settings(target, proxy);
             }
             int pages = Math.Max(1, (options.Count + PageSize - 1) / PageSize);
             int page = Math.Min(pages - 1, edit ? index / PageSize : index);
@@ -70,11 +71,15 @@ namespace Queyang.Game
                     if (bytes > 90) break;
                     shortLabel.Append(part);
                 }
-                text.AppendFormat(CultureInfo.InvariantCulture, "\nb/{0}/{1}/{2}\t{3}",
-                    id, i, options[i].Token(), shortLabel);
+                text.AppendFormat(CultureInfo.InvariantCulture, "\n{0}/{1}/{2}/{3}\t{4}",
+                    proxy ? "setproxy" : "b", id, i, options[i].Token(), shortLabel);
             }
-            return text.ToString();
+            return proxy ? "NM1/p/" + text : text.ToString();
         }
+
+        internal static string ProxyOptions(string action, int x, int y) =>
+            World != null && VisibleCell(World, x, y, out int cell) ?
+                BuildingOptions(action.Substring(3), cell, x, y) : "ERROR Building unavailable";
 
         private static bool Natural(string value, out int number) =>
             int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out number) && number >= 0;
@@ -88,7 +93,31 @@ namespace Queyang.Game
         private static readonly System.Reflection.FieldInfo ToggleIndex =
             AccessTools.DeclaredField(typeof(BuildingEnabledButton), "ToggleIdx");
 
-        private static List<Setting> Settings(GameObject building)
+        internal static string NativeBuilding(string[] p, int x, int y)
+        {
+            var world = World;
+            if (p.Length < 3 || world == null || !VisibleCell(world, x, y, out int cell))
+                return "ERROR Building unavailable";
+            var target = FindBuilding(cell);
+            var button = target == null ? null : target.GetComponent<BuildingEnabledButton>();
+            var toggle = target == null ? null : target.GetComponent<Toggleable>();
+            if (target == null || target.GetComponent<BuildingComplete>() == null ||
+                target.GetComponent<KPrefabID>().InstanceID != NativeManagement.Number(p[2])) return "ERROR Building changed";
+            if (p[1] == "settings" || p[1] == "filter" || p[1] == "recipe")
+                return NativeManagement.BuildingSettings(target, p);
+            if (button == null || toggle == null || p.Length != (p[1] == "switch" ? 5 : 3)) return "ERROR No building switch";
+            int slot = (int)ToggleIndex.GetValue(button);
+            bool queued = toggle.IsToggleQueued(slot);
+            if (p.Length == 5)
+            {
+                if (p[3] != (button.IsEnabled ? "1" : "0") || p[4] != (queued ? "1" : "0")) return "ERROR Switch changed";
+                ToggleMenu.Value(button);
+                queued = toggle.IsToggleQueued(slot);
+            }
+            return "NM1/b/" + p[2] + "/" + (button.IsEnabled ? "1" : "0") + "/" + (queued ? "1" : "0");
+        }
+
+        private static List<Setting> Settings(GameObject building, bool proxy)
         {
             var options = new List<Setting>();
             var button = building.GetComponent<BuildingEnabledButton>();
@@ -99,6 +128,7 @@ namespace Queyang.Game
                 string label = queued ? "取消已排队的开关操作" : button.IsEnabled ? "停用建筑" : "启用建筑";
                 options.Add(new Setting("power/" + button.IsEnabled + "/" + queued, label, () => ToggleMenu.Value(button)));
             }
+            if (proxy) AddProxyControls(options, building);
             AddFilters(options, building.GetComponent<TreeFilterable>());
             AddRecipes(options, building.GetComponent<ComplexFabricator>());
             return options;
@@ -106,19 +136,7 @@ namespace Queyang.Game
 
         private static void AddFilters(List<Setting> options, TreeFilterable filter)
         {
-            var storage = filter == null ? null : filter.GetFilterStorage();
-            if (storage == null || !filter.showUserMenu || storage.storageFilters == null) return;
-            var discovery = DiscoveredResources.Instance;
-            var tags = new HashSet<Tag>();
-            foreach (Tag category in storage.storageFilters)
-            {
-                HashSet<Tag> members;
-                if (discovery.TryGetDiscoveredResourcesFromTag(category, out members) && members != null)
-                    tags.UnionWith(members);
-                if (discovery.IsDiscovered(category)) tags.Add(category);
-            }
-            if (filter.ForbiddenTags != null) tags.ExceptWith(filter.ForbiddenTags);
-            foreach (Tag tag in tags.OrderBy(t => t.ToString(), StringComparer.Ordinal))
+            foreach (Tag tag in EditableTags(filter).OrderBy(t => t.ToString(), StringComparer.Ordinal))
             {
                 bool on = filter.ContainsTag(tag);
                 options.Add(new Setting("filter/" + tag + "/" + on, (on ? "停止收纳 " : "允许收纳 ") + tag, () => {
@@ -128,16 +146,29 @@ namespace Queyang.Game
             }
         }
 
+        internal static HashSet<Tag> EditableTags(TreeFilterable filter)
+        {
+            var storage = filter == null ? null : filter.GetFilterStorage();
+            var tags = new HashSet<Tag>();
+            if (storage == null || !filter.showUserMenu || storage.storageFilters == null) return tags;
+            var discovery = DiscoveredResources.Instance;
+            foreach (Tag category in storage.storageFilters)
+            {
+                HashSet<Tag> members;
+                if (discovery.TryGetDiscoveredResourcesFromTag(category, out members) && members != null)
+                    tags.UnionWith(members);
+                if (discovery.IsDiscovered(category)) tags.Add(category);
+            }
+            if (filter.ForbiddenTags != null) tags.ExceptWith(filter.ForbiddenTags);
+            return tags;
+        }
+
         private static void AddRecipes(List<Setting> options, ComplexFabricator fabricator)
         {
             if (fabricator == null) return;
             foreach (var recipe in fabricator.GetRecipes().OrderBy(r => r.id, StringComparer.Ordinal))
             {
-                if (!recipe.IsRequiredTechOrPOIUnlocked() || recipe.IsAnyProductDeprecated()) continue;
-                if (recipe.RequiresAllIngredientsDiscovered && !recipe.ingredients.All(ingredient =>
-                    DiscoveredResources.Instance.IsDiscovered(ingredient.material) ||
-                    (ingredient.possibleMaterials != null && ingredient.possibleMaterials.Any(DiscoveredResources.Instance.IsDiscovered))))
-                    continue;
+                if (!RecipeAvailable(recipe)) continue;
                 int count = fabricator.GetRecipeQueueCount(recipe);
                 if (count == ComplexFabricator.QUEUE_INFINITE) continue;
                 string label = recipe.GetUIName(false) + " [" + count + "]";
@@ -148,5 +179,11 @@ namespace Queyang.Game
                     options.Add(new Setting("remove/" + state, "−1 " + label, () => fabricator.SetRecipeQueueCount(recipe, count - 1)));
             }
         }
+
+        internal static bool RecipeAvailable(ComplexRecipe recipe) =>
+            recipe.IsRequiredTechOrPOIUnlocked() && !recipe.IsAnyProductDeprecated() &&
+            (!recipe.RequiresAllIngredientsDiscovered || recipe.ingredients.All(ingredient =>
+                DiscoveredResources.Instance.IsDiscovered(ingredient.material) ||
+                (ingredient.possibleMaterials != null && ingredient.possibleMaterials.Any(DiscoveredResources.Instance.IsDiscovered))));
     }
 }

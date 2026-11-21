@@ -18,7 +18,10 @@ namespace Queyang.Game
             new[] { "梯子", "砖块", "门", "储物箱", "供氧设备", "发电机", "电线", "气管", "液管" }
         };
         private static readonly string[] Groups = { "工具", "建造" };
-        private static readonly string[] Overlays = { "地形", "温度", "氧气", "电力", "气管", "液管", "自动化" };
+        private static readonly string[][] OverlayRows = {
+            new[] { "地形", "温度", "氧气", "电力" },
+            new[] { "气管", "液管", "自动化" }
+        };
         private const int MaxBatch = 256;
 
         private struct PendingCommand { public string Action; public int X, Y; }
@@ -29,7 +32,7 @@ namespace Queyang.Game
         private readonly BuildOptionsPanel buildOptions = new BuildOptionsPanel();
         private ColonyView view;
         private byte[] received;
-        private bool expanded, launchChecked, hadClient;
+        private bool expanded, launchChecked, hadClient, hadNativeClient;
         private IDisposable invites;
         private float nextInviteCheck, nextSend;
         private int group, tool, overlay, zoom = 1;
@@ -53,27 +56,34 @@ namespace Queyang.Game
 
         private void OnEnable()
         {
+            CoopSession.CommandResult += NativeGuestFeedback.Result;
             CoopSession.CommandResult += buildings.Receive;
             CoopSession.CommandResult += buildOptions.Receive;
         }
         private void OnDisable()
         {
+            CoopSession.CommandResult -= NativeGuestFeedback.Result;
             CoopSession.CommandResult -= buildings.Receive;
             CoopSession.CommandResult -= buildOptions.Receive;
         }
 
         private void Update()
         {
+            NativeGuestScene.Tick();
             bool menu = MenuReady();
             UpdateInvites(menu);
-            if (CoopSession.IsClient && (MainMenu.Instance == null || global::Game.Instance != null) ||
+            if (CoopSession.IsClient && !NativeGuestScene.Active && (MainMenu.Instance == null || global::Game.Instance != null) ||
                 CoopSession.IsHosting && global::Game.Instance == null)
             {
                 CoopSession.Disconnect();
                 localMessage = "场景已切换，会话已结束。";
             }
             CoopSession.Pump();
-            if (CoopSession.IsClient)
+            if (hadNativeClient && !CoopSession.IsNativeClient)
+                NativeGuestFeedback.Show(CoopSession.Status == "Offline" ? "已离开联机房间。" : "联机已结束 · " + CoopSession.Status);
+            hadNativeClient = CoopSession.IsNativeClient;
+            bool diagnostic = CoopSession.IsClient && !CoopSession.IsNativeClient;
+            if (diagnostic)
             {
                 if (!hadClient)
                 {
@@ -115,11 +125,12 @@ namespace Queyang.Game
                     CoopSession.Command(c.Action, c.X, c.Y);
                 }
             }
-            if (!CoopSession.IsClient && hadClient) { ClearReplica(); buildOptions.Reset(); }
-            hadClient = CoopSession.IsClient;
+            if (!diagnostic && hadClient) { ClearReplica(); buildOptions.Reset(); }
+            hadClient = diagnostic;
             if (!menu && !HostMenu()) expanded = false;
-            gateInput = CoopSession.IsClient || menu || HostMenu();
-            BlockMenuKeys = CoopSession.IsClient || menu && expanded;
+            bool connecting = CoopSession.IsNativeClient && !NativeGuestScene.Ready;
+            gateInput = diagnostic || connecting || menu || HostMenu();
+            BlockMenuKeys = diagnostic || connecting || menu && expanded;
             UpdateBlocker();
         }
 
@@ -216,13 +227,14 @@ namespace Queyang.Game
 
         private Rect PanelRect(float width, float height)
         {
+            if (CoopSession.IsNativeClient && NativeGuestScene.Ready) return new Rect(width - 265, 12, 253, 79);
             if (CoopSession.IsClient) return new Rect(0, 0, width, height);
             return expanded ? new Rect(width - 366, 12, 354, 312) : new Rect(width - 126, 12, 114, 34);
         }
 
         private void OnGUI()
         {
-            if (!gateInput) return;
+            if (!gateInput && !NativeGuestFeedback.Visible) return;
             Matrix4x4 old = GUI.matrix;
             int oldDepth = GUI.depth;
             GUISkin oldSkin = GUI.skin;
@@ -241,6 +253,15 @@ namespace Queyang.Game
                 }
                 GUI.skin = panelSkin;
                 GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
+                if (NativeGuestFeedback.Visible)
+                {
+                    float width = Mathf.Min(420f, Screen.width / scale - 16f);
+                    float height = GUI.skin.label.CalcHeight(new GUIContent(NativeGuestFeedback.Text), width - 20f) + 12f;
+                    var toast = new Rect((Screen.width / scale - width) * .5f, 10f, width, height);
+                    Fill(toast, new Color(.10f, .10f, .14f, .95f));
+                    GUI.Label(new Rect(toast.x + 10f, toast.y + 5f, width - 20f, height - 10f), NativeGuestFeedback.Text);
+                }
+                if (!gateInput) return;
                 var rect = PanelRect(Screen.width / scale, Screen.height / scale);
                 GUI.BeginGroup(rect);
                 try { DrawPanel(rect.width, rect.height); }
@@ -251,6 +272,18 @@ namespace Queyang.Game
 
         private void DrawPanel(float w, float h)
         {
+            if (CoopSession.IsNativeClient)
+            {
+                Fill(new Rect(0, 0, w, h), new Color(.10f, .10f, .14f));
+                GUI.Label(new Rect(12, 8, w - 24, 28), CoopSession.Status);
+                if (GUI.Button(new Rect(12, 39, 132, 30), "离开房间")) CoopSession.Disconnect();
+                return;
+            }
+            if (NativeGuestScene.Active)
+            {
+                GUI.Label(new Rect(12, 8, w - 24, 28), "正在退出联机殖民地…");
+                return;
+            }
             if (CoopSession.IsClient)
             {
                 Fill(new Rect(0, 0, w, h), new Color(.10f, .10f, .14f));
@@ -358,7 +391,15 @@ namespace Queyang.Game
 
         private void DrawSidebar(float x, float width, float height)
         {
-            int choice = GUI.SelectionGrid(new Rect(x, 48, width, 48), overlay, Overlays, 4);
+            int choice = overlay, offset = 0;
+            for (int row = 0; row < OverlayRows.Length; row++)
+            {
+                var labels = OverlayRows[row];
+                int selectedInRow = overlay >= offset && overlay < offset + labels.Length ? overlay - offset : -1;
+                int clicked = GUI.SelectionGrid(new Rect(x, 48 + 25 * row, width, 23), selectedInRow, labels, labels.Length);
+                if (clicked >= 0 && clicked != selectedInRow) choice = offset + clicked;
+                offset += labels.Length;
+            }
             if (choice != overlay) { overlay = choice; map.Paint(view, (ColonyMap.Overlay)overlay); }
             if (GUI.Button(new Rect(x, 101, 42, 27), "←")) Pan(-1, 0);
             if (GUI.Button(new Rect(x + 46, 101, 42, 27), "→")) Pan(1, 0);
@@ -517,6 +558,8 @@ namespace Queyang.Game
             GUI.DrawTexture(rect, Texture2D.whiteTexture);
             GUI.color = old;
         }
+
+        private void OnApplicationQuit() => NativeGuestScene.QuitApplication();
 
         private void OnDestroy()
         {

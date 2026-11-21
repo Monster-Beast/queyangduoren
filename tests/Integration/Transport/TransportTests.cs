@@ -26,6 +26,7 @@ internal static class TransportSmoke
     public static int Main(string[] args)
     {
         if(args.Length == 1 && args[0] == "--late-join") return LateJoin.Run();
+        if(args.Length == 1 && args[0] == "--native-save") return LateJoin.Run(true);
         // Ask the OS for a test port to avoid interfering with a real game session.
         var selector = new TcpListener(IPAddress.Loopback, 0);
         selector.Start();

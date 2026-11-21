@@ -45,7 +45,9 @@ namespace Queyang.Game
             string prefab;
             IUtilityNetworkMgr manager;
             var game = global::Game.Instance;
-            switch (action.Substring(0, at))
+            var kind = action.Substring(0, at).Split('/');
+            if (kind.Length > 2 || (kind.Length == 2 && kind[1].Length == 0)) return "ERROR Invalid utility material";
+            switch (kind[0])
             {
                 case "wire": prefab = WireConfig.ID; manager = game.electricalConduitSystem; break;
                 case "gaspipe": prefab = GasConduitConfig.ID; manager = game.gasConduitSystem; break;
@@ -70,7 +72,7 @@ namespace Queyang.Game
                 var obj = Grid.Objects[cell, (int)def.TileLayer];
                 if (obj == null)
                 {
-                    string result = Place(prefab, cell, world, out obj);
+                    string result = Place(prefab, cell, world, out obj, primaryMaterial:kind.Length == 2 ? kind[1] : null);
                     if (obj == null) return PartialLine(i, count, result);
                 }
                 var item = obj.GetComponent<KAnimGraphTileVisualizer>();

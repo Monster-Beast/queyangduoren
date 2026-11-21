@@ -5,10 +5,17 @@ using System.IO;
 
 namespace Queyang.Core
 {
-    public sealed class RoomClient
+    public sealed class RoomClient : IDisposable
     {
         readonly string fingerprint;
         readonly Action<byte[]> send;
+        readonly string nativeSaveDirectory;
+        readonly Action<string> nativeSaveReady;
+        NativeSaveSink save;
+        bool worldReady, disposed;
+        public bool WaitingForNativeWorld { get; private set; }
+        public int NativeBytesExpected { get; private set; }
+        public int NativeBytesReceived { get; private set; }
         byte[] room, staging;
         int peer, received;
         uint generation;
@@ -21,10 +28,48 @@ namespace Queyang.Core
         public bool Rejected { get; private set; }
         public event Action<string> ResultReceived;
         public event Action<double> CommandLatencyMs;
+        public event Action<byte[]> PeripheralReceived;
+        bool peripheralPending;
+        byte[] peripheral;
+        int peripheralOffset;
+        public bool RequestPeripheral(int x,int y)
+        {
+            if (!worldReady || !Live || peripheralPending || x < 0 || y < 0) return false;
+            peripheralPending = true;
+            Send(Message.PeripheralRequest,w => { w.Write(x); w.Write(y); });
+            return true;
+        }
         readonly Dictionary<ulong,long> pending = new Dictionary<ulong,long>();
 
-        public RoomClient(string fingerprint, Action<byte[]> send) { this.fingerprint = fingerprint; this.send = send; }
-        public void Connected() => send(Wire.Pack(Message.Hello,w => Wire.Text(w,fingerprint)));
+        // The game owns a verified .sav once nativeSaveReady returns; incomplete files belong to this client.
+        public RoomClient(string fingerprint, Action<byte[]> send, string nativeSaveDirectory = null, Action<string> nativeSaveReady = null)
+        {
+            if ((nativeSaveDirectory == null) != (nativeSaveReady == null)) throw new ArgumentException("Supply both native save directory and loader.");
+            this.fingerprint = fingerprint; this.send = send;
+            this.nativeSaveDirectory = nativeSaveDirectory == null ? null : Path.GetFullPath(nativeSaveDirectory);
+            this.nativeSaveReady = nativeSaveReady;
+        }
+        public void Connected() => send(Wire.Pack(Message.Hello,w => {
+            Wire.Text(w,fingerprint);
+            if (nativeSaveReady != null) w.Write((byte)1);
+        }));
+
+        public void NativeWorldReady()
+        {
+            if (worldReady) return;
+            if (!WaitingForNativeWorld || disposed) throw new InvalidOperationException("No verified native world awaiting load.");
+            WaitingForNativeWorld = false; worldReady = true;
+            Send(Message.NativeReady,w => {});
+            RequestView();
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed=true; WaitingForNativeWorld=false;
+            save?.Dispose(); save=null;
+            room=null; View=null; staging=null; pending.Clear();
+        }
         public void Ping(long stamp)
         {
             if (room != null) Send(Message.Ping,w => w.Write(stamp));
@@ -36,7 +81,7 @@ namespace Queyang.Core
         {
             if (this.x == x && this.y == y && generation != 0) return;
             this.x=x; this.y=y;
-            if (room != null) RequestView();
+            if (room != null && (nativeSaveReady == null || worldReady)) RequestView();
         }
 
         void RequestView()
@@ -57,6 +102,13 @@ namespace Queyang.Core
 
         public void Receive(byte[] frame)
         {
+            if (disposed) throw new ObjectDisposedException(nameof(RoomClient));
+            try { ReadFrame(frame); }
+            catch { save?.Dispose(); save=null; throw; }
+        }
+
+        private void ReadFrame(byte[] frame)
+        {
             Wire.Read(frame,(type,r) =>
             {
                 if (type == Message.Reject && room == null)
@@ -67,12 +119,58 @@ namespace Queyang.Core
                 if (room == null)
                 {
                     if (type != Message.Welcome || source <= 0) throw new InvalidDataException("Expected Welcome");
-                    Wire.End(r); room = identity; peer = source; RequestView(); return;
+                    Wire.End(r); room = identity; peer = source;
+                    if (nativeSaveReady == null) RequestView();
+                    else Status = "Waiting for native save";
+                    return;
                 }
                 if (!ViewPatch.Equal(room,identity) || source != peer) throw new InvalidDataException("Wrong session");
                 switch (type)
                 {
+                    case Message.PeripheralChunk:
+                        int total = r.ReadInt32(), at = r.ReadInt32();
+                        if (!peripheralPending || at != peripheralOffset || total < 1 || total > Wire.MaxFrame ||
+                            at >= total || (peripheral != null && peripheral.Length != total))
+                            throw new InvalidDataException("Invalid peripheral chunk");
+                        int count = Math.Min(Wire.ChunkSize,total-at);
+                        var piece = Wire.Bytes(r,count); Wire.End(r);
+                        if (peripheral == null) peripheral = new byte[total];
+                        Buffer.BlockCopy(piece,0,peripheral,at,count); peripheralOffset += count;
+                        if (peripheralOffset == total)
+                        {
+                            var complete = peripheral;
+                            peripheral = null; peripheralOffset = 0; peripheralPending = false;
+                            PeripheralReceived?.Invoke(complete);
+                        }
+                        break;
+                    case Message.NativeBegin:
+                        var nativeLength=r.ReadInt32(); Wire.End(r);
+                        if (nativeSaveReady==null || NativeBytesExpected!=0) throw new InvalidDataException("Unexpected native save manifest.");
+                        save=new NativeSaveSink(nativeSaveDirectory,nativeLength);
+                        NativeBytesExpected=nativeLength; Status="Receiving native save"; break;
+                    case Message.NativeChunk:
+                        if (save==null) throw new InvalidDataException("Native save chunk without a transfer.");
+                        save.Append(r);
+                        NativeBytesReceived=save.Received;
+                        if (save.Received==save.Length || save.Received % (4*Wire.ChunkSize)==0)
+                            Send(Message.NativeWindow,w=>w.Write(NativeBytesReceived));
+                        break;
+                    case Message.NativeEnd:
+                        var saveHash=Wire.Bytes(r,32); Wire.End(r);
+                        if (save==null) throw new InvalidDataException("Native save end without a transfer.");
+                        var localPath=save.Publish(saveHash);
+                        save.Dispose(); save=null;
+                        WaitingForNativeWorld=true; Status="Loading native world";
+                        try { nativeSaveReady(localPath); }
+                        catch { WaitingForNativeWorld=false; File.Delete(localPath); throw; }
+                        break;
+                    case Message.NativeError:
+                        if (nativeSaveReady==null || worldReady) throw new InvalidDataException("Unexpected native save failure.");
+                        var failure=Wire.Text(r); Wire.End(r);
+                        save?.Dispose(); save=null; Rejected=true; Status=failure;
+                        break;
                     case Message.Begin:
+                        if (nativeSaveReady!=null && !worldReady) throw new InvalidDataException("View before native world load.");
                         var g = r.ReadUInt32(); var from = r.ReadUInt64(); var to = r.ReadUInt64();
                         var length = r.ReadInt32(); var prefix = r.ReadInt32(); var suffix = r.ReadInt32();
                         var shape = new ViewPatch(prefix,suffix,length,Wire.Bytes(r,32)); Wire.End(r);
@@ -104,8 +202,9 @@ namespace Queyang.Core
                             pending.Remove(cmd);
                             CommandLatencyMs?.Invoke((Stopwatch.GetTimestamp()-start)*1000.0/Stopwatch.Frequency);
                         }
-                        Status = result.StartsWith("M1:",StringComparison.Ordinal) ? "Management updated" :
-                            "#" + cmd + " [" + seq + "] " + result;
+                        if (!result.StartsWith("NM1/",StringComparison.Ordinal))
+                            Status = result.StartsWith("M1:",StringComparison.Ordinal) ? "Management updated" :
+                                "#" + cmd + " [" + seq + "] " + result;
                         ResultReceived?.Invoke(result);
                         break;
                     case Message.Pong: r.ReadInt64(); break;

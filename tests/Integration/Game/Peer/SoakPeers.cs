@@ -19,13 +19,23 @@ namespace Queyang.Integration
             internal long Bytes, Frames, Applied;
             internal ColonyView View;
             internal int OriginX, OriginY, Inspected;
+            readonly string temp = Path.Combine(Path.GetTempPath(),"qy-soak-" + Guid.NewGuid().ToString("N"));
+            double nextPeripheral;
+            internal int SideViews;
             byte[] last;
             public Guest(string fingerprint,string endpoint)
             {
                 Link=new CoopTransport((_,b)=>{
                     Frames++; Bytes+=b.Length; Client.Receive(b);
                 },_=>Client.Connected(),_=>throw new IOException("Unexpected peer disconnect"));
-                Client=new RoomClient(fingerprint,b=>Link.Send(0,b));
+                Client=new RoomClient(fingerprint,b=>Link.Send(0,b),temp,file => {
+                    File.Delete(file);
+                    Client.NativeWorldReady();
+                });
+                Client.PeripheralReceived += b => {
+                    if (!ColonyView.Decode(b).Native) throw new InvalidDataException("Expected native peripheral viewport");
+                    SideViews++;
+                };
                 Client.CommandLatencyMs+=ms=>Latencies.Add(ms);
                 Client.ResultReceived+=_=>Inspected++;
                 Link.Join(endpoint,false);
@@ -40,8 +50,18 @@ namespace Queyang.Integration
                     View=ColonyView.Decode(last);
                     if(Applied++==0) { OriginX=View.X; OriginY=View.Y; }
                 }
+                double now = (double)Stopwatch.GetTimestamp()/Stopwatch.Frequency;
+                if (Client.Live && now >= nextPeripheral)
+                {
+                    nextPeripheral = now+.25;
+                    Client.RequestPeripheral(OriginX+24,OriginY);
+                }
             }
-            public void Dispose() => Link.Dispose();
+            public void Dispose()
+            {
+                Link.Dispose(); Client.Dispose();
+                if (Directory.Exists(temp)) Directory.Delete(temp);
+            }
         }
 
         public static void Run(Action<string> log,int seconds)
@@ -118,7 +138,8 @@ namespace Queyang.Integration
                 for(int i=0;i<guests.Length;i++)
                 {
                     var g=guests[i]; g.Latencies.Sort();
-                    log("SOAK peer="+i+" views="+g.Applied+" frames="+g.Frames+" rxBytes="+g.Bytes+
+                    if (g.SideViews < 1) throw new IOException("No peripheral view");
+                    log("SOAK peer="+i+" views="+g.Applied+" peripheralViews="+g.SideViews+" frames="+g.Frames+" rxBytes="+g.Bytes+
                         " commands="+g.Inspected+" commandP95ms="+g.Latencies[(int)Math.Ceiling(g.Latencies.Count*0.95)-1].ToString("F1"));
                 }
                 log("PASS real host, three TCP guests, "+seconds+" seconds, "+joined+" reconnections");

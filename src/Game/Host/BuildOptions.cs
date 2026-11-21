@@ -60,5 +60,17 @@ namespace Queyang.Game
             if (def==null || !Orientations(def).Contains((Orientation)value)) return "ERROR Invalid orientation";
             return Place(prefab,cell,world,out _,(Orientation)value,p[3]);
         }
+
+        static string PlaceNativePlan(string action,int cell,WorldContainer world)
+        {
+            var parts = action.Split('/');
+            if (parts.Length != 4 || !int.TryParse(parts[2],NumberStyles.None,CultureInfo.InvariantCulture,out int rotation))
+                return "ERROR Invalid construction plan";
+            var def = Assets.GetBuildingDef(parts[1]);
+            if (def == null || def.isUtility || !Orientations(def).Contains((Orientation)rotation))
+                return "ERROR Invalid building or orientation";
+            try { return Place(def.PrefabID,cell,world,out _,(Orientation)rotation,specified:parts[3].Split(',')); }
+            catch (KeyNotFoundException) { return "ERROR Building unavailable in the current plan menu"; }
+        }
     }
 }

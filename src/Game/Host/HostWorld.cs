@@ -54,6 +54,7 @@ namespace Queyang.Game
                 y -= ColonyView.Height / 2;
             }
             var view = new ColonyView {
+                Native = true, Detailed = true, HasResources = true,
                 X = Math.Max(origin.x, Math.Min(origin.x + size.x - ColonyView.Width, x)),
                 Y = Math.Max(origin.y, Math.Min(origin.y + size.y - ColonyView.Height, y))
             };
@@ -65,13 +66,14 @@ namespace Queyang.Game
             float selectedSpeed = speed.GetSpeed() == 0 ? speed.normalSpeed :
                 speed.GetSpeed() == 1 ? speed.fastSpeed : speed.ultraSpeed;
             view.Speed = (byte)Mathf.Clamp(Mathf.RoundToInt(selectedSpeed), 0, 10);
+            var circuits = new Dictionary<ushort, ColonyCell>();
             for (int dy = 0; dy < ColonyView.Height; dy++)
             {
                 for (int dx = 0; dx < ColonyView.Width; dx++)
                 {
                     int cell;
                     if (VisibleCell(world, view.X + dx, view.Y + dy, out cell))
-                        view.Cells[dy * ColonyView.Width + dx] = ReadCell(cell);
+                        view.Cells[dy * ColonyView.Width + dx] = ReadCell(cell, circuits);
                 }
             }
             var dupes = new List<ColonyDupe>();
@@ -88,7 +90,14 @@ namespace Queyang.Game
                 var driver = dupe.GetComponent<ChoreDriver>();
                 var chore = driver == null ? null : driver.GetCurrentChore();
                 var pos = dupe.transform.position;
+                var anim = dupe.GetComponent<KBatchedAnimController>();
                 dupes.Add(new ColonyDupe {
+                    SaveId = dupe.GetComponent<KPrefabID>().InstanceID,
+                    Personality = dupe.personalityResourceId.HashValue,
+                    Animation = anim == null ? 0 : anim.currentAnim.HashValue,
+                    AnimationPosition = anim == null ? (byte)0 :
+                        (byte)Mathf.RoundToInt(255 * Mathf.Clamp01(anim.GetPositionPercent())),
+                    FlipX = anim != null && anim.FlipX,
                     X = dupeX, Y = dupeY, Name = dupe.GetProperName(),
                     Id = TargetKeys.GetValue(dupe.gameObject, CreateKey).Value,
                     SubX = (byte)Mathf.RoundToInt(255 * Mathf.Clamp01(pos.x - dupeX)),
@@ -98,6 +107,7 @@ namespace Queyang.Game
                 if (dupes.Count == 64) break;
             }
             view.Dupes = dupes.ToArray();
+            NativeResources.Capture(view, world);
             return view.Encode();
         }
 
@@ -111,7 +121,7 @@ namespace Queyang.Game
             return Grid.WorldIdx[cell] == world.id && Grid.Visible[cell] > 0;
         }
 
-        private static GameObject FindBuilding(int cell)
+        internal static GameObject FindBuilding(int cell)
         {
             foreach (var layer in DisplayLayers)
             {
@@ -127,13 +137,14 @@ namespace Queyang.Game
             return dig != null ? dig : FindBuilding(cell);
         }
 
-        private static ColonyCell ReadCell(int cell)
+        private static ColonyCell ReadCell(int cell, Dictionary<ushort, ColonyCell> circuits)
         {
             var element = Grid.Element[cell];
             var building = FindBuilding(cell);
             var dig = Grid.Objects[cell, (int)ObjectLayer.DigPlacer];
             var target = dig != null ? dig : building;
             var result = new ColonyCell {
+                ElementHash = (int)element.id, Visibility = Grid.Visible[cell], RenderGround = Grid.RenderedByWorld[cell],
                 Flags = 1, Element = element.name, Mass = Grid.Mass[cell],
                 Temperature = Grid.Temperature[cell],
                 TargetId = target == null ? 0 : TargetKeys.GetValue(target, CreateKey).Value
@@ -149,6 +160,24 @@ namespace Queyang.Game
             if (building != null)
             {
                 var item = building.GetComponent<Building>();
+                result.BuildingHash = new HashedString(item.Def.PrefabID).HashValue;
+                var offset = Grid.CellToXY(item.GetCell()) - Grid.CellToXY(cell);
+                result.AnchorDX = (sbyte)Mathf.Clamp(offset.x, -127, 127);
+                result.AnchorDY = (sbyte)Mathf.Clamp(offset.y, -127, 127);
+                if (offset.x == 0 && offset.y == 0)
+                {
+                    result.BuildingSaveId = building.GetComponent<KPrefabID>().InstanceID;
+                    var primary = building.GetComponent<PrimaryElement>();
+                    if (primary != null)
+                        result.Structure = new MaterialSample { Element = (int)primary.ElementID,
+                            Mass = primary.Mass, Temperature = primary.Temperature };
+                    var anim = building.GetComponent<KBatchedAnimController>();
+                    if (anim != null)
+                    {
+                        result.BuildingAnimation = anim.currentAnim.HashValue;
+                        result.BuildingFrame = (byte)Mathf.RoundToInt(255 * Mathf.Clamp01(anim.GetPositionPercent()));
+                    }
+                }
                 result.Building = item.Def.Name;
                 result.BuildingStyle = (byte)(((int)item.Orientation & 7) << 4);
                 switch (item.Def.PrefabID)
@@ -168,6 +197,7 @@ namespace Queyang.Game
                     result.Progress = (byte)Mathf.RoundToInt(100f * Mathf.Clamp01(construct.GetPercentComplete()));
             }
             ReadConnections(ref result, cell);
+            ReadUtilityValues(ref result, cell, circuits);
             return result;
         }
 
@@ -177,6 +207,7 @@ namespace Queyang.Game
         {
             int cell;
             var world = World;
+            if (world != null && NativeManagement.TryExecute(action,x,y,out string nativeResult)) return nativeResult;
             if (world != null && action != null && action.StartsWith("manage/", StringComparison.Ordinal))
                 return ColonyManagement.Execute(action);
             if (world != null && action != null && action.Length <= 96 && action.StartsWith("buildOptions/", StringComparison.Ordinal))
@@ -184,6 +215,8 @@ namespace Queyang.Game
             if (action == "overview" && world != null) return Overview(world);
             if (world == null || !VisibleCell(world, x, y, out cell) || !Grid.IsValidBuildingCell(cell))
                 return "ERROR Cell unavailable";
+            if (action != null && action.Length <= 512 && action.StartsWith("plan/",StringComparison.Ordinal))
+                return PlaceNativePlan(action,cell,world);
             if (string.IsNullOrEmpty(action) || action.Length > 96) return "ERROR Unsupported tool";
             if (action.StartsWith("build/", StringComparison.Ordinal)) return PlaceSelected(action, cell, world);
             if (action.StartsWith("building/", StringComparison.Ordinal) || action.StartsWith("b/", StringComparison.Ordinal))
@@ -226,12 +259,14 @@ namespace Queyang.Game
         }
 
         private static string Place(string prefab, int cell, WorldContainer world, out GameObject order,
-            Orientation orientation = Orientation.Neutral, string primaryMaterial = null)
+            Orientation orientation = Orientation.Neutral, string primaryMaterial = null, string[] specified = null)
         {
             order = null;
             var def = Assets.GetBuildingDef(prefab);
             if (def == null || PlanScreen.Instance == null || !PlanScreen.Instance.IsDefBuildable(def))
                 return "ERROR Building locked or unavailable";
+            if (specified != null && def.MaterialCategory.Length != specified.Length)
+                return "ERROR Construction materials changed";
             int x, y;
             Grid.CellToXY(cell, out x, out y);
             var pending = Pending.GetOrCreateValue(world);
@@ -250,6 +285,7 @@ namespace Queyang.Game
                 foreach (Tag tag in MaterialSelector.GetValidMaterials(def.MaterialCategory[i], true))
                 {
                     if (i == 0 && primaryMaterial != null && tag.ToString() != primaryMaterial) continue;
+                    if (specified != null && tag.ToString() != specified[i]) continue;
                     if (world.worldInventory.GetAmount(tag, true) < def.Mass[i]) continue;
                     materials.Add(tag);
                     break;
@@ -288,6 +324,14 @@ namespace Queyang.Game
 
         private static string EditTarget(string action, GameObject target)
         {
+            if (action.Length == 9 && action.StartsWith("priority", StringComparison.Ordinal) &&
+                action[8] >= '1' && action[8] <= '9')
+            {
+                var priority = target.GetComponent<Prioritizable>();
+                if (priority == null || !priority.IsPrioritizable()) return "ERROR Target has no active priority";
+                priority.SetMasterPriority(new PrioritySetting(PriorityScreen.PriorityClass.basic, action[8] - '0'));
+                return "OK Priority changed";
+            }
             var deconstruct = target.GetComponent<Deconstructable>();
             switch (action)
             {
@@ -307,13 +351,6 @@ namespace Queyang.Game
                         return "ERROR Cannot deconstruct this target";
                     deconstruct.QueueDeconstruction(false);
                     return deconstruct.IsMarkedForDeconstruction() ? "OK Deconstruction queued" : "ERROR Not queued";
-                case "priority5":
-                case "priority9":
-                    var priority = target.GetComponent<Prioritizable>();
-                    if (priority == null || !priority.IsPrioritizable()) return "ERROR Target has no active priority";
-                    priority.SetMasterPriority(new PrioritySetting(PriorityScreen.PriorityClass.basic,
-                        action == "priority5" ? 5 : 9));
-                    return "OK Priority changed";
                 default: return "ERROR Unsupported tool";
             }
         }

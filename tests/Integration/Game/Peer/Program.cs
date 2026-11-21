@@ -28,12 +28,24 @@ namespace Queyang.Integration
                     log("PASS real host with three concurrent TCP test peers");
                     return 0;
                 }
+                if (args.Length==1 && args[0]=="--native-replay") return NativeReplay.Run(log);
+                var recording = args.Length==1 && args[0]=="--native-record"
+                    ? new NativeRecording(NativeRecording.LocalDirectory(),log) : null;
+                if (args.Length!=0 && recording==null) throw new ArgumentException("Unknown peer mode.");
                 RoomClient client = null;
-                using (var transport = new CoopTransport((id,data) => client.Receive(data),
+                using (var transport = new CoopTransport((id,data) => { client.Receive(data); recording?.View(client.View); },
                     id => client.Connected(), id => { throw new IOException("Host disconnected."); }))
+                using (client = new RoomClient(Environment.GetEnvironmentVariable("QY_SMOKE_FINGERPRINT"), p => transport.Send(0,p),
+                    recording?.DirectoryPath, recording == null ? (Action<string>)null : file => {
+                        recording.Save(file);
+                        client.NativeWorldReady();
+                    }))
                 {
-                    client = new RoomClient(Environment.GetEnvironmentVariable("QY_SMOKE_FINGERPRINT"), p => transport.Send(0,p));
-                    var scenario = new GuestScenario(log,(action,x,y) => client.Command(action,x,y));
+                    if (recording!=null) client.ResultReceived+=recording.Result;
+                    var scenario = new GuestScenario(log,(action,x,y) => {
+                        recording?.Sent(action,x,y);
+                        client.Command(action,x,y);
+                    });
                     string previous = "";
                     transport.Join(Environment.GetEnvironmentVariable("QY_SMOKE_ENDPOINT"),false);
                     var timer = Stopwatch.StartNew();
@@ -50,7 +62,21 @@ namespace Queyang.Integration
                         Thread.Sleep(4);
                     }
                     if (!scenario.Done) throw new TimeoutException("Orders did not finish.");
-                    log("PASS transport peer observed host excavation and construction");
+                    if (recording!=null) recording.Finish(client.View, (command,x,y) =>
+                    {
+                        string reply = null;
+                        void Receive(string value) { reply=value; }
+                        client.ResultReceived += Receive;
+                        try
+                        {
+                            client.Command(command,x,y);
+                            var timeout=Stopwatch.StartNew();
+                            while (reply==null && timeout.Elapsed.TotalSeconds<10) { transport.Poll(); Thread.Sleep(4); }
+                            return reply ?? throw new TimeoutException("No response for "+command);
+                        }
+                        finally { client.ResultReceived -= Receive; }
+                    });
+                    log(recording==null ? "PASS transport peer observed host excavation and construction" : "PASS native recording complete");
                 }
                 return 0;
             }

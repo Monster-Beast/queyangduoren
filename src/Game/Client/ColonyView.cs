@@ -5,6 +5,26 @@ using System.Text;
 
 namespace Queyang.Game
 {
+    public struct MaterialSample
+    {
+        public int Element;
+        public float Mass, Temperature;
+    }
+
+    public struct ColonyPile
+    {
+        public int SaveId, Animation;
+        public ushort Cell;
+        public byte SubX, SubY;
+        public MaterialSample Material;
+    }
+
+    public struct ColonyStock
+    {
+        public int Tag;
+        public float Total, Reserved;
+    }
+
     public struct ColonyCell
     {
         public byte Flags;
@@ -14,6 +34,15 @@ namespace Queyang.Game
         public byte R, G, B, BuildingStyle, Progress;
         public string Element, Building;
         public float Mass, Temperature;
+        public int ElementHash, BuildingHash;
+        public int BuildingAnimation, BuildingSaveId;
+        public byte BuildingFrame;
+        public sbyte AnchorDX, AnchorDY;
+        public byte Visibility;
+        public bool RenderGround;
+        public MaterialSample GasPipe, LiquidPipe, Structure;
+        public float WattsUsed, WattsGenerated, WattsSafe, WattsNeeded;
+        public int LogicValue;
     }
 
     public struct ColonyDupe
@@ -21,13 +50,29 @@ namespace Queyang.Game
         public int Id, X, Y;
         public byte SubX, SubY;
         public string Name, Activity;
+        public int SaveId, Animation;
+        public int Personality;
+        public byte AnimationPosition;
+        public bool FlipX;
     }
 
     // A display-only sample. Rows start at the bottom, matching ONI's grid.
     public sealed class ColonyView
     {
         public const int Width = 24, Height = 16;
-        private const ushort Version = 4;
+        public const ushort NativeVersion = 5;
+        public bool Native;
+        public bool Detailed;
+        public bool HasResources;
+        public const int MaxPiles = 128, MaxStocks = 384;
+        public byte[] PileCoverage = new byte[Width * Height / 8];
+        public int PileFrom, PileThrough = int.MaxValue;
+        public ColonyPile[] Piles = Array.Empty<ColonyPile>();
+        public ColonyStock[] Stocks = Array.Empty<ColonyStock>();
+        public bool CompleteStock;
+        public int StockFrom = int.MinValue, StockThrough = int.MaxValue;
+
+        public bool CoversPiles(int index) => (PileCoverage[index >> 3] & (1 << (index & 7))) != 0;
         private const int MaxNames = Width * Height * 2 + 64 * 2 + 1;
         private const int MaxNameBytes = 58;
         private static readonly UTF8Encoding Utf8 = new UTF8Encoding(false, true);
@@ -39,7 +84,9 @@ namespace Queyang.Game
         public ColonyCell[] Cells = new ColonyCell[Width * Height];
         public ColonyDupe[] Dupes = Array.Empty<ColonyDupe>();
 
-        public byte[] Encode()
+        public byte[] Encode() => Encode(Native ? 50 : MaxNameBytes);
+
+        private byte[] Encode(int nameBytes)
         {
             if (Cells == null || Cells.Length != Width * Height || Dupes == null || Dupes.Length > 64)
                 throw new InvalidDataException("Invalid viewport size.");
@@ -50,15 +97,17 @@ namespace Queyang.Game
             foreach (var c in Cells)
             {
                 Validate(c);
-                AddName(c.Element, ids, names);
-                AddName(c.Building, ids, names);
+                AddName(c.Element, ids, names, nameBytes);
+                AddName(c.Building, ids, names, nameBytes);
             }
-            foreach (var d in Dupes) { AddName(d.Name, ids, names); AddName(d.Activity, ids, names); }
+            foreach (var d in Dupes) { AddName(d.Name, ids, names, nameBytes); AddName(d.Activity, ids, names, nameBytes); }
             ValidateDupes(Dupes);
             using (var stream = new MemoryStream())
             using (var w = new BinaryWriter(stream))
             {
-                w.Write(Version);
+                if (Detailed && !Native) throw new InvalidDataException("Detailed view requires native state.");
+                if (HasResources && !Detailed) throw new InvalidDataException("Resource state requires detailed view.");
+                w.Write(HasResources ? (ushort)7 : Detailed ? (ushort)6 : Native ? NativeVersion : (ushort)4);
                 w.Write(X); w.Write(Y);
                 w.Write(Cycle); w.Write(CycleFraction); w.Write(Paused); w.Write(Speed);
                 w.Write((ushort)names.Count);
@@ -74,6 +123,27 @@ namespace Queyang.Game
                     w.Write(ids[c.Building ?? string.Empty]);
                     w.Write(c.Mass);
                     w.Write(c.Temperature);
+                    if (Native)
+                    {
+                        w.Write(c.ElementHash); w.Write(c.BuildingHash);
+                        w.Write(c.AnchorDX); w.Write(c.AnchorDY); w.Write(c.Visibility); w.Write(c.RenderGround);
+                        w.Write(c.BuildingAnimation); w.Write(c.BuildingFrame);
+                        if (Detailed)
+                        {
+                            if ((c.Utilities & 1) != 0)
+                            {
+                                w.Write(c.WattsUsed); w.Write(c.WattsGenerated); w.Write(c.WattsSafe); w.Write(c.WattsNeeded);
+                            }
+                            if ((c.Utilities & 2) != 0) WriteMaterial(w, c.GasPipe);
+                            if ((c.Utilities & 4) != 0) WriteMaterial(w, c.LiquidPipe);
+                            if ((c.Utilities & 8) != 0) w.Write(c.LogicValue);
+                            if (c.BuildingHash != 0 && c.AnchorDX == 0 && c.AnchorDY == 0)
+                            {
+                                WriteMaterial(w, c.Structure);
+                                if (HasResources) w.Write(c.BuildingSaveId);
+                            }
+                        }
+                    }
                 }
                 w.Write((byte)Dupes.Length);
                 foreach (var d in Dupes)
@@ -82,17 +152,28 @@ namespace Queyang.Game
                     w.Write(d.SubX); w.Write(d.SubY);
                     w.Write(ids[d.Name ?? string.Empty]);
                     w.Write(ids[d.Activity ?? string.Empty]);
+                    if (Native)
+                    {
+                        w.Write(d.SaveId); w.Write(d.Animation); w.Write(d.AnimationPosition); w.Write(d.FlipX);
+                        if (Detailed) w.Write(d.Personality);
+                    }
                 }
+                // Keep ordinary localized names intact. The synthetic worst case has 896
+                // unique names plus all four utilities and a building in every cell.
+                if (HasResources) WriteResources(w);
+                int shortNames = HasResources ? 14 : 24;
+                if (stream.Length > 65520 && Detailed && nameBytes > shortNames) return Encode(shortNames);
+                if (stream.Length > 65520) throw new InvalidDataException("Viewport exceeds the frame limit.");
                 return stream.ToArray();
             }
         }
 
-        private static void AddName(string name, Dictionary<string, ushort> ids, List<byte[]> names)
+        private static void AddName(string name, Dictionary<string, ushort> ids, List<byte[]> names, int nameBytes = MaxNameBytes)
         {
             name = name ?? string.Empty;
             if (ids.ContainsKey(name)) return;
             var encoder = Encoding.UTF8.GetEncoder();
-            var buffer = new byte[MaxNameBytes];
+            var buffer = new byte[nameBytes];
             // Convert truncates at a complete UTF-8 character, even for non-BMP names.
             int count = Math.Min(name.Length, MaxNameBytes);
             encoder.Convert(name.ToCharArray(0, count), 0, count, buffer, 0, buffer.Length,
@@ -109,8 +190,10 @@ namespace Queyang.Game
             using (var stream = new MemoryStream(payload, false))
             using (var r = new BinaryReader(stream))
             {
-                if (r.ReadUInt16() != Version) throw new InvalidDataException("Unknown viewport version.");
-                var v = new ColonyView { X = r.ReadInt32(), Y = r.ReadInt32() };
+                ushort version = r.ReadUInt16();
+                if (version < 4 || version > 7) throw new InvalidDataException("Unknown viewport version.");
+                var v = new ColonyView { Native = version >= 5, Detailed = version >= 6, HasResources = version >= 7,
+                    X = r.ReadInt32(), Y = r.ReadInt32() };
                 if (v.X < 0 || v.Y < 0 || v.X > int.MaxValue - Width || v.Y > int.MaxValue - Height)
                     throw new InvalidDataException("Invalid viewport origin.");
                 v.Cycle = r.ReadInt32(); v.CycleFraction = r.ReadSingle();
@@ -141,6 +224,31 @@ namespace Queyang.Game
                         Element = ReadName(r, names), Building = ReadName(r, names),
                         Mass = r.ReadSingle(), Temperature = r.ReadSingle()
                     };
+                    if (v.Native)
+                    {
+                        cell.ElementHash = r.ReadInt32(); cell.BuildingHash = r.ReadInt32();
+                        cell.AnchorDX = r.ReadSByte(); cell.AnchorDY = r.ReadSByte(); cell.Visibility = r.ReadByte();
+                        byte ground = r.ReadByte();
+                        if (ground > 1) throw new InvalidDataException("Invalid ground rendering flag.");
+                        cell.RenderGround = ground == 1;
+                        cell.BuildingAnimation = r.ReadInt32(); cell.BuildingFrame = r.ReadByte();
+                        if (v.Detailed)
+                        {
+                            if ((cell.Utilities & 1) != 0)
+                            {
+                                cell.WattsUsed = ReadAmount(r); cell.WattsGenerated = ReadAmount(r);
+                                cell.WattsSafe = ReadAmount(r); cell.WattsNeeded = ReadAmount(r);
+                            }
+                            if ((cell.Utilities & 2) != 0) cell.GasPipe = ReadMaterial(r);
+                            if ((cell.Utilities & 4) != 0) cell.LiquidPipe = ReadMaterial(r);
+                            if ((cell.Utilities & 8) != 0) cell.LogicValue = r.ReadInt32();
+                            if (cell.BuildingHash != 0 && cell.AnchorDX == 0 && cell.AnchorDY == 0)
+                            {
+                                cell.Structure = ReadMaterial(r);
+                                if (v.HasResources) cell.BuildingSaveId = r.ReadInt32();
+                            }
+                        }
+                    }
                     Validate(cell);
                     v.Cells[i] = cell;
                 }
@@ -148,12 +256,88 @@ namespace Queyang.Game
                 if (n > 64) throw new InvalidDataException("Invalid duplicant count.");
                 v.Dupes = new ColonyDupe[n];
                 for (int i = 0; i < n; i++)
+                {
                     v.Dupes[i] = new ColonyDupe { Id = r.ReadInt32(), X = r.ReadInt32(), Y = r.ReadInt32(),
                         SubX = r.ReadByte(), SubY = r.ReadByte(), Name = ReadName(r, names), Activity = ReadName(r, names) };
+                    if (v.Native)
+                    {
+                        v.Dupes[i].SaveId = r.ReadInt32(); v.Dupes[i].Animation = r.ReadInt32();
+                        v.Dupes[i].AnimationPosition = r.ReadByte();
+                        byte flip = r.ReadByte();
+                        if (flip > 1) throw new InvalidDataException("Invalid duplicant orientation.");
+                        v.Dupes[i].FlipX = flip == 1;
+                        if (v.Detailed) v.Dupes[i].Personality = r.ReadInt32();
+                    }
+                }
                 ValidateDupes(v.Dupes);
+                if (v.HasResources) v.ReadResources(r);
                 if (stream.Position != stream.Length) throw new InvalidDataException("Trailing viewport bytes.");
                 return v;
             }
+        }
+
+        private static float ReadAmount(BinaryReader r)
+        {
+            float value = r.ReadSingle();
+            if (float.IsNaN(value) || float.IsInfinity(value) || value < 0)
+                throw new InvalidDataException("Invalid physical reading.");
+            return value;
+        }
+
+        private void WriteResources(BinaryWriter w)
+        {
+            if (PileCoverage.Length != Width * Height / 8 || Piles.Length > MaxPiles || Stocks.Length > MaxStocks)
+                throw new InvalidDataException("Invalid resource sample size.");
+            w.Write(PileCoverage); w.Write(PileFrom); w.Write(PileThrough); w.Write((byte)Piles.Length);
+            foreach (var pile in Piles)
+            {
+                w.Write(pile.SaveId); w.Write(pile.Cell); w.Write(pile.SubX); w.Write(pile.SubY);
+                w.Write(pile.Animation); WriteMaterial(w, pile.Material);
+            }
+            w.Write(CompleteStock); w.Write(StockFrom); w.Write(StockThrough); w.Write((ushort)Stocks.Length);
+            foreach (var stock in Stocks) { w.Write(stock.Tag); w.Write(stock.Total); w.Write(stock.Reserved); }
+        }
+
+        private void ReadResources(BinaryReader r)
+        {
+            PileCoverage = r.ReadBytes(Width * Height / 8);
+            if (PileCoverage.Length != Width * Height / 8) throw new EndOfStreamException();
+            PileFrom = r.ReadInt32(); PileThrough = r.ReadInt32();
+            if (PileFrom < 0 || PileFrom > PileThrough) throw new InvalidDataException("Invalid pile range.");
+            int count = r.ReadByte();
+            if (count > MaxPiles) throw new InvalidDataException("Invalid pile count.");
+            var ids = new HashSet<int>();
+            Piles = new ColonyPile[count];
+            for (int i = 0; i < count; i++)
+            {
+                var pile = new ColonyPile { SaveId = r.ReadInt32(), Cell = r.ReadUInt16(), SubX = r.ReadByte(),
+                    SubY = r.ReadByte(), Animation = r.ReadInt32(), Material = ReadMaterial(r) };
+                if (pile.SaveId < PileFrom || pile.SaveId > PileThrough || pile.Cell >= Cells.Length || (Cells[pile.Cell].Flags & 1) == 0 ||
+                    !ids.Add(pile.SaveId)) throw new InvalidDataException("Invalid pile identity or position.");
+                Piles[i] = pile;
+            }
+            byte complete = r.ReadByte();
+            if (complete > 1) throw new InvalidDataException("Invalid inventory flag.");
+            CompleteStock = complete != 0; StockFrom = r.ReadInt32(); StockThrough = r.ReadInt32();
+            if (StockFrom > StockThrough || (CompleteStock && (StockFrom != int.MinValue || StockThrough != int.MaxValue)))
+                throw new InvalidDataException("Invalid inventory range.");
+            count = r.ReadUInt16();
+            if (count > MaxStocks) throw new InvalidDataException("Invalid inventory size.");
+            ids.Clear(); Stocks = new ColonyStock[count];
+            for (int i = 0; i < count; i++)
+            {
+                Stocks[i] = new ColonyStock { Tag = r.ReadInt32(), Total = ReadAmount(r), Reserved = ReadAmount(r) };
+                if (Stocks[i].Tag < StockFrom || Stocks[i].Tag > StockThrough || !ids.Add(Stocks[i].Tag))
+                    throw new InvalidDataException("Invalid inventory tag.");
+            }
+        }
+
+        private static MaterialSample ReadMaterial(BinaryReader r) =>
+            new MaterialSample { Element = r.ReadInt32(), Mass = ReadAmount(r), Temperature = ReadAmount(r) };
+
+        private static void WriteMaterial(BinaryWriter w, MaterialSample value)
+        {
+            w.Write(value.Element); w.Write(value.Mass); w.Write(value.Temperature);
         }
 
         private static string ReadName(BinaryReader r, string[] names)
