@@ -6,11 +6,11 @@
 
 ## 构建和安装
 
-当前游戏版本可使用仓库中的 [0.3.1-dev 开发包](dist/QueyangCoop-0.3.1-dev.zip)。在仓库根目录先预览安装目标，第二行安装同一个 ZIP。安装器会为已有的不同版本备份，并打印回滚路径。
+当前基础游戏版本可使用 [0.3.2-dev 双账号实测包](dist/QueyangCoop-0.3.2-dev.zip)，SHA-256 为 `BB0293C32F6B614EF924CBA8261B6F3257CA54FFFDD10FE2281887607651432F`。该包验证了挖掘工具、掩埋标记、掉落物和小动物运动。仍有局部照明色差，源码后续迭代的功能需查看各自验收记录。在仓库根目录先预览安装目标，第二行安装同一个 ZIP。安装器会为已有的不同版本备份，并打印回滚路径。
 
 ~~~powershell
-.\tools\install-dev.ps1 -Package .\dist\QueyangCoop-0.3.1-dev.zip -WhatIf
-.\tools\install-dev.ps1 -Package .\dist\QueyangCoop-0.3.1-dev.zip
+.\tools\install-dev.ps1 -Package .\dist\QueyangCoop-0.3.2-dev.zip -WhatIf
+.\tools\install-dev.ps1 -Package .\dist\QueyangCoop-0.3.2-dev.zip
 ~~~
 
 仓库保留的 [0.2.0 历史包](dist/QueyangCoop-0.2.0-dev.zip) 适用于 Klei 744825。历史包哈希见[当时的验收记录](docs/evidence/native.md)。
