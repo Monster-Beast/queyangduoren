@@ -108,6 +108,8 @@ $package = '.\dist\QueyangCoop-0.3.2-construction-preview.zip'
 
 此轮客机能定位地板蓝图，施工前原版白色斜纹线框在两端仍有显示差异。地板验收覆盖普通成品砖的接缝与拆除。
 
+后续在 `1119455d8beb48eeb7c9bcdc15d3e928` 补验同一普通砖格 49787 的原版施工网格。蓝图 ID 2359 变成成品 2370 后又拆除，两端白色线框计数都是 1 → 0 → 0，成品网格计数都是 0 → 1 → 0。新版包含客机操作预览包的功能，双 Steam 重连和带 Mod、无 Mod 回读通过，受保护输入的哈希一致。此轮覆盖普通砖块，独立的背景墙层仍需专项核对。[施工框预览包](../dist/QueyangCoop-0.3.2-floor-outline-preview.zip) · [施工前对照](evidence/qa/dual-cc6a-floor-stage-0.jpg) · [完工后对照](evidence/qa/dual-cc6a-floor-stage-1.jpg)
+
 ## 后续逐项覆盖
 
 | 工位 | 原版状态切换 | 对照项目 |
