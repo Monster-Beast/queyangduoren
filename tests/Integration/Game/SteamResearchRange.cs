@@ -28,6 +28,12 @@ namespace Queyang.Integration
         void Set(CSteamID room,string field,string value)
         { if(!SteamMatchmaking.SetLobbyData(room,Key(field),value)) throw new IOException("Could not publish research reading"); }
         string Read(CSteamID room,string field)=>SteamMatchmaking.GetLobbyData(room,Key(field));
+        static string VisualOrigin(KSelectable target)
+        {
+            var anim=target.GetComponent<KBatchedAnimController>();
+            var m=NativeDupePose.RenderMatrix(anim);
+            return FormattableString.Invariant($"{m.m02:R}|{m.m12:R}");
+        }
 
         void SetUp()
         {
@@ -77,6 +83,7 @@ namespace Queyang.Integration
                 Change();
                 int points=Mathf.RoundToInt(station.GetPercentComplete()*required);
                 Set(room,"station",$"{stableId}|{cell}|{points}|{required.ToString(culture)}");
+                Set(room,"art",VisualOrigin(station.GetComponent<KSelectable>()));
                 prepared=stage;
             }
             var record=Read(room,"station").Split('|');
@@ -88,6 +95,12 @@ namespace Queyang.Integration
             center.y+=1;center.z=camera.transform.position.z;
             camera.SetTargetPos(center,6f,false);camera.SetPosition(center);camera.OrthographicSize=6f;
             if(target==null) return false;
+            string currentArt=VisualOrigin(target),hostArt=Read(room,"art");
+            if(string.IsNullOrEmpty(hostArt)) return false;
+            var observedPosition=currentArt.Split('|').Select(value=>float.Parse(value,culture)).ToArray();
+            var expectedPosition=hostArt.Split('|').Select(value=>float.Parse(value,culture)).ToArray();
+            float artError=Vector2.Distance(new Vector2(observedPosition[0],observedPosition[1]),
+                new Vector2(expectedPosition[0],expectedPosition[1]));
             if(DetailsScreen.Instance?.target!=target.gameObject)
             {
                 SelectTool.Instance.Select(target,false);
@@ -100,11 +113,11 @@ namespace Queyang.Integration
                 UnityEngine.Object.FindObjectsByType<SimpleInfoScreen>(FindObjectsSortMode.None)
                     .Where(info=>info.isActiveAndEnabled).SelectMany(info=>info.GetComponentsInChildren<LocText>(false))
                     .Any(label=>label.text.Contains(pointsText));
-            if(!text || visible!=(stage<2) || visible && Math.Abs(bar.PercentFull-fraction)>.01f)
+            if(!text || artError>.005f || visible!=(stage<2) || visible && Math.Abs(bar.PercentFull-fraction)>.01f)
             {
                 if(Time.realtimeSinceStartup>=nextLog)
                 {
-                    log($"RESEARCH_RANGE_WAIT stage={stage} id={stableId} text={text} visible={visible} expected={fraction} shown={bar?.PercentFull}");
+                    log($"RESEARCH_RANGE_WAIT stage={stage} id={stableId} text={text} visible={visible} expected={fraction} shown={bar?.PercentFull} overlay={SimDebugView.Instance?.GetMode()} art={currentArt}/{hostArt} error={artError}");
                     nextLog=Time.realtimeSinceStartup+5;
                 }
                 return false;
@@ -118,7 +131,7 @@ namespace Queyang.Integration
             if(!photo.Complete) return false;
             if(host && SteamMatchmaking.GetLobbyMemberData(room,peer,Key("ok"))!="1") return false;
             if(!host) SteamMatchmaking.SetLobbyMemberData(room,Key("ok"),"1");
-            log(FormattableString.Invariant($"RESEARCH_RANGE stage={stage} cell={cell} id={stableId} points={pointsText} barVisible={visible} fraction={bar?.PercentFull}"));
+            log(FormattableString.Invariant($"RESEARCH_RANGE stage={stage} cell={cell} id={stableId} points={pointsText} barVisible={visible} fraction={bar?.PercentFull} art={currentArt} artError={artError:R}"));
             stage++;photo=null;
             if(stage!=3) return false;
             SelectTool.Instance.Select(null,false);

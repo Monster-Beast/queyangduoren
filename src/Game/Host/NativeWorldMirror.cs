@@ -239,7 +239,7 @@ namespace Queyang.Game
             marker.SetActive(false);
             marker.layer = prefab.layer;
             marker.transform.SetParent(markerRoot.transform, false);
-            marker.transform.position = Grid.CellToPosCBC(cell, source.sceneLayer);
+            marker.transform.position = Grid.CellToPosCBC(cell, def.SceneLayer);
             var controller = marker.AddComponent<KBatchedAnimController>();
             controller.AnimFiles = source.AnimFiles;
             controller.animScale = source.animScale;
@@ -247,13 +247,9 @@ namespace Queyang.Game
             controller.defaultAnim = source.defaultAnim;
             controller.sceneLayer = source.sceneLayer;
             controller.fgLayer = source.fgLayer;
-            controller.Offset = source.Offset;
             controller.materialType = source.materialType;
             var orientation = (Orientation)((sample.BuildingStyle >> 4) & 7);
-            if (orientation >= Orientation.R90 && orientation <= Orientation.R270)
-                controller.Rotation = -90 * (int)orientation;
-            controller.FlipX = orientation == Orientation.FlipH;
-            controller.FlipY = orientation == Orientation.FlipV;
+            ApplyBuildingVisualizer(def,prefab,source,controller,orientation,(flags&32)==0);
             controller.TintColour = NativeOrderColors.BuildingTint(sample);
             var collider = marker.AddComponent<KBoxCollider2D>();
             collider.size = new Vector2(def.WidthInCells, def.HeightInCells);
@@ -276,6 +272,29 @@ namespace Queyang.Game
             marker.SetActive(true);
             buildingMarkers[cell] = new Marker { Hash = sample.BuildingHash, Target = sample.TargetId, SaveId = sample.BuildingSaveId, Style = sample.BuildingStyle,
                 Flags = flags, Object = marker, Anim = controller, Primary = primary };
+        }
+
+        static void ApplyBuildingVisualizer(BuildingDef def,GameObject prefab,KBatchedAnimController source,
+            KBatchedAnimController target,Orientation orientation,bool complete)
+        {
+            var rotatable=prefab.GetComponent<Rotatable>();
+            if(rotatable==null)
+            {
+                // BuildingComplete.OnPrefabInit applies the half-cell visualizer
+                // offset to spawned instances. A display-only proxy skips that callback.
+                target.Offset=complete?def.GetVisualizerOffset():source.Offset;
+                target.Pivot=source.Pivot;
+                return;
+            }
+            var offset=def.GetVisualizerOffset();
+            var pivot=new Vector3(-offset.x,.5f,0);
+            target.FlipX=orientation==Orientation.FlipH;
+            target.FlipY=orientation==Orientation.FlipV;
+            if(target.FlipX) {offset.x=-offset.x;pivot.x=-pivot.x;}
+            if(target.FlipY) offset.y=1;
+            target.Offset=offset;target.Pivot=pivot;
+            if(rotatable.permittedRotations==PermittedRotations.R90 || rotatable.permittedRotations==PermittedRotations.R360)
+                target.Rotation=-90*(int)orientation;
         }
 
         internal static void ApplyPrimary(PrimaryElement primary, MaterialSample material)

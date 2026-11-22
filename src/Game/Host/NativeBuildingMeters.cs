@@ -19,6 +19,7 @@ namespace Queyang.Game
         readonly List<Entry> slots=new List<Entry>();
         static readonly ConditionalWeakTable<MeterController,Entry> byController=new ConditionalWeakTable<MeterController,Entry>();
         static readonly List<ColonyMeter> rows=new List<ColonyMeter>();
+        static readonly AccessTools.FieldRef<KBatchedAnimController,bool> rebuild=AccessTools.FieldRefAccess<KBatchedAnimController,bool>("_forceRebuild");
         static bool creatingReplica;
 
         [HarmonyPatch(typeof(MeterController),"Initialize")]
@@ -121,7 +122,19 @@ namespace Queyang.Game
             anim.SetVisiblity(s.Visible);
             if(s.Animation!=0 && anim.currentAnim.HashValue!=s.Animation && anim.HasAnimation(new HashedString(s.Animation)))
                 anim.Play(new HashedString(s.Animation),KAnim.PlayMode.Paused);
-            anim.Rotation=s.Rotation;anim.SetPositionPercent(s.Position);
+            anim.Rotation=s.Rotation;
+            var clip=anim.GetCurrentAnim();
+            if(clip!=null)
+            {
+                anim.SetPositionPercent(s.Position);
+                int absolute=clip.firstFrameIdx+clip.GetFrameIdx(anim.PlayMode,anim.GetElapsedTime());
+                if(anim.GetCurrentFrameIndex()!=absolute)
+                {
+                    // UpdateAnim returns early for paused KAnim meters unless the native
+                    // force-rebuild flag is set. A UI value can be correct while the GPU stays at 0.
+                    rebuild(anim)=true;anim.UpdateAnim(0f);
+                }
+            }
             for(int i=0;i<s.Tints.Length;i++)anim.SetSymbolTint(new KAnimHashedString(s.TintSymbols[i]),NativeOrderColors.Unpack(s.Tints[i]));
         }
         internal void Hide()

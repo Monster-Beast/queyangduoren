@@ -62,9 +62,15 @@ if (!$FixtureDriverPath) {
     $fixtureReferences=Join-Path $run 'package-refs'
     [IO.Compression.ZipFile]::ExtractToDirectory($PackagePath,$fixtureReferences)
     Assert-DevPackage $fixtureReferences
-    dotnet build (Join-Path $PSScriptRoot SmokeDriver.csproj) -c Release "-p:ONI_GAME_DIR=$GameDir" "-p:FixturePackageDir=$fixtureReferences"
+    # Freeze the driver source and all build outputs for this run. A normal developer
+    # build may run concurrently and reference a different version of QueyangCoop.
+    $fixtureSource=Join-Path $run 'fixture-source'
+    [IO.Directory]::CreateDirectory($fixtureSource) | Out-Null
+    & robocopy $PSScriptRoot $fixtureSource '*.cs' 'SmokeDriver.csproj' /S /XJ /XD bin obj Peer /R:1 /W:0 /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw "Could not snapshot fixture source ($LASTEXITCODE)." }
+    dotnet build (Join-Path $fixtureSource SmokeDriver.csproj) -c Release "-p:ONI_GAME_DIR=$GameDir" "-p:FixturePackageDir=$fixtureReferences"
     if ($LASTEXITCODE) { throw 'Fixture build failed.' }
-    $fixture=Join-Path $PSScriptRoot 'bin/Release/net48/SmokeDriver.dll'
+    $fixture=Join-Path $fixtureSource 'bin/Release/net48/SmokeDriver.dll'
 } else {
     $fixture=(Resolve-Path -LiteralPath $FixtureDriverPath).Path
     if ([reflection.assemblyname]::GetAssemblyName($fixture).Name -ne 'SmokeDriver') { throw 'Expected a pinned SmokeDriver fixture DLL.' }
@@ -316,6 +322,22 @@ try {
                 }
                 $shot=Get-Physical $d (Join-Path $d.base "range-$role-$stage.png")
                 if (!(Test-Path -LiteralPath $shot)) { throw "Missing construction screenshot $shot." }
+            }
+        }
+    }
+    foreach($case in @(@($CheckResearch,'research'),@($CheckBattery,'battery'),@($CheckReservoir,'reservoir'))) {
+        if(!$case[0]) {continue}
+        $suite=$case[1]
+        $record=$suite.ToUpperInvariant()+'_RANGE'
+        foreach($role in $roles) {
+            $d=$drivers[$role]
+            $report=Get-Physical $d $d.env.QY_SMOKE_REPORT
+            foreach($stage in 0..2) {
+                if (!(Select-String -LiteralPath $report -Pattern "^$record stage=$stage " -Quiet)) {
+                    throw "Missing $suite checkpoint $stage for $role."
+                }
+                $shot=Get-Physical $d (Join-Path $d.base "$suite-$role-$stage.png")
+                if (!(Test-Path -LiteralPath $shot)) { throw "Missing $suite screenshot $shot." }
             }
         }
     }

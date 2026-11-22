@@ -132,7 +132,9 @@ namespace Queyang.Game
                 autoHide(d.Bar)=state.AutoHide;
                 d.Bar.transform.position=new Vector3(state.X,state.Y,state.Z);
                 d.Bar.barColor=new Color32((byte)state.Color,(byte)(state.Color>>8),(byte)(state.Color>>16),(byte)(state.Color>>24));
-                if(!requested(d.Bar)) d.Bar.SetVisibility(true);
+                // CreateProgressBar initializes the widget before Retarget supplies
+                // its world position. ONI can hide it until visibility is recomputed.
+                if(!requested(d.Bar) || !d.Bar.gameObject.activeSelf) d.Bar.SetVisibility(true);
                 d.Bar.PercentFull=state.Fill;
             }
             foreach(var p in displays.ToArray())
