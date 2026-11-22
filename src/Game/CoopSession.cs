@@ -76,6 +76,7 @@ namespace Queyang.Game
                 host.IsMotionPaused=()=>SpeedControlScreen.Instance.IsPaused;
                 host.ExecuteForPeer = (peer,installation,action,x,y) => OrderOwnership.Execute(link.Account(peer),link.DisplayName(peer),peer,installation,action,x,y);
                 host.NativeCaptureFailed += error => UnityEngine.Debug.LogWarning("[QueyangCoop] Failed to capture colony: " + error.Message);
+                host.PeerFailure += reason => UnityEngine.Debug.LogWarning("[QueyangCoop] " + reason);
                 link.Host(steam);
                 OrderOwnership.SetName(1,link.DisplayName(0));
                 notice = "Hosting";
@@ -235,6 +236,7 @@ namespace Queyang.Game
             catch (Exception e)
             {
                 if (host == null) { closing = e.Message; return; }
+                UnityEngine.Debug.LogWarning("[QueyangCoop] Guest message rejected: " + e.Message);
                 host.Remove(peer); link.Drop(peer);
                 notice = "Guest disconnected: " + e.Message;
             }

@@ -44,6 +44,7 @@ namespace Queyang.Core
         readonly Func<double> now;
         readonly Func<Stream> openNativeSave;
         public event Action<Exception> NativeCaptureFailed;
+        public event Action<string> PeerFailure;
         public Func<int,Guid,string,int,int,string> ExecuteForPeer { get; set; }
         public Func<int,int,IEnumerable<byte[]>> CaptureMotion { get; set; }
         public Func<bool> IsMotionPaused { get; set; }
@@ -275,7 +276,11 @@ namespace Queyang.Core
                 double timeout = p.Native == NativeStage.Loading ? 180 : 30;
                 if (time - p.LastSeen > timeout ||
                     ((!p.Accepted || !p.Subscribed || p.Target != null) && time - p.Progress > timeout))
-                { drop(id); Remove(id); continue; }
+                {
+                    PeerFailure?.Invoke(FormattableString.Invariant(
+                        $"Timed out stage={p.Native} subscribed={p.Subscribed} revision={p.Revision} incomingAge={time - p.LastSeen:F1}s progressAge={time - p.Progress:F1}s"));
+                    drop(id); Remove(id); continue;
+                }
                 if (p.Native == NativeStage.Requested || p.Native == NativeStage.Sending)
                 {
                     if (p.Native == NativeStage.Requested)
@@ -289,7 +294,8 @@ namespace Queyang.Core
                 try
                 {
                     bool paused=IsMotionPaused?.Invoke()==true;
-                    if (CaptureMotion!=null && p.Native==NativeStage.Ready && (time>=p.NextMotion || paused!=p.MotionPaused))
+                    if (CaptureMotion!=null && p.Native==NativeStage.Ready && p.Live &&
+                        (time>=p.NextMotion || paused!=p.MotionPaused))
                     {
                         double interval=paused?.25:.05;
                         p.NextMotion=p.NextMotion>0 && paused==p.MotionPaused ?
@@ -340,7 +346,11 @@ namespace Queyang.Core
                         p.Sent += count;
                     }
                 }
-                catch (IOException) { drop(id); Remove(id); }
+                catch (IOException error)
+                {
+                    PeerFailure?.Invoke($"Viewport failed at ({p.X},{p.Y}), revision={p.Revision}: {error.Message}");
+                    drop(id); Remove(id);
+                }
             }
         }
     }

@@ -146,9 +146,13 @@ public class MultiPeerTests
             Join(2); Pump(false); Assert.Throws<InvalidDataException>(()=>host.Receive(2,oldAck));
             Pump(false); Assert.Equal(baseline,File.ReadAllBytes(published));
             var motion=new List<byte[]>();
-            host.CaptureMotion=(x,y)=>new[]{new[]{checked((byte)x)}};
+            int motionCaptures=0;
+            host.CaptureMotion=(x,y)=>{ motionCaptures++; return new[]{new[]{checked((byte)x)}}; };
             guests[2].MotionReceived+=motion.Add;
-            guests[2].Subscribe(72,0); guests[2].NativeWorldReady(); Pump(false); Pump(false);
+            guests[2].Subscribe(72,0); guests[2].NativeWorldReady();
+            Pump(false);
+            Assert.Equal(0,motionCaptures);
+            Pump(false);
             var fresh=ColonyView.Decode(guests[2].View);
             Assert.Equal(new byte[]{72},Assert.Single(motion));
             time+=.06; host.Tick(); // In-flight unreliable event from the previous camera.

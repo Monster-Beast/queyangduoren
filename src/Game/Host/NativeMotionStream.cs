@@ -15,6 +15,9 @@ namespace Queyang.Game
             bool paused=SpeedControlScreen.Instance.IsPaused;
             var world=ClusterManager.Instance?.activeWorld;
             if(world==null) yield break;
+            var origin = HostWorld.ViewOrigin(world, left, bottom);
+            left = origin.x;
+            bottom = origin.y;
             foreach (var packet in NativeFallingOre.Capture(world,left,bottom)) yield return packet;
             foreach (var packet in Actors(world,left,bottom,paused,false)) yield return packet;
             foreach (var packet in Actors(world,left,bottom,paused,true)) yield return packet;

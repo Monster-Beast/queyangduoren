@@ -33,11 +33,8 @@ namespace Queyang.Game
 
         public static byte[] Capture(int x, int y) => CapturePage(x,y,-1);
 
-        internal static byte[] CapturePage(int x, int y, int sample)
+        internal static Vector2I ViewOrigin(WorldContainer world, int x, int y)
         {
-            var world = World;
-            if (world == null || Grid.WidthInCells == 0)
-                throw new InvalidOperationException("The host colony has not loaded.");
             var origin = world.WorldOffset;
             var size = world.WorldSize;
             if (x == -1 && y == -1)
@@ -55,10 +52,19 @@ namespace Queyang.Game
                 x -= ColonyView.Width / 2;
                 y -= ColonyView.Height / 2;
             }
+            return new Vector2I(Math.Max(origin.x, Math.Min(origin.x + size.x - ColonyView.Width, x)),
+                Math.Max(origin.y, Math.Min(origin.y + size.y - ColonyView.Height, y)));
+        }
+
+        internal static byte[] CapturePage(int x, int y, int sample)
+        {
+            var world = World;
+            if (world == null || Grid.WidthInCells == 0)
+                throw new InvalidOperationException("The host colony has not loaded.");
+            var origin = ViewOrigin(world, x, y);
             var view = new ColonyView {
                 Native = true, Detailed = true, HasResources = true, HasEnvironment = true,
-                X = Math.Max(origin.x, Math.Min(origin.x + size.x - ColonyView.Width, x)),
-                Y = Math.Max(origin.y, Math.Min(origin.y + size.y - ColonyView.Height, y))
+                X = origin.x, Y = origin.y
             };
             view.EnvironmentPage = sample>=0 ? sample%4 : NativeEnvironment.NextPage(world, view.X, view.Y);
             var clock = GameClock.Instance;

@@ -10,6 +10,7 @@ namespace Queyang.Game
     internal sealed class SteamBackend : ConnectionBackend
     {
         private const int VirtualPort = 24714;
+        private const int MaxQueuedReliableBytes = 1024 * 1024;
         private const string RoomKey = "queyang_coop", RoomValue = "1";
         // JoinLobby completes asynchronously even if its caller has returned to the menu.
         // Track ownership so a late completion cannot eject a newer session from the same room.
@@ -23,6 +24,9 @@ namespace Queyang.Game
             internal bool Ready, Announced;
             internal string Failure;
             internal long Created;
+            internal readonly Queue<byte[]> Reliable = new Queue<byte[]>();
+            internal int QueuedBytes;
+            internal long RetryAt;
         }
         private readonly Dictionary<int, Peer> peers = new Dictionary<int, Peer>();
         private readonly Dictionary<HSteamNetConnection, Peer> handles = new Dictionary<HSteamNetConnection, Peer>();
@@ -206,6 +210,7 @@ namespace Queyang.Game
                 if (!peer.Ready && clock.ElapsedMilliseconds - peer.Created > 30000) peer.Failure = "P2P connection timed out.";
                 if (peer.Failure != null)
                 {
+                    UnityEngine.Debug.LogWarning("[QueyangCoop] " + peer.Failure);
                     Owner.LastError = peer.Failure;
                     Drop(peer.Id);
                     continue;
@@ -216,6 +221,7 @@ namespace Queyang.Game
                     peer.Announced = true;
                     Owner.Connected(peer.Id);
                 }
+                FlushReliable(peer);
                 for (int n = 0; n < 16 && peers.ContainsKey(peer.Id); n++)
                 {
                     int count = SteamNetworkingSockets.ReceiveMessagesOnConnection(peer.Handle, slot, 1);
@@ -246,17 +252,67 @@ namespace Queyang.Game
         {
             Peer peer;
             if (!peers.TryGetValue(id, out peer) || !peer.Ready || peer.Failure != null) return;
+            bool motion = packet.Length >= 16 && BitConverter.ToUInt16(packet, 8) == (ushort)Queyang.Core.Message.Motion;
+            if (peer.Reliable.Count != 0)
+            {
+                if (!motion) QueueReliable(peer, packet);
+                return;
+            }
+            var result = SendPacket(peer, packet, motion);
+            if (result == EResult.k_EResultOK ||
+                motion && (result == EResult.k_EResultIgnored || result == EResult.k_EResultLimitExceeded)) return;
+            if (result == EResult.k_EResultLimitExceeded)
+            {
+                // Steam has accepted earlier reliable frames. Retry this one in order
+                // after it has room, and give durable state priority over motion.
+                peer.RetryAt = clock.ElapsedMilliseconds + 10;
+                QueueReliable(peer, packet);
+                return;
+            }
+            peer.Failure = "Steam send failed: " + result;
+        }
+
+        private static void QueueReliable(Peer peer, byte[] packet)
+        {
+            if (packet.Length > MaxQueuedReliableBytes - peer.QueuedBytes)
+            {
+                peer.Failure = "Steam reliable send backlog exhausted";
+                return;
+            }
+            peer.Reliable.Enqueue(packet);
+            peer.QueuedBytes += packet.Length;
+        }
+
+        private void FlushReliable(Peer peer)
+        {
+            if (peer.Failure != null || clock.ElapsedMilliseconds < peer.RetryAt) return;
+            for (int i = 0; i < 16 && peer.Reliable.Count != 0; i++)
+            {
+                var packet = peer.Reliable.Peek();
+                var result = SendPacket(peer, packet, false);
+                if (result == EResult.k_EResultLimitExceeded)
+                {
+                    peer.RetryAt = clock.ElapsedMilliseconds + 10;
+                    return;
+                }
+                if (result != EResult.k_EResultOK)
+                {
+                    peer.Failure = "Steam send failed: " + result;
+                    return;
+                }
+                peer.Reliable.Dequeue();
+                peer.QueuedBytes -= packet.Length;
+            }
+        }
+
+        private static EResult SendPacket(Peer peer, byte[] packet, bool motion)
+        {
             var pinned = GCHandle.Alloc(packet, GCHandleType.Pinned);
             try
             {
-                long number;
-                bool motion=packet.Length>=16 && BitConverter.ToUInt16(packet,8)==(ushort)Queyang.Core.Message.Motion;
-                var result = SteamNetworkingSockets.SendMessageToConnection(peer.Handle, pinned.AddrOfPinnedObject(),
+                return SteamNetworkingSockets.SendMessageToConnection(peer.Handle, pinned.AddrOfPinnedObject(),
                     (uint)packet.Length, motion ? Steamworks.Constants.k_nSteamNetworkingSend_UnreliableNoDelay :
-                    Steamworks.Constants.k_nSteamNetworkingSend_Reliable, out number);
-                if(motion && (result==EResult.k_EResultIgnored || result==EResult.k_EResultLimitExceeded)) return;
-                // Valve caps its send buffer and reports LimitExceeded on backpressure.
-                if (result != EResult.k_EResultOK) peer.Failure = "Steam send failed: " + result;
+                    Steamworks.Constants.k_nSteamNetworkingSend_Reliable, out _);
             }
             finally { pinned.Free(); }
         }
