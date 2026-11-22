@@ -13,7 +13,7 @@ namespace Queyang.Integration
     internal sealed class SteamPopulation
     {
         string last;
-        bool startedDeath,wasPaused;
+        bool startedDeath,finishedDeath,wasPaused;
         float nextCheck,nextDiagnostic;
         FixtureFrame screenshot;
         static readonly AccessTools.FieldRef<MeterScreen,LocText> counter=AccessTools.FieldRefAccess<MeterScreen,LocText>("currentMinions");
@@ -68,6 +68,7 @@ namespace Queyang.Integration
 
         internal bool Death(CSteamID lobby,bool host,GameObject subject,int born,Action<string> log)
         {
+            if (finishedDeath) return true;
             if (host && !startedDeath)
             {
                 if (subject==null || subject.GetComponent<KPrefabID>().InstanceID!=born || !CoopSession.IsHosting ||
@@ -75,12 +76,12 @@ namespace Queyang.Integration
                     throw new InvalidOperationException("Census death fixture requires its own printed person and isolated host");
                 wasPaused=SpeedControlScreen.Instance.IsPaused;
                 subject.GetSMI<DeathMonitor.Instance>().Kill(Db.Get().Deaths.Slain);
-                if (wasPaused) SpeedControlScreen.Instance.Unpause(false);
+                while (SpeedControlScreen.Instance.IsPaused) SpeedControlScreen.Instance.Unpause(false);
                 startedDeath=true;
             }
             if (!Check(lobby,host,"death",born,log)) return false;
             if (host && wasPaused) SpeedControlScreen.Instance.Pause(false);
-            return true;
+            return finishedDeath=true;
         }
     }
 }
