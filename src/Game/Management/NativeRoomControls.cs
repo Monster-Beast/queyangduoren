@@ -8,9 +8,12 @@ namespace Queyang.Game
 {
     internal static partial class NativeManagement
     {
+        const int MaxRenameBytes = 50;
         static readonly UTF8Encoding RenameEncoding = new UTF8Encoding(false, true);
         static readonly AccessTools.FieldRef<SpeedControlScreen, int> PauseCount =
             AccessTools.FieldRefAccess<SpeedControlScreen, int>("pauseCount");
+        static GameObject buildingNameTarget;
+        static string buildingNameVersion;
 
         internal static void RequestClock(bool pause, int speed = 0, bool relative = false, bool cycle = false)
         {
@@ -51,36 +54,101 @@ namespace Queyang.Game
             return "OK";
         }
 
-        internal static bool RequestDupeName(GameObject target, string name)
+        internal static bool RequestObjectName(GameObject target, string name)
         {
             int id = SaveId(target);
-            if (id <= 0) return false;
-            if (!ValidDupeName(name))
+            int cell = Grid.InvalidCell;
+            bool dupe = id > 0;
+            if (!dupe && !TryBuildingNameTarget(target,out cell,out id)) return false;
+            if (!ValidName(name))
             {
-                NativeGuestFeedback.Show("名字须为非空纯文本，最多 58 个 UTF-8 字节。");
+                NativeGuestFeedback.Show($"名字须为非空纯文本，最多 {MaxRenameBytes} 个 UTF-8 字节。");
                 return true;
             }
-            var oldName = target.GetComponent<KSelectable>()?.GetProperName();
             string encoded = Convert.ToBase64String(RenameEncoding.GetBytes(name)).Replace('/', '_');
-            Send($"name/{id}/{Digest(oldName ?? "")}/{encoded}");
+            if (dupe)
+                Send($"name/{id}/{Digest(target.GetComponent<KSelectable>()?.GetProperName() ?? "")}/{encoded}");
+            else if (target != buildingNameTarget || buildingNameVersion == null)
+                NativeGuestFeedback.Show("正在同步房主的建筑名称，请稍后重试。");
+            else
+            {
+                Grid.CellToXY(cell,out int x,out int y);
+                Send($"buildingname/{id}/{buildingNameVersion}/{encoded}",x,y);
+            }
             return true;
         }
 
         [HarmonyPatch(typeof(DetailsScreen), nameof(DetailsScreen.UpdateTitle))]
-        static class ProjectedDupeRename
+        static class EditableGuestTitle
         {
             static void Postfix(DetailsScreen __instance, EditableTitleBar ___TabTitle)
             {
                 if (NativeGuestScene.Ready && __instance.target != null &&
-                    __instance.target.GetComponent<NativeDupeIdentityMarker>() != null)
+                    (__instance.target.GetComponent<NativeDupeIdentityMarker>() != null ||
+                     TryBuildingNameTarget(__instance.target,out _,out _)))
                     ___TabTitle.SetUserEditable(true);
             }
         }
 
-        static bool ValidDupeName(string name)
+        internal static bool NameableBuilding(GameObject target) => target != null &&
+            target.GetComponent<UserNameable>() != null &&
+            target.GetComponent<CommandModule>() == null && target.GetComponent<ClustercraftExteriorDoor>() == null;
+
+        static bool TryBuildingNameTarget(GameObject target, out int cell, out int id)
+        {
+            var proxy = target?.GetComponent<NativeBuildingIdentity>();
+            cell = proxy == null ? target?.GetComponent<BuildingComplete>()?.GetCell() ?? Grid.InvalidCell : proxy.Cell;
+            id = proxy == null ? target?.GetComponent<KPrefabID>()?.InstanceID ?? 0 : proxy.SaveId;
+            if (!Grid.IsValidCell(cell) || id <= 0) return false;
+            if (proxy == null) return NameableBuilding(target);
+            if (!proxy.Complete) return false;
+            var def = Assets.GetBuildingDef(target.PrefabID().Name);
+            return NameableBuilding(def?.BuildingComplete) && NativeWorldMirror.GetBuildingSelectable(cell,id)?.gameObject == target;
+        }
+
+        static void PollBuildingName(KSelectable selected)
+        {
+            var target = selected == null ? null : selected.gameObject;
+            if (target != buildingNameTarget)
+            {
+                buildingNameTarget = target;
+                buildingNameVersion = null;
+            }
+            if (!TryBuildingNameTarget(target,out int cell,out int id)) return;
+            Grid.CellToXY(cell,out int x,out int y);
+            Send("buildingname/"+id,x,y);
+        }
+
+        internal static string ApplyBuildingName(GameObject target, string[] fields)
+        {
+            if (!NameableBuilding(target) || fields.Length != 3 && fields.Length != 5) return Conflict;
+            var nameable = target.GetComponent<UserNameable>();
+            string name = target.GetComponent<KSelectable>().GetProperName() ?? "";
+            if (fields.Length == 5)
+            {
+                if (fields[3] != Digest(name) || !TryDecodeName(fields[4],out name)) return Conflict;
+                nameable.SetName(name);
+            }
+            // Send the full revision even when the viewport compacts long display names.
+            string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(name)).Replace('/','_');
+            return encoded.Length <= 2048 ? Prefix+"bn/"+fields[2]+"/"+Digest(name)+"/"+encoded : Conflict;
+        }
+
+        static void ReceiveBuildingName(string[] fields)
+        {
+            if (fields.Length != 5 || !TryBuildingNameTarget(buildingNameTarget,out _,out int id) || id != Number(fields[2])) return;
+            string name = RenameEncoding.GetString(Convert.FromBase64String(fields[4].Replace('_','/')));
+            buildingNameVersion = fields[3];
+            var selected = buildingNameTarget.GetComponent<KSelectable>();
+            if (selected.GetProperName() == name) return;
+            selected.SetName(name);
+            if (DetailsScreen.Instance?.target == buildingNameTarget) DetailsScreen.Instance.UpdateTitle();
+        }
+
+        static bool ValidName(string name)
         {
             if (string.IsNullOrWhiteSpace(name) || name.Any(c => char.IsControl(c) || c == '<' || c == '>')) return false;
-            try { return RenameEncoding.GetByteCount(name) <= 58; }
+            try { return RenameEncoding.GetByteCount(name) <= MaxRenameBytes; }
             catch (EncoderFallbackException) { return false; }
         }
 
@@ -90,14 +158,19 @@ namespace Queyang.Game
             var dupe = FindDupe(Number(fields[2]));
             if (dupe == null || ClusterUtil.GetMyWorldId(dupe) != ClusterManager.Instance.activeWorldId ||
                 Digest(dupe.GetProperName() ?? "") != fields[3]) return Conflict;
-            string name;
-            try { name = RenameEncoding.GetString(Convert.FromBase64String(fields[4].Replace('_', '/'))); }
-            catch (FormatException) { return Conflict; }
-            catch (DecoderFallbackException) { return Conflict; }
-            if (!ValidDupeName(name)) return Conflict;
+            if (!TryDecodeName(fields[4],out string name)) return Conflict;
             dupe.SetName(name);
             ScheduleScreen.Instance?.Trigger(1980521255);
             return "OK";
+        }
+
+        static bool TryDecodeName(string value, out string name)
+        {
+            name = null;
+            try { name = RenameEncoding.GetString(Convert.FromBase64String(value.Replace('_','/'))); }
+            catch (FormatException) { return false; }
+            catch (DecoderFallbackException) { return false; }
+            return ValidName(name);
         }
     }
 }

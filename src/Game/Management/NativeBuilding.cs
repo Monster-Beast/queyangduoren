@@ -20,11 +20,13 @@ namespace Queyang.Game
             statusPanel=null; statusTarget=null; storagePanel=null;
             ResetStoragePanel();
             SelectSettings(null);
+            buildingNameTarget=null; buildingNameVersion=null;
         }
         static void PollBuilding()
         {
             var selected = SelectTool.Instance == null ? null : Selection.GetValue(SelectTool.Instance) as KSelectable;
             PollBuildingReadings(selected);
+            PollBuildingName(selected);
             if (selected != null)
             {
                 var proxy = selected.GetComponent<NativeProxySettings>();

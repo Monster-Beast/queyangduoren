@@ -61,7 +61,8 @@ namespace Queyang.Game
                 route.StartsWith("vitals/", StringComparison.Ordinal) || route.StartsWith("profile/", StringComparison.Ordinal) ||
                 route.StartsWith("proxy/", StringComparison.Ordinal) ||
                 route.StartsWith("dupe/", StringComparison.Ordinal) || route.StartsWith("building/", StringComparison.Ordinal) ||
-                route.StartsWith("settings/", StringComparison.Ordinal))
+                route.StartsWith("settings/", StringComparison.Ordinal) ||
+                route.StartsWith("buildingname/",StringComparison.Ordinal) && route.Count(c => c == '/') == 1)
                 CoopSession.Command("nm/" + route, x, y);
             else if (pendingEdits.Count < 256)
                 pendingEdits.Enqueue(new Edit { Route = route, X = x, Y = y });
@@ -199,6 +200,7 @@ namespace Queyang.Game
                     break;
                 case "readings":
                 case "building":
+                case "buildingname":
                 case "switch":
                 case "settings":
                 case "filter":
@@ -264,6 +266,7 @@ namespace Queyang.Game
                 else if (p[1] == "v" && p.Length == 4) ApplyVitals(Number(p[2]), p[3]);
                 else if (p[1] == "pf" && p.Length == 4) ApplyProfile(Number(p[2]), p[3]);
                 else if (p[1] == "b") ApplyBuilding(p);
+                else if (p[1] == "bn") ReceiveBuildingName(p);
                 else if (p[1] == "f") ApplySettings(p);
                 else if (p[1] == "s" && p.Length == 4)
                 {

@@ -12,10 +12,12 @@ namespace Queyang.Integration
     {
         const string Prefix = "qy_room_controls_";
         const string TestName = "联机值班员 QA";
+        const string TestBuildingName = "联机储物箱 QA";
         static readonly AccessTools.FieldRef<SpeedControlScreen, int> Pauses =
             AccessTools.FieldRefAccess<SpeedControlScreen, int>("pauseCount");
         int stage, id, originalSpeed;
         int storageCell = Grid.InvalidCell, storageId;
+        int nameCell = Grid.InvalidCell, nameId;
         Tag storageTag;
         bool clicked, finished, rechecked;
         float deadline;
@@ -32,7 +34,8 @@ namespace Queyang.Integration
                 if (rechecked) return true;
                 if (id == 0 || Find(id)?.GetProperName() != TestName) return false;
                 if (StorageFilter(host)?.ContainsTag(storageTag) != true) return false;
-                log($"ROOM_CONTROLS_REJOIN role={(host ? "host" : "guest")} id={id} nameRetained=True storageFilterRetained=True");
+                if (NamedBuilding(host)?.GetComponent<UserNameable>()?.savedName != TestBuildingName) return false;
+                log($"ROOM_CONTROLS_REJOIN role={(host ? "host" : "guest")} id={id} nameRetained=True storageFilterRetained=True buildingNameRetained=True");
                 return rechecked = true;
             }
             if (finished) return true;
@@ -113,7 +116,8 @@ namespace Queyang.Integration
                 case 3: verified = speedValue == 1 && paused; break;
                 case 4: verified = !paused; break;
                 case 5: verified = paused; break;
-                default: verified = CheckStorage(lobby, host); break;
+                case 6: verified = CheckStorage(lobby, host); break;
+                default: verified = CheckBuildingName(lobby, host); break;
             }
             if (!verified || !host && !clicked) return false;
             string acknowledgement = Prefix + "seen_" + stage;
@@ -128,7 +132,7 @@ namespace Queyang.Integration
             stage++;
             actionAt = Time.unscaledTime + 1.5f;
             clicked = false;
-            if (stage < 7) return false;
+            if (stage < 8) return false;
             if (host) speed.SetSpeed(originalSpeed);
             camera.SetTargetPos(originalCamera,zoom,false);
             camera.SetPosition(originalCamera);
@@ -196,6 +200,55 @@ namespace Queyang.Integration
                 NativeWorldMirror.GetBuildingSelectable(storageCell,storageId)?.gameObject;
             return target != null && target.GetComponent<KPrefabID>()?.InstanceID == storageId ?
                 target.GetComponent<TreeFilterable>() : null;
+        }
+
+        bool CheckBuildingName(CSteamID lobby, bool host)
+        {
+            if (nameCell == Grid.InvalidCell)
+            {
+                if (host)
+                {
+                    int world = ClusterManager.Instance.activeWorldId;
+                    var building = Components.BuildingCompletes.Items.First(b => b != null &&
+                        ClusterUtil.GetMyWorldId(b) == world && Grid.Visible[b.GetCell()] != 0 &&
+                        b.Def.PrefabID == RationBoxConfig.ID && NativeManagement.NameableBuilding(b.gameObject));
+                    nameCell = building.GetCell();
+                    nameId = building.GetComponent<KPrefabID>().InstanceID;
+                    Set(lobby,"building",$"{nameCell}|{nameId}");
+                }
+                else
+                {
+                    var reading = Read(lobby,"building").Split('|');
+                    if (reading.Length != 2) return false;
+                    nameCell = int.Parse(reading[0]);
+                    nameId = int.Parse(reading[1]);
+                }
+            }
+            Focus(CameraController.Instance,Grid.CellToPosCCC(nameCell,Grid.SceneLayer.Building));
+            var buildingTarget = NamedBuilding(host);
+            if (buildingTarget == null) return false;
+            if (!host && !clicked)
+            {
+                var selected = buildingTarget.GetComponent<KSelectable>();
+                if (DetailsScreen.Instance?.target != buildingTarget)
+                {
+                    SelectTool.Instance.Select(selected,false);
+                    actionAt = Time.unscaledTime + 2f;
+                    return false;
+                }
+                if (Time.unscaledTime < actionAt) return false;
+                AccessTools.Method(typeof(DetailsScreen),"OnNameChanged").Invoke(DetailsScreen.Instance,new object[] { TestBuildingName });
+                clicked = true;
+            }
+            return buildingTarget.GetComponent<KSelectable>().GetProperName() == TestBuildingName &&
+                (!host || buildingTarget.GetComponent<UserNameable>().savedName == TestBuildingName);
+        }
+
+        GameObject NamedBuilding(bool host)
+        {
+            var result = host ? HostWorld.FindBuilding(nameCell) :
+                NativeWorldMirror.GetBuildingSelectable(nameCell,nameId)?.gameObject;
+            return result?.GetComponent<KPrefabID>()?.InstanceID == nameId ? result : null;
         }
 
         static KSelectable Find(int saveId) => CoopSession.IsHosting

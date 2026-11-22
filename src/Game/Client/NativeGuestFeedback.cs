@@ -73,7 +73,7 @@ namespace Queyang.Game
             static bool Prefix(DetailsScreen __instance, string __0)
             {
                 if (!NativeGuestScene.Ready) return true;
-                if (NativeManagement.RequestDupeName(__instance.target, __0)) return false;
+                if (NativeManagement.RequestObjectName(__instance.target, __0)) return false;
                 return Refuse("对象重命名");
             }
         }

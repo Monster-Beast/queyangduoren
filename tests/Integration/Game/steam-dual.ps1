@@ -417,7 +417,7 @@ try {
         foreach ($role in $roles) {
             $d=$drivers[$role]
             $report=Get-Physical $d $d.env.QY_SMOKE_REPORT
-            foreach ($stage in 0..6) {
+            foreach ($stage in 0..7) {
                 if (!(Select-String -LiteralPath $report -Pattern "^ROOM_CONTROLS_STAGE role=$role stage=$stage " -Quiet)) {
                     throw "Missing room controls stage $stage for $role."
                 }

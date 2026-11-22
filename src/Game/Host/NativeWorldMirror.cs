@@ -272,6 +272,7 @@ namespace Queyang.Game
             marker.AddComponent<KSelectable>().SetName(def.Name);
             var identity = marker.AddComponent<NativeBuildingIdentity>();
             identity.Cell = cell; identity.SaveId = sample.BuildingSaveId;
+            identity.Complete = (flags & 32) == 0;
             if ((flags & 32) == 0 && (sample.Flags & 8) == 0 && sample.TargetId > 0)
                 marker.AddComponent<NativeProxySettings>().Initialize(cell, sample.TargetId);
             PrimaryElement primary = null;

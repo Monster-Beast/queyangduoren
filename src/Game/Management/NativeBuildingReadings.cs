@@ -10,6 +10,7 @@ namespace Queyang.Game
     internal sealed class NativeBuildingIdentity : MonoBehaviour
     {
         internal int Cell, SaveId;
+        internal bool Complete;
     }
 
     internal static partial class NativeManagement
