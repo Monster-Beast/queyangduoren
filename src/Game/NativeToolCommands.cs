@@ -49,6 +49,7 @@ namespace Queyang.Game
             {
                 if(!__state) return;
                 collectingDig=false;
+                bool urgent=UrgentSelection();
                 int start=0;
                 while(start<digCells.Count)
                 {
@@ -57,7 +58,8 @@ namespace Queyang.Game
                     int length=1;
                     while(length<64 && x+length<Grid.WidthInCells && start+length<digCells.Count &&
                           digCells[start+length]==cell+length) length++;
-                    pending.Enqueue(new Order {Action=length==1?"dig":"digspan/"+length,X=x,Y=y});
+                    string action=length==1?"dig":"digspan/"+length;
+                    pending.Enqueue(new Order {Action=urgent?"urgent-"+action:action,X=x,Y=y});
                     start+=length;
                 }
                 digCells.Clear();
@@ -68,6 +70,9 @@ namespace Queyang.Game
                 return __exception;
             }
         }
+        static bool UrgentSelection()=>ToolMenu.Instance?.PriorityScreen?.GetLastSelectedPriority().priority_class==
+            PriorityScreen.PriorityClass.topPriority;
+        static string PriorityToken(int priority)=>priority==10?"!":priority.ToString();
         internal static void EnqueueSelected(string action, GameObject selected)
         {
             if (selected == null) return;
@@ -87,8 +92,8 @@ namespace Queyang.Game
                 int priority=separate?sample.SeparateOrderPriority:sample.OrderPriority;
                 if (action.StartsWith("priority", StringComparison.Ordinal))
                 {
-                    if (priority == 0) { NativeGuestFeedback.Show("此对象没有可修改的普通优先级。"); return; }
-                    action += "/" + priority;
+                    if (priority == 0) { NativeGuestFeedback.Show("此对象没有可修改的优先级。"); return; }
+                    action += "/" + PriorityToken(priority);
                 }
                 action += ":" + token;
             }
@@ -118,7 +123,7 @@ namespace Queyang.Game
                 int priority=separate?sample.SeparateOrderPriority:sample.OrderPriority;
                 if (id < 1) { NativeGuestFeedback.Show("此处没有可修改的订单或建筑。"); return; }
                 if (action.StartsWith("priority", StringComparison.Ordinal) && priority > 0)
-                    action += "/" + priority;
+                    action += "/" + PriorityToken(priority);
                 action += ":" + id;
             }
             if (pending.Count >= 256) { NativeGuestFeedback.Show("已选格子过多，请等待当前订单发送后再试。"); return; }
@@ -144,10 +149,11 @@ namespace Queyang.Game
                 if (action == "priority")
                 {
                     var selected = ToolMenu.Instance.PriorityScreen.GetLastSelectedPriority();
-                    if (selected.priority_class != PriorityScreen.PriorityClass.basic)
-                    { NativeGuestFeedback.Show("紧急优先级由房主设置。"); return false; }
-                    action += selected.priority_value;
+                    if(selected.priority_class==PriorityScreen.PriorityClass.topPriority) action+="!";
+                    else if(selected.priority_class==PriorityScreen.PriorityClass.basic) action+=selected.priority_value;
+                    else return false;
                 }
+                else if(action=="dig" && UrgentSelection()) action="urgent-dig";
                 Enqueue(action, __0);
                 return false;
             }

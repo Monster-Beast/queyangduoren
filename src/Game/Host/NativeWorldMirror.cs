@@ -80,6 +80,7 @@ namespace Queyang.Game
             if (view.HasResources) NativeResources.Apply(view, world, markerRoot.transform);
             NativeBuildingWork.Apply(view);
             NativeBuildingWarnings.Apply(view);
+            NativeAlerts.Apply(view,world);
         }
 
         static unsafe void ApplyElement(int cell, ColonyCell sample)
@@ -521,6 +522,7 @@ namespace Queyang.Game
             NativeResources.Reset();
             NativeBuildingWork.Reset();
             NativeBuildingWarnings.Reset();
+            NativeAlerts.Reset();
             NativeEnvironment.Reset();
             NativeMaterialReadings.Reset();
         }

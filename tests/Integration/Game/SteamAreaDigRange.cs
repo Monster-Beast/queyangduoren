@@ -184,9 +184,19 @@ namespace Queyang.Integration
             }
             if(host && SpeedControlScreen.Instance.IsPaused) SpeedControlScreen.Instance.Unpause(false);
             if(Grid.Solid[tracked] || Reading(tracked,host)!=null) return false;
-            if(host && SteamMatchmaking.GetLobbyMemberData(room,peer,"qy_area_finished")!="1") return false;
-            if(!host) SteamMatchmaking.SetLobbyMemberData(room,"qy_area_finished","1");
-            else SpeedControlScreen.Instance.Pause(false);
+            if(host)
+            {
+                if(SteamMatchmaking.GetLobbyMemberData(room,peer,"qy_area_finished")!="1") return false;
+                SpeedControlScreen.Instance.Pause(false);
+                if(!SteamMatchmaking.SetLobbyData(room,"qy_area_host_finished","1"))
+                    throw new IOException("Could not finish the area excavation checkpoint");
+            }
+            else
+            {
+                if(SteamMatchmaking.GetLobbyMemberData(room,peer,"qy_area_finished")!="1")
+                    SteamMatchmaking.SetLobbyMemberData(room,"qy_area_finished","1");
+                if(SteamMatchmaking.GetLobbyData(room,"qy_area_host_finished")!="1") return false;
+            }
             log($"AREA_DIG_BAR_CLEARED cell={tracked} excavated={cells.Count(c=>!Grid.Solid[c])}/{cells.Length}");
             stage++;
             camera.SetTargetPos(oldCamera,oldZoom,false);camera.SetPosition(oldCamera);camera.OrthographicSize=oldZoom;

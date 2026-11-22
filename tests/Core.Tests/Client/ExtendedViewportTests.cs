@@ -11,6 +11,32 @@ namespace Queyang.Core.Tests
         static ColonyView View() => new ColonyView { Native = true, Detailed = true, HasResources = true };
 
         [Fact]
+        public void NativeYellowAlertAndUrgentOrderRoundTrip()
+        {
+            var view=View();
+            view.HasDupeAppearance=true;
+            view.LightMask=new byte[ColonyView.Width*ColonyView.Height/8];
+            view.HostAlerts=1;
+            view.Cells[0].Flags=11;
+            view.Cells[0].OrderPriority=10;
+            var received=ColonyView.Decode(view.Encode());
+            Assert.Equal((byte)1,received.HostAlerts);
+            Assert.Equal((byte)10,received.Cells[0].OrderPriority);
+            view.HostAlerts=4;
+            Assert.Throws<InvalidDataException>(()=>view.Encode());
+        }
+
+        [Fact]
+        public void StorageSweepFlagRoundTripsWithoutApplyingItemEquipmentSemantics()
+        {
+            var row=new ColonyEntity {Id=12,Kind=ColonyEntityKind.Storage,Flags=ColonyEntity.StorageSweepOnly};
+            var received=Assert.Single(EntityStateCodec.Decode(EntityStateCodec.Encode(
+                new ColonyEntityPage{Entities=new[]{row}})).Entities);
+            Assert.Equal(ColonyEntity.StorageSweepOnly,received.Flags);
+            Assert.False(received.IsWorn);
+        }
+
+        [Fact]
         public void NeighborTileCannotRemoveWorkBarFromAnotherCell()
         {
             var view=View();
@@ -303,7 +329,7 @@ namespace Queyang.Core.Tests
             var raw=v.Encode();
             var cell=ColonyView.Decode(raw).Cells[8];
             Assert.Equal((80,(byte)7,19,(byte)4,true),(cell.TargetId,cell.OrderPriority,cell.OrderTargetId,cell.SeparateOrderPriority,cell.MopOrdered));
-            raw[^1]=10;
+            raw[^1]=11;
             Assert.Throws<InvalidDataException>(()=>ColonyView.Decode(raw));
             raw[^1]=4; Array.Clear(raw,raw.Length-5,4);
             Assert.Throws<InvalidDataException>(()=>ColonyView.Decode(raw));

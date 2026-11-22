@@ -110,6 +110,9 @@ namespace Queyang.Game
             var hp = target.GetComponent<BuildingHP>();
             if (hp != null) lines.Add($"耐久 {hp.HitPoints}/{hp.MaxHitPoints}");
             var battery = target.GetComponent<Battery>();
+            var store=target.GetComponent<Storage>();
+            if(store!=null && store.allowSettingOnlyFetchMarkedItems)
+                lines.Add(store.GetOnlyFetchMarkedItems()?"仅限清扫：开启":"仅限清扫：关闭");
             if (battery != null) lines.Add(FormattableString.Invariant($"储能 {battery.JoulesAvailable:0}/{battery.Capacity:0} J"));
             var fabricator = target.GetComponent<ComplexFabricator>();
             if (fabricator != null && fabricator.CurrentWorkingOrder != null)

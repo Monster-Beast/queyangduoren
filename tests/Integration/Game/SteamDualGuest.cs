@@ -28,6 +28,8 @@ namespace Queyang.Integration
         readonly SteamDualHealth health=new SteamDualHealth();
         readonly SteamConstructionRange constructionRange=new SteamConstructionRange();
         readonly SteamAreaDigRange areaDig=new SteamAreaDigRange();
+        readonly SteamAlertRange alertRange=new SteamAlertRange();
+        readonly SteamSweepSymbolRange sweepRange=new SteamSweepSymbolRange();
         readonly SteamResearchRange researchRange=new SteamResearchRange();
         readonly SteamPowerRange powerRange=new SteamPowerRange();
         readonly SteamMeterRange batteryRange=new SteamMeterRange(), reservoirRange=new SteamMeterRange(true);
@@ -269,6 +271,8 @@ namespace Queyang.Integration
                 case Phase.Invite: Join(); break;
                 case Phase.Loading: WorldReady(); break;
                 case Phase.Dig:
+                    if (!alertRange.Check(lobby,self,false,round,Grid.InvalidCell,log)) break;
+                    if (!sweepRange.Check(lobby,self,false,round,log)) break;
                     if (!powerRange.Check(lobby,self,false,round,log)) break;
                     if (!researchRange.Check(lobby,self,false,round,log)) break;
                     if (!batteryRange.Check(lobby,self,false,round,log)) break;

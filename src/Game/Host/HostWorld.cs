@@ -129,6 +129,7 @@ namespace Queyang.Game
             NativeBuildingMeters.Capture(view,sample);
             NativeBuildingWork.Capture(view,world,sample);
             NativeBuildingWarnings.Capture(view,sample);
+            if(view.LightMask!=null) view.HostAlerts=NativeAlerts.Capture(world);
             view.HasHealthBars=view.LightMask!=null && view.Dupes.Length>0;
             view.HasPileAppearance=view.HasEntombed && view.HasColonyHud;
             OrderOwnership.Capture(view,sample);
@@ -263,6 +264,7 @@ namespace Queyang.Game
             var priority=target==null ? null : target.GetComponent<Prioritizable>();
             if(priority==null || !priority.IsPrioritizable()) return 0;
             var value=priority.GetMasterPriority();
+            if(value.priority_class==PriorityScreen.PriorityClass.topPriority) return 10;
             return value.priority_class==PriorityScreen.PriorityClass.basic ? (byte)Mathf.Clamp(value.priority_value,1,9) : (byte)0;
         }
 
@@ -277,7 +279,9 @@ namespace Queyang.Game
                 return Options(action, world);
             if (action == "overview" && world != null) return Overview(world);
             if(world!=null && action!=null && action.StartsWith("digspan/",StringComparison.Ordinal))
-                return DigSpan(action,x,y,world);
+                return DigSpan(action.Substring(8),x,y,world,false);
+            if(world!=null && action!=null && action.StartsWith("urgent-digspan/",StringComparison.Ordinal))
+                return DigSpan(action.Substring(15),x,y,world,true);
             if (world == null || !VisibleCell(world, x, y, out cell) || !Grid.IsValidBuildingCell(cell))
                 return "ERROR Cell unavailable";
             if (action != null && action.Length <= 512 && action.StartsWith("plan/",StringComparison.Ordinal))
@@ -318,6 +322,8 @@ namespace Queyang.Game
                 case "inspect": return Inspect(cell);
                 case "dig":
                     return DigCell(cell);
+                case "urgent-dig":
+                    return DigCell(cell,true);
                 case "ladder": return Place(LadderConfig.ID, cell, world);
                 case "tile": return Place(TileConfig.ID, cell, world);
                 case "door": return Place(DoorConfig.ID, cell, world);
@@ -348,21 +354,26 @@ namespace Queyang.Game
             return "ERROR The selected order or building has changed";
         }
 
-        static string DigCell(int cell) =>
-            DigTool.Instance==null || !Grid.Solid[cell] || !Diggable.IsDiggable(cell) ||
-            Diggable.Undiggable(Grid.Element[cell]) || Diggable.GetDiggable(cell)!=null
-                ? "ERROR Cell cannot be designated for digging"
-                : DigTool.PlaceDig(cell,0)==null?"ERROR Dig tool declined":"OK Dig designated";
-
-        static string DigSpan(string action,int x,int y,WorldContainer world)
+        static string DigCell(int cell,bool urgent=false)
         {
-            if(action.Length>10 || !int.TryParse(action.Substring(8),NumberStyles.None,CultureInfo.InvariantCulture,out int length) ||
+            if(DigTool.Instance==null || !Grid.Solid[cell] || !Diggable.IsDiggable(cell) ||
+                Diggable.Undiggable(Grid.Element[cell]) || Diggable.GetDiggable(cell)!=null)
+                return "ERROR Cell cannot be designated for digging";
+            var order=DigTool.PlaceDig(cell,0);
+            if(order==null) return "ERROR Dig tool declined";
+            if(urgent) order.GetComponent<Prioritizable>().SetMasterPriority(new PrioritySetting(PriorityScreen.PriorityClass.topPriority,1));
+            return "OK Dig designated";
+        }
+
+        static string DigSpan(string size,int x,int y,WorldContainer world,bool urgent)
+        {
+            if(size.Length>2 || !int.TryParse(size,NumberStyles.None,CultureInfo.InvariantCulture,out int length) ||
                 length<2 || length>64 || x<0 || x>Grid.WidthInCells-length)
                 return "ERROR Invalid excavation row";
             int accepted=0;
             for(int offset=0;offset<length;offset++)
                 if(VisibleCell(world,x+offset,y,out int cell) && Grid.IsValidBuildingCell(cell) &&
-                   DigCell(cell)=="OK Dig designated") accepted++;
+                   DigCell(cell,urgent)=="OK Dig designated") accepted++;
             return FormattableString.Invariant($"{(accepted>0?"OK":"ERROR")} Area excavation designated {accepted}/{length}");
         }
 
@@ -370,10 +381,9 @@ namespace Queyang.Game
         {
             if (edit.StartsWith("priority", StringComparison.Ordinal) && edit.Length > 9)
             {
-                var priority = target.GetComponent<Prioritizable>();
-                if (edit.Length != 11 || edit[9] != '/' || edit[10] < '1' || edit[10] > '9' || priority == null ||
-                    priority.GetMasterPriority().priority_class != PriorityScreen.PriorityClass.basic ||
-                    priority.GetMasterPriority().priority_value != edit[10] - '0') return "ERROR Order priority changed";
+                if (edit.Length != 11 || edit[9] != '/') return "ERROR Order priority changed";
+                int expected=edit[10]=='!'?10:edit[10]-'0';
+                if(expected<1 || expected>10 || ReadPriority(target)!=expected) return "ERROR Order priority changed";
                 edit = edit.Substring(0, 9);
             }
             return EditTarget(edit, target);
@@ -479,11 +489,13 @@ namespace Queyang.Game
         private static string EditTarget(string action, GameObject target)
         {
             if (action.Length == 9 && action.StartsWith("priority", StringComparison.Ordinal) &&
-                action[8] >= '1' && action[8] <= '9')
+                (action[8]=='!' || action[8] >= '1' && action[8] <= '9'))
             {
                 var priority = target.GetComponent<Prioritizable>();
                 if (priority == null || !priority.IsPrioritizable()) return "ERROR Target has no active priority";
-                priority.SetMasterPriority(new PrioritySetting(PriorityScreen.PriorityClass.basic, action[8] - '0'));
+                bool urgent=action[8]=='!';
+                priority.SetMasterPriority(new PrioritySetting(urgent?PriorityScreen.PriorityClass.topPriority:PriorityScreen.PriorityClass.basic,
+                    urgent?1:action[8]-'0'));
                 return "OK Priority changed";
             }
             var deconstruct = target.GetComponent<Deconstructable>();

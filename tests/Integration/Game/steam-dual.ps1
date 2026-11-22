@@ -15,6 +15,8 @@ param(
     [switch]$CheckBuildings,
     [switch]$CheckConstruction,
     [switch]$CheckAreaDig,
+    [switch]$CheckAlert,
+    [switch]$CheckSweepSymbol,
     [switch]$CheckResearch,
     [switch]$CheckPower,
     [switch]$CheckBattery,
@@ -160,6 +162,8 @@ foreach ($role in $roles) {
     $values.QY_CHECK_BUILDINGS=([int]$CheckBuildings.IsPresent).ToString()
     $values.QY_CONSTRUCTION_RANGE=([int]$CheckConstruction.IsPresent).ToString()
     $values.QY_AREA_DIG_RANGE=([int]$CheckAreaDig.IsPresent).ToString()
+    $values.QY_ALERT_RANGE=([int]$CheckAlert.IsPresent).ToString()
+    $values.QY_SWEEP_RANGE=([int]$CheckSweepSymbol.IsPresent).ToString()
     $values.QY_RESEARCH_RANGE=([int]$CheckResearch.IsPresent).ToString()
     $values.QY_POWER_RANGE=([int]$CheckPower.IsPresent).ToString()
     $values.QY_BATTERY_RANGE=([int]$CheckBattery.IsPresent).ToString()
@@ -345,7 +349,7 @@ try {
             }
         }
     }
-    foreach($case in @(@($CheckPower,'power'),@($CheckResearch,'research'),@($CheckBattery,'battery'),@($CheckReservoir,'reservoir'))) {
+    foreach($case in @(@($CheckAlert,'alert'),@($CheckSweepSymbol,'sweep'),@($CheckPower,'power'),@($CheckResearch,'research'),@($CheckBattery,'battery'),@($CheckReservoir,'reservoir'))) {
         if(!$case[0]) {continue}
         $suite=$case[1]
         $record=$suite.ToUpperInvariant()+'_RANGE'
@@ -441,7 +445,7 @@ try {
                     if($src -ne $dest -and (Test-Path $src)){Copy-Item -LiteralPath $src -Destination $dest}
                 }
             }
-            foreach($case in @(@($CheckPower,'power'),@($CheckResearch,'research'),@($CheckBattery,'battery'),@($CheckReservoir,'reservoir'))) {
+            foreach($case in @(@($CheckAlert,'alert'),@($CheckSweepSymbol,'sweep'),@($CheckPower,'power'),@($CheckResearch,'research'),@($CheckBattery,'battery'),@($CheckReservoir,'reservoir'))) {
                 if(!$case[0]) {continue}
                 $suite=$case[1]
                 foreach($stage in 0..2){
@@ -515,7 +519,7 @@ $joins=@(foreach ($line in $guestReport) {
 })
 if ($joins.Count -ne 2 -or $joins[0].round -ne 1 -or $joins[1].round -ne 2) { throw 'Missing exact join methods for both rounds.' }
 [ordered]@{packageSha256=$before[0];saveSha256=$before[1];protectedInputsUnchanged=$true;joins=$joins
-    checks=[ordered]@{areaDig=$CheckAreaDig.IsPresent;power=$CheckPower.IsPresent;research=$CheckResearch.IsPresent;battery=$CheckBattery.IsPresent;reservoir=$CheckReservoir.IsPresent;construction=$CheckConstruction.IsPresent;health=$CheckHealth.IsPresent;lighting=$CheckLighting.IsPresent;buildings=$CheckBuildings.IsPresent;buried=$CheckBuried.IsPresent;fallingOre=$CheckFallingOre.IsPresent;critters=$CheckCritters.IsPresent;skills=!$SkipManagement;person=!$SkipManagement -and !$SkipPerson;work=!$SkipManagement -and !$SkipWork}} |
+    checks=[ordered]@{areaDig=$CheckAreaDig.IsPresent;alert=$CheckAlert.IsPresent;sweepSymbol=$CheckSweepSymbol.IsPresent;power=$CheckPower.IsPresent;research=$CheckResearch.IsPresent;battery=$CheckBattery.IsPresent;reservoir=$CheckReservoir.IsPresent;construction=$CheckConstruction.IsPresent;health=$CheckHealth.IsPresent;lighting=$CheckLighting.IsPresent;buildings=$CheckBuildings.IsPresent;buried=$CheckBuried.IsPresent;fallingOre=$CheckFallingOre.IsPresent;critters=$CheckCritters.IsPresent;skills=!$SkipManagement;person=!$SkipManagement -and !$SkipPerson;work=!$SkipManagement -and !$SkipWork}} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $run 'result.json') -Encoding UTF8
 Write-Output "PASS both Steam game clients; evidence in $run"
 } finally {

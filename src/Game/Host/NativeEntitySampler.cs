@@ -196,7 +196,11 @@ namespace Queyang.Game
         internal static void ReadStorage(GameObject obj, ColonyEntity e, NativeFacilityStorage.Snapshot details=null)
         {
             IStorage[] stores = details==null ? obj.GetComponents<Storage>() : obj.GetComponentsInChildren<IStorage>();
-            if(details==null && e.Kind==ColonyEntityKind.Storage) e.StorageMeter=NativeFacilityStorage.SampleFoodMeter(obj);
+            if(details==null && e.Kind==ColonyEntityKind.Storage)
+            {
+                e.StorageMeter=NativeFacilityStorage.SampleFoodMeter(obj);
+                if(obj.GetComponent<Storage>()?.GetOnlyFetchMarkedItems()==true) e.Flags|=ColonyEntity.StorageSweepOnly;
+            }
             var seen = details==null ? null : new HashSet<GameObject>();
             var lists = details==null ? null : new HashSet<List<GameObject>>();
             IStorage washStore = details!=null && obj.GetComponent<HandSanitizer>()!=null ? obj.GetComponent<Storage>() : null;

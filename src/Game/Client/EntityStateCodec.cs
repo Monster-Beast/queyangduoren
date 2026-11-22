@@ -17,6 +17,7 @@ namespace Queyang.Game
     {
         public const byte Worn = 32; // Item-kind flag for an occupied ONI equipment slot.
         public const byte ConstructionBar = 32; // Construction-kind flag for ONI's visible work bar.
+        public const byte StorageSweepOnly = 32; // Storage-kind flag for ONI's sweep-only symbol.
         public int Id, Prefab, Element, Animation;
         public ushort Cell;
         public byte SubX, SubY, Frame, Flags;

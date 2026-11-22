@@ -135,6 +135,10 @@ namespace Queyang.Game
         internal static void ApplyMeter(KSelectable target,ColonyEntity e)
         {
             if(e.Kind!=ColonyEntityKind.Storage) return;
+            var animator=target.GetComponent<KBatchedAnimController>();
+            bool sweep=(e.Flags&ColonyEntity.StorageSweepOnly)!=0;
+            if(animator!=null && animator.GetSymbolVisiblity("sweep")!=sweep)
+                animator.SetSymbolVisiblity("sweep",sweep);
             var prefab=Assets.TryGetPrefab(new Tag(e.Prefab));
             if(!HasKnownMeter(prefab)) return;
             var display=target.GetComponent<NativeFacilityStorage>()??target.gameObject.AddComponent<NativeFacilityStorage>();
