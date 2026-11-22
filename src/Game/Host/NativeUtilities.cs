@@ -67,8 +67,9 @@ namespace Queyang.Game
         {
             var toggle = widget == null ? null : widget.GetComponent<KToggle>();
             if (toggle == null || toggle.isOn == value) return;
-            toggle.SetIsOnWithoutNotify(value);
-            toggle.ForceUpdateVisualState();
+            // KToggle's own setter updates the native image and flourish. The
+            // Unity setter bypasses both; the speed commands are wired to onClick.
+            toggle.isOn = value;
         }
 
         internal static void Apply(int cell, ColonyCell data, bool hasEnvironment)

@@ -279,11 +279,11 @@ namespace Queyang.Integration
                     if (!researchRange.Check(lobby,self,false,round,log)) break;
                     if (!batteryRange.Check(lobby,self,false,round,log)) break;
                     if (!reservoirRange.Check(lobby,self,false,round,log)) break;
-                    if (!researchMotion.Check(lobby,self,false,round,log)) break;
-                    if (!buildingMotion.Check(lobby,self,false,round,log)) break;
                     if (!ownership.Legacy(lobby,false,log)) break;
                     if (SteamMatchmaking.GetLobbyMemberData(lobby,self,"qy_legacy_checked")!="1")
                         SteamMatchmaking.SetLobbyMemberData(lobby,"qy_legacy_checked","1");
+                    if (!researchMotion.Check(lobby,self,false,round,log)) break;
+                    if (!buildingMotion.Check(lobby,self,false,round,log)) break;
                     if (!constructionRange.Check(lobby,self,false,round,log)) break;
                     if (!areaDig.Check(lobby,self,false,round,Grid.InvalidCell,log)) break;
                     if (!health.Check(lobby,self,false,round,log)) break;

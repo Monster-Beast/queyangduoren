@@ -163,10 +163,10 @@ namespace Queyang.Integration
                     if (!researchRange.Check(lobby,friend,true,round,log)) return false;
                     if (!batteryRange.Check(lobby,friend,true,round,log)) return false;
                     if (!reservoirRange.Check(lobby,friend,true,round,log)) return false;
-                    if (!researchMotion.Check(lobby,friend,true,round,log)) return false;
-                    if (!buildingMotion.Check(lobby,friend,true,round,log)) return false;
                     // Other fixture stages let the colony run, and a worker may finish this old order.
                     if (!ownership.Legacy(lobby,true,log) || SteamMatchmaking.GetLobbyMemberData(lobby,friend,"qy_legacy_checked")!="1") return false;
+                    if (!researchMotion.Check(lobby,friend,true,round,log)) return false;
+                    if (!buildingMotion.Check(lobby,friend,true,round,log)) return false;
                     if (!constructionRange.Check(lobby,friend,true,round,log)) return false;
                     if (!areaDig.Check(lobby,friend,true,round,candidate,log)) return false;
                     if (!health.Check(lobby,friend,true,round,log)) return false;

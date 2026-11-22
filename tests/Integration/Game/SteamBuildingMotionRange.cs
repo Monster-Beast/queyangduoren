@@ -71,7 +71,7 @@ namespace Queyang.Integration
                     if (SteamMatchmaking.GetLobbyMemberData(room, peer, Prefix + "ready") != "1") return false;
                     if (!motor.HasAnimation(Loop)) throw new InvalidDataException("Manual generator has no native working loop");
                     wasPaused = SpeedControlScreen.Instance.IsPaused;
-                    if (wasPaused) SpeedControlScreen.Instance.Unpause(false);
+                    while (SpeedControlScreen.Instance.IsPaused) SpeedControlScreen.Instance.Unpause(false);
                     motor.Play(Loop, KAnim.PlayMode.Loop);
                     Publish(room, "start", "1");
                     nextStep = now;

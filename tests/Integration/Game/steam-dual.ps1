@@ -9,6 +9,8 @@ param(
     [string]$BoxRoot,
     [string]$SandboxStart="$env:ProgramFiles/Sandboxie-Plus/Start.exe",
     [string]$FixtureDriverPath,
+    [ValidateRange(800,3840)][int]$GuestWidth=1040,
+    [ValidateRange(540,2160)][int]$GuestHeight=650,
     [Alias('MotionBaselineOnly')][switch]$SkipManagement,
     [switch]$SkipPerson,
     [switch]$SkipWork,
@@ -37,6 +39,10 @@ $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 . (Join-Path $repo 'tools/dev-common.ps1')
 . (Join-Path $PSScriptRoot 'steam-dual-video.ps1')
 $recorders=@{}
+$animationRecorders=@{}
+$animationCaptures=@()
+if($CheckResearchMotion) { $animationCaptures+=@{name='research-motion';marker='RESEARCH_MOTION_RECORD';seconds=8} }
+if($CheckBuildingMotion) { $animationCaptures+=@{name='building-motion';marker='BUILDING_MOTION_INPUT';seconds=12} }
 if (!$GameDir) {
     $steamRoot=(Get-ItemProperty -LiteralPath 'HKCU:\Software\Valve\Steam').SteamPath
     $GameDir=Join-Path $steamRoot 'steamapps/common/OxygenNotIncluded'
@@ -158,6 +164,7 @@ foreach ($role in $roles) {
     $exe=Join-Path $run "$role-game/OxygenNotIncluded.exe"
     $values=[ordered]@{
         SteamAppId='457140'; SteamGameId='457140'; QY_BASELINE_ONLY=([int]$SkipManagement.IsPresent).ToString(); QY_SKIP_PERSON=([int]$SkipPerson.IsPresent).ToString(); QY_SKIP_WORK=([int]$SkipWork.IsPresent).ToString(); QY_SMOKE_ROLE=$role; QY_DUAL_ROLE=$role
+        QY_WINDOW_WIDTH=$(if($role -eq 'guest'){$GuestWidth}else{1280}); QY_WINDOW_HEIGHT=$(if($role -eq 'guest'){$GuestHeight}else{800})
         QY_SMOKE_REPORT=(Join-Path $base "$role.report"); QY_SMOKE_ROOT=$klei; QY_SMOKE_SAVE=$save
         QY_DUAL_SELF=$self; QY_DUAL_FRIEND=$friend; QY_DUAL_HOST_ID=$HostSteamId; QY_DUAL_WAIT_INVITE_SECONDS=([string]$InviteWaitSeconds); QY_DUAL_ACCEPT_INVITE=([int]$AcceptDeliveredInvite.IsPresent).ToString()
     }
@@ -191,7 +198,7 @@ param([string]`$Base,[string]`$Exe)
 `$settings=Get-Content -LiteralPath (Join-Path `$Base 'session.json') -Raw | ConvertFrom-Json
 Get-ChildItem Env: | Where-Object { `$_.Name -like 'QY_*' -or `$_.Name -eq 'ONI_COOP_BIND' } | ForEach-Object { [Environment]::SetEnvironmentVariable(`$_.Name,`$null) }
 foreach (`$prop in `$settings.PSObject.Properties) { [Environment]::SetEnvironmentVariable(`$prop.Name,[string]`$prop.Value) }
-`$playerArgs=@('-screen-width','1280','-screen-height','800','-screen-fullscreen','0','-logFile',('"'+(Join-Path `$Base 'player.log')+'"'))
+`$playerArgs=@('-screen-width',`$env:QY_WINDOW_WIDTH,'-screen-height',`$env:QY_WINDOW_HEIGHT,'-screen-fullscreen','0','-logFile',('"'+(Join-Path `$Base 'player.log')+'"'))
 `$p=Start-Process -FilePath `$Exe -WorkingDirectory (Split-Path `$Exe) -ArgumentList `$playerArgs -WindowStyle Hidden -PassThru
 [IO.File]::WriteAllText((Join-Path `$Base 'player.pid'),[string]`$p.Id)
 `$p.WaitForExit()
@@ -266,6 +273,15 @@ try {
             if ($role -eq 'host' -and !$recorders.Count -and $lines -match '^DUAL_MOTION_(ARM|START)\b') {
                 foreach ($endpoint in $roles) { $recorders[$endpoint]=Start-DualRecording $drivers[$endpoint] }
             }
+            if ($role -eq 'host') {
+                foreach ($capture in $animationCaptures) {
+                    if ($animationRecorders.ContainsKey($capture.name) -or !($lines -match "^$($capture.marker) ")) { continue }
+                    $animationRecorders[$capture.name]=@{}
+                    foreach ($endpoint in $roles) {
+                        $animationRecorders[$capture.name][$endpoint]=Start-DualRecording $drivers[$endpoint] $capture.name $capture.seconds
+                    }
+                }
+            }
             if ($role -eq 'host' -and $recorders.Count -eq 2 -and !$motionReady) {
                 $files=@(foreach ($endpoint in $roles) {
                     $out=Join-Path $drivers[$endpoint].base 'dupe-motion.mp4'
@@ -302,6 +318,12 @@ try {
     }
     if (!$drivers.host.done -or !$drivers.guest.done) { throw 'Two-account Steam fixture timed out. See private reports.' }
     foreach ($endpoint in $roles) { Confirm-DualRecording $drivers[$endpoint] $recorders[$endpoint] }
+    foreach ($capture in $animationCaptures) {
+        if (!$animationRecorders.ContainsKey($capture.name)) { throw "Missing $($capture.name) recording start." }
+        foreach ($endpoint in $roles) {
+            Confirm-DualRecording $drivers[$endpoint] $animationRecorders[$capture.name][$endpoint] $capture.name $capture.seconds
+        }
+    }
     foreach ($endpoint in $roles) {
         $d=$drivers[$endpoint]
         $report=Get-Physical $d $d.env.QY_SMOKE_REPORT
@@ -453,6 +475,9 @@ try {
     throw
 } finally {
     foreach ($p in $recorders.Values) { if ($p -and !$p.HasExited) { $p.Kill(); [void]$p.WaitForExit(10000) } }
+    foreach ($pair in $animationRecorders.Values) {
+        foreach ($p in $pair.Values) { if ($p -and !$p.HasExited) { $p.Kill(); [void]$p.WaitForExit(10000) } }
+    }
     foreach ($role in $roles) {
         $d=$drivers[$role]
         $p=Get-Player $d

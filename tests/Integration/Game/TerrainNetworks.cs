@@ -138,7 +138,7 @@ namespace Queyang.Integration
             }
             return false;
         }
-        static void Set(IUtilityNetworkMgr mgr,int cell,GameObject wire,UtilityConnections value)
+        internal static void Set(IUtilityNetworkMgr mgr,int cell,GameObject wire,UtilityConnections value)
         {
             mgr.SetConnections(value,cell,false);
             var v=wire.GetComponent<KAnimGraphTileVisualizer>(); v.UpdateConnections(value); v.Connections=value;

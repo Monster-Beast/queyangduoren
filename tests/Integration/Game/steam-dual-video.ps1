@@ -31,39 +31,39 @@ public static class QyWindowCapture {
 }
 "@
 }
-function Start-DualRecording([object]$driver) {
+function Start-DualRecording([object]$driver,[string]$name='dupe-motion',[int]$seconds=24) {
     $game=Get-Player $driver
     if (!$game) { throw "No verified $($driver.role) game process for capture." }
     $window=[QyWindowCapture]::GameWindow([uint32]$game.Id)
-    $out=Join-Path $driver.base 'dupe-motion.mp4'
-    $log=Join-Path $driver.base 'capture.log'
+    $out=Join-Path $driver.base "$name.mp4"
+    $log=Join-Path $driver.base $(if($name -eq 'dupe-motion'){'capture.log'}else{"$name-capture.log"})
     # Background windows can deliver fewer graphics updates than the nominal source rate.
     # Use elapsed capture time for frame presentation, including gaps between updates.
     $graph="gfxcapture=hwnd=${window}:width=1280:height=720:resize_mode=scale:max_framerate=30:capture_cursor=0:display_border=0,hwdownload,format=bgra,settb=AVTB,setpts=(RTCTIME-RTCSTART)/1000000/TB,fps=30,format=yuv420p[v]"
-    $opts=@('-hide_banner','-nostdin','-loglevel','error','-filter_complex',$graph,'-map','[v]','-an','-c:v','libx264','-preset','veryfast','-threads','2','-crf','19','-r','30','-fps_mode','cfr','-t','24','-movflags','+faststart',('"' + $out + '"'))
+    $opts=@('-hide_banner','-nostdin','-loglevel','error','-filter_complex',$graph,'-map','[v]','-an','-c:v','libx264','-preset','veryfast','-threads','2','-crf','19','-r','30','-fps_mode','cfr','-t',"$seconds",'-movflags','+faststart',('"' + $out + '"'))
     $p=Start-Process -FilePath (Get-Command ffmpeg).Source -ArgumentList $opts -WindowStyle Hidden -PassThru -RedirectStandardError $log
     [ordered]@{utc=[DateTime]::UtcNow.ToString('o');qpc=[Diagnostics.Stopwatch]::GetTimestamp();qpcHz=[Diagnostics.Stopwatch]::Frequency;gameProcess=$game.Id;window=$window} |
-        ConvertTo-Json |Set-Content (Join-Path $driver.base 'capture-clock.json')
+        ConvertTo-Json |Set-Content (Join-Path $driver.base $(if($name -eq 'dupe-motion'){'capture-clock.json'}else{"$name-clock.json"}))
     $p
 }
-function Confirm-DualRecording([object]$driver,[Diagnostics.Process]$recorder) {
+function Confirm-DualRecording([object]$driver,[Diagnostics.Process]$recorder,[string]$name='dupe-motion',[int]$seconds=24) {
     if (!$recorder -or !$recorder.WaitForExit(30000) -or ($null -ne $recorder.ExitCode -and $recorder.ExitCode -ne 0)) {
         throw "Windows Graphics Capture failed for $($driver.role); see its capture.log"
     }
-    $path=Join-Path $driver.base 'dupe-motion.mp4'
+    $path=Join-Path $driver.base "$name.mp4"
     $json=& ffprobe -v error -select_streams v:0 -show_entries 'stream=codec_name,width,height,avg_frame_rate,nb_frames,duration' -of json $path
     if ($LASTEXITCODE) { throw "Unreadable video: $path" }
     $video=($json | ConvertFrom-Json).streams[0]
-    if (!$video -or $video.codec_name -ne 'h264' -or $video.width -ne 1280 -or $video.height -ne 720 -or $video.avg_frame_rate -ne '30/1' -or [int]$video.nb_frames -lt 710 -or [double]$video.duration -lt 23.9) { throw "Bad capture stream: $path" }
+    if (!$video -or $video.codec_name -ne 'h264' -or $video.width -ne 1280 -or $video.height -ne 720 -or $video.avg_frame_rate -ne '30/1' -or [int]$video.nb_frames -lt ($seconds*30-10) -or [double]$video.duration -lt ($seconds-.1)) { throw "Bad capture stream: $path" }
     $filter='fps=1,crop=iw*.65:ih*.65,scale=160:90'
     $samples=& ffmpeg -v error -i $path -vf $filter -an -f framemd5 -
     $hashes=@($samples -match '^0,' | ForEach-Object {($_ -split ',')[-1].Trim()} | Sort-Object -Unique)
     $stats=& ffmpeg -v error -i $path -vf "$filter,signalstats,metadata=mode=print:key=lavfi.signalstats.YAVG:file=-" -an -f null NUL
     $means=@($stats -match '^lavfi.signalstats.YAVG=' | ForEach-Object {[double]::Parse(($_ -split '=')[1],[cultureinfo]::InvariantCulture)})
-    if ($means.Count -ne 24 -or ($means | Measure-Object -Minimum).Minimum -le 18 -or $hashes.Count -lt 5) {
+    if ($means.Count -ne $seconds -or ($means | Measure-Object -Minimum).Minimum -le 18 -or $hashes.Count -lt 5) {
         throw "Motion clip contains black or static colony samples: $path"
     }
     $video | Add-Member -NotePropertyName distinctOneSecondSceneHashes -NotePropertyValue $hashes.Count
     $video | Add-Member -NotePropertyName minimumSceneLuma -NotePropertyValue (($means | Measure-Object -Minimum).Minimum)
-    $video | ConvertTo-Json |Set-Content (Join-Path $driver.base 'capture-stream.json')
+    $video | ConvertTo-Json |Set-Content (Join-Path $driver.base $(if($name -eq 'dupe-motion'){'capture-stream.json'}else{"$name-stream.json"}))
 }

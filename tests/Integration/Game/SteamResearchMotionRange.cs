@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using HarmonyLib;
 using Queyang.Game;
 using Steamworks;
 using UnityEngine;
@@ -14,11 +13,11 @@ namespace Queyang.Integration
     {
         const string Prefix = "qy_research_motion_";
         static readonly HashedString WorkLoop = new HashedString("working_loop");
-        static readonly AccessTools.FieldRef<EnergyConsumer, ushort> Circuit =
-            AccessTools.FieldRefAccess<EnergyConsumer, ushort>("<CircuitID>k__BackingField");
         readonly HashSet<int> frames = new HashSet<int>();
         readonly List<string> samples = new List<string> { "time,building,worker,clip,frame,frame_count,research_fraction" };
         ResearchCenter station;
+        Battery power;
+        List<global::Wire> wires;
         Tech tech;
         FixtureFrame photo;
         int cell, id, worker, previousFrame = -1, wraps;
@@ -61,12 +60,13 @@ namespace Queyang.Integration
                 var speed = SpeedControlScreen.Instance;
                 paused = speed.IsPaused;
                 speed.SetSpeed(0);
+                power.AddEnergy(power.Capacity - power.JoulesAvailable);
                 station.GetComponent<Storage>().AddOre(SimHashes.Dirt, 650f, 295f, byte.MaxValue, 0, false, false);
                 Research.Instance.SetActiveResearch(tech, true);
                 station.GetComponent<Prioritizable>().SetMasterPriority(new PrioritySetting(PriorityScreen.PriorityClass.topPriority, 9));
                 foreach (var dupe in Components.LiveMinionIdentities.Items.Where(d => d != null && ClusterUtil.GetMyWorldId(d) == ClusterManager.Instance.activeWorldId))
                     dupe.GetComponent<ChoreConsumer>().SetPersonalPriority(Db.Get().ChoreGroups.Research, 5);
-                if (paused) speed.Unpause(false);
+                while (speed.IsPaused) speed.Unpause(false);
                 started = true;
             }
             else if (!host && !started)
@@ -78,17 +78,12 @@ namespace Queyang.Integration
             {
                 if (host)
                 {
-                    // The fixture supplies power. The original scheduler, worker,
-                    // workstation animation and material conversion run normally.
-                    var energy = station.GetComponent<EnergyConsumer>();
-                    Circuit(energy) = 1;
-                    energy.SetConnectionStatus(CircuitManager.ConnectionStatus.Powered);
-                    station.GetComponent<RequireInputs>().Sim200ms(0);
                     points = station.GetPercentComplete();
                     if (station.worker != null && worker == 0 && body.currentAnim == WorkLoop)
                     {
                         worker = station.worker.GetComponent<KPrefabID>().InstanceID;
                         Publish(room, "worker", worker.ToString(CultureInfo.InvariantCulture));
+                        log($"RESEARCH_MOTION_RECORD id={id} worker={worker}");
                     }
                 }
                 else if (worker == 0) int.TryParse(Read(room, "worker"), out worker);
@@ -110,13 +105,22 @@ namespace Queyang.Integration
                 if (now >= nextLog)
                 {
                     log($"RESEARCH_MOTION_WAIT role={Role(host)} id={id} operational={station?.GetComponent<Operational>().IsOperational} worker={worker} clip={body.currentAnim.HashValue} frame={frame}/{count} sampled={frames.Count} wraps={wraps} points={points}");
+                    if (host && worker == 0)
+                    {
+                        var candidates = Components.LiveMinionIdentities.Items.Where(d => d != null)
+                            .Select(d => $"{d.GetComponent<Navigator>().CanReach(station)}:{d.GetComponent<ChoreDriver>().GetCurrentChore()?.choreType.Id}");
+                        var energy = station.GetComponent<EnergyConsumer>();
+                        log(FormattableString.Invariant($"RESEARCH_MOTION_LABOR time={GameClock.Instance.GetTime():0.0} paused={SpeedControlScreen.Instance.IsPaused} scale={Time.timeScale} material={station.GetComponent<Storage>().MassStored()} nativeWorker={station.worker?.GetComponent<KPrefabID>().InstanceID} circuit={energy.CircuitID} powered={energy.IsPowered} batteryJoules={power.JoulesAvailable:R} reachAndChores={string.Join(",", candidates)}"));
+                    }
                     nextLog = now + 5f;
                 }
                 int minimum = Math.Max(3, Math.Min(12, count - 1));
                 if (frames.Count < minimum || wraps < 2 || photo?.Complete != true) return false;
                 if (host)
                 {
-                    if (points <= 0 || station.worker == null) return false;
+                    var energy = station.GetComponent<EnergyConsumer>();
+                    if (points <= 0 || station.worker == null || !energy.IsPowered) return false;
+                    log(FormattableString.Invariant($"RESEARCH_MOTION_CIRCUIT id={energy.CircuitID} wires={wires.Count} batteryJoules={power.JoulesAvailable:R}"));
                     Publish(room, "frames", string.Join(",", frames.OrderBy(f => f)));
                 }
                 else
@@ -150,13 +154,62 @@ namespace Queyang.Integration
         {
             if (!CoopSession.IsHosting || Util.GetKleiRootPath() != Environment.GetEnvironmentVariable("QY_SMOKE_ROOT"))
                 throw new InvalidOperationException("Research motion requires an isolated host");
-            station = NativeFacilityChecks.Build(ResearchCenterConfig.ID, ClusterManager.Instance.activeWorldId).GetComponent<ResearchCenter>();
+            int world = ClusterManager.Instance.activeWorldId;
+            station = NativeFacilityChecks.Build(ResearchCenterConfig.ID, world).GetComponent<ResearchCenter>();
+            power = NativeFacilityChecks.Build(BatteryConfig.ID, world).GetComponent<Battery>();
             cell = station.GetComponent<Building>().GetCell();
             id = station.GetComponent<KPrefabID>().InstanceID;
             string type = station.GetResearchType();
             tech = Db.Get().Techs.resources.First(t => !t.Disabled && t.FoundNode && !t.IsComplete() && t.ArePrerequisitesComplete() &&
                 t.costsByResearchTypeID.TryGetValue(type, out float cost) && cost >= 4 && t.costsByResearchTypeID.Values.Count(n => n > 0) == 1);
+            wires = WireCircuit(station.GetComponent<Building>().GetPowerInputCell(), power.GetComponent<Building>().GetPowerInputCell(), world);
             Publish(room, "device", FormattableString.Invariant($"{id}|{cell}"));
+        }
+
+        static List<global::Wire> WireCircuit(int start, int end, int world)
+        {
+            var steps = new (int Delta, UtilityConnections Direction, UtilityConnections Opposite)[] {
+                (-1, UtilityConnections.Left, UtilityConnections.Right),
+                (1, UtilityConnections.Right, UtilityConnections.Left),
+                (-Grid.WidthInCells, UtilityConnections.Down, UtilityConnections.Up),
+                (Grid.WidthInCells, UtilityConnections.Up, UtilityConnections.Down)
+            };
+            bool Vacant(int c) => Grid.IsValidBuildingCell(c) && Grid.WorldIdx[c] == world && Grid.Visible[c] != 0 &&
+                Grid.Objects[c, (int)ObjectLayer.Wire] == null && Grid.Objects[c, (int)ObjectLayer.WireTile] == null;
+            if (!Vacant(start) || !Vacant(end)) throw new InvalidDataException("Research fixture power port overlaps a wire");
+            var visited = new Dictionary<int, (int Parent, UtilityConnections Direction, UtilityConnections Opposite)> {
+                [start] = (Grid.InvalidCell, 0, 0)
+            };
+            var pending = new Queue<int>();
+            pending.Enqueue(start);
+            while (pending.Count > 0 && !visited.ContainsKey(end))
+            {
+                int c = pending.Dequeue();
+                foreach (var step in steps)
+                {
+                    int next = c + step.Delta;
+                    if (!Vacant(next) || Grid.GetCellDistance(c, next) != 1 || Grid.GetCellDistance(start, next) > 24 ||
+                        visited.ContainsKey(next)) continue;
+                    visited.Add(next, (c, step.Direction, step.Opposite));
+                    pending.Enqueue(next);
+                }
+            }
+            if (!visited.ContainsKey(end)) throw new InvalidDataException("No short free path for the research fixture circuit");
+            var def = Assets.GetBuildingDef(WireConfig.ID);
+            var material = new[] { ElementLoader.FindElementByHash(SimHashes.Cuprite).tag };
+            var manager = global::Game.Instance.electricalConduitSystem;
+            var built = new List<global::Wire>();
+            UtilityConnections fromNext = 0;
+            for (int c = end; c != Grid.InvalidCell; c = visited[c].Parent)
+            {
+                var step = visited[c];
+                var obj = def.Build(c, Orientation.Neutral, null, material, 295f, false, -1f);
+                if (obj == null) throw new InvalidDataException($"Could not build native wire at cell {c}");
+                built.Add(obj.GetComponent<global::Wire>());
+                TerrainNetworks.Set(manager, c, obj, fromNext | step.Opposite);
+                fromNext = step.Direction;
+            }
+            return built;
         }
 
         static string Folder => Path.GetDirectoryName(Environment.GetEnvironmentVariable("QY_SMOKE_REPORT"));
