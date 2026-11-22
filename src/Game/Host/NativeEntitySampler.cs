@@ -245,6 +245,8 @@ namespace Queyang.Game
                         float required = Amount(ingredient.amount); needed += required; row.Required += required; totals[tag] = row;
                     }
                 e.Value = construction.GetWorkTime() > 0 ? Mathf.Clamp01(Amount(construction.GetPercentComplete())) : 0;
+                if(NativeConstructionProgress.Source(construction)?.gameObject.activeSelf==true)
+                    e.Flags|=ColonyEntity.ConstructionBar;
                 e.Limit = stored; e.Extra = needed;
             }
             else { e.Value = stored; e.Limit = Amount(capacity); e.Extra = stacks; }

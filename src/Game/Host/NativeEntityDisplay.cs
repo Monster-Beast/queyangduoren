@@ -23,6 +23,8 @@ namespace Queyang.Game
             internal int Cell;
             internal int ViewTick;
             internal float LastCritterMotion=float.NegativeInfinity;
+            internal ProgressBar WorkBar;
+            internal float WorkFraction()=>State.Value;
         }
 
         static readonly Dictionary<int, NativeEntitySampler.Candidate> locals = new Dictionary<int, NativeEntitySampler.Candidate>();
@@ -93,7 +95,13 @@ namespace Queyang.Game
                 bool tracked=e.Kind==ColonyEntityKind.Critter && NativeDupePose.Knows(e.Id);
                 if(!tracked || NativeDupePose.Current(e.Id,view.DupePoseTick)) item.Cell = cell;
                 item.ViewTick=Math.Max(item.ViewTick,view.DupePoseTick);
-                if (building) { NativeFacilityStorage.ApplyMeter(target,e); continue; }
+                if (building)
+                {
+                    NativeFacilityStorage.ApplyMeter(target,e);
+                    if(e.Kind==ColonyEntityKind.Construction)
+                        NativeConstructionProgress.Apply(target,e,item.WorkFraction,ref item.WorkBar);
+                    continue;
+                }
                 SetVisible(target, true);
                 NativeWorldMirror.ApplyPrimary(target.GetComponent<PrimaryElement>(),
                     new MaterialSample { Element = e.Element, Mass = e.Mass, Temperature = e.Temperature });
@@ -309,6 +317,7 @@ namespace Queyang.Game
         {
             if (!active.TryGetValue(id, out var old)) return;
             active.Remove(id);
+            NativeConstructionProgress.Clear(ref old.WorkBar);
             if(old.State.Kind==ColonyEntityKind.Critter) NativeDupePose.Forget(id,0);
             if (old.Target == null) return;
             old.Target.RemoveStatusItem(old.Status);
@@ -316,6 +325,7 @@ namespace Queyang.Game
         }
 
         internal static KSelectable GetSelectable(int hostId) => active.TryGetValue(hostId, out var s) ? s.Target : null;
+        internal static ProgressBar GetConstructionBar(int hostId) => active.TryGetValue(hostId,out var s)?s.WorkBar:null;
         internal static KBatchedAnimController MovingCritter(int id,int tick,int cell)
         {
             if(!active.TryGetValue(id,out var s) || s.State.Kind!=ColonyEntityKind.Critter ||

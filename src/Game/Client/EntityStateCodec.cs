@@ -16,6 +16,7 @@ namespace Queyang.Game
     public sealed class ColonyEntity
     {
         public const byte Worn = 32; // Item-kind flag for an occupied ONI equipment slot.
+        public const byte ConstructionBar = 32; // Construction-kind flag for ONI's visible work bar.
         public int Id, Prefab, Element, Animation;
         public ushort Cell;
         public byte SubX, SubY, Frame, Flags;

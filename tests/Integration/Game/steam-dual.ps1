@@ -13,6 +13,7 @@ param(
     [switch]$SkipPerson,
     [switch]$SkipWork,
     [switch]$CheckBuildings,
+    [switch]$CheckConstruction,
     [switch]$CheckFallingOre,
     [switch]$CheckBuried,
     [switch]$CheckLighting,
@@ -146,6 +147,7 @@ foreach ($role in $roles) {
         QY_DUAL_SELF=$self; QY_DUAL_FRIEND=$friend; QY_DUAL_HOST_ID=$HostSteamId; QY_DUAL_WAIT_INVITE_SECONDS=([string]$InviteWaitSeconds); QY_DUAL_ACCEPT_INVITE=([int]$AcceptDeliveredInvite.IsPresent).ToString()
     }
     $values.QY_CHECK_BUILDINGS=([int]$CheckBuildings.IsPresent).ToString()
+    $values.QY_CONSTRUCTION_RANGE=([int]$CheckConstruction.IsPresent).ToString()
     $values.QY_CHECK_FALLING_ORE=([int]$CheckFallingOre.IsPresent).ToString()
     $values.QY_CHECK_BURIED=([int]$CheckBuried.IsPresent).ToString()
     $values.QY_CHECK_LIGHTING=([int]$CheckLighting.IsPresent).ToString()
@@ -298,6 +300,19 @@ try {
         $path=Get-Physical $d (Join-Path $d.base $entry[1])
         if (!(Test-Path $path) -or (Get-Item $path).Length -lt 45) { throw "Missing screenshot $($entry[1])." }
     }
+    if ($CheckConstruction) {
+        foreach($role in $roles) {
+            $d=$drivers[$role]
+            $report=Get-Physical $d $d.env.QY_SMOKE_REPORT
+            foreach($stage in 0..2) {
+                if (!(Select-String -LiteralPath $report -Pattern "^CONSTRUCTION_RANGE stage=$stage " -Quiet)) {
+                    throw "Missing native construction checkpoint $stage for $role."
+                }
+                $shot=Get-Physical $d (Join-Path $d.base "range-$role-$stage.png")
+                if (!(Test-Path -LiteralPath $shot)) { throw "Missing construction screenshot $shot." }
+            }
+        }
+    }
     if ($CheckBuried) {
         foreach ($role in $roles) {
             $d=$drivers[$role]
@@ -371,6 +386,13 @@ try {
         $p=Get-Player $d
         if ($p -and !$p.HasExited) { $p.Kill(); [void]$p.WaitForExit(10000) }
         if ($role -eq 'guest') {
+            if($CheckConstruction) {
+                foreach($stage in 0..2){
+                    $dest=Join-Path $d.base "range-guest-$stage.png"
+                    $src=Get-Physical $d $dest
+                    if ($src -ne $dest -and (Test-Path $src)) { Copy-Item -LiteralPath $src -Destination $dest }
+                }
+            }
             if($CheckHealth) {
                 foreach($stage in 0..2){
                     $dest=Join-Path $d.base "health-guest-$stage.png"
@@ -429,7 +451,7 @@ $joins=@(foreach ($line in $guestReport) {
 })
 if ($joins.Count -ne 2 -or $joins[0].round -ne 1 -or $joins[1].round -ne 2) { throw 'Missing exact join methods for both rounds.' }
 [ordered]@{packageSha256=$before[0];saveSha256=$before[1];protectedInputsUnchanged=$true;joins=$joins
-    checks=[ordered]@{health=$CheckHealth.IsPresent;lighting=$CheckLighting.IsPresent;buildings=$CheckBuildings.IsPresent;buried=$CheckBuried.IsPresent;fallingOre=$CheckFallingOre.IsPresent;critters=$CheckCritters.IsPresent;skills=!$SkipManagement;person=!$SkipManagement -and !$SkipPerson;work=!$SkipManagement -and !$SkipWork}} |
+    checks=[ordered]@{construction=$CheckConstruction.IsPresent;health=$CheckHealth.IsPresent;lighting=$CheckLighting.IsPresent;buildings=$CheckBuildings.IsPresent;buried=$CheckBuried.IsPresent;fallingOre=$CheckFallingOre.IsPresent;critters=$CheckCritters.IsPresent;skills=!$SkipManagement;person=!$SkipManagement -and !$SkipPerson;work=!$SkipManagement -and !$SkipWork}} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $run 'result.json') -Encoding UTF8
 Write-Output "PASS both Steam game clients; evidence in $run"
 } finally {
