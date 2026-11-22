@@ -11,6 +11,7 @@ namespace Queyang.Game
     {
         const ObjectLayer Foundation = ObjectLayer.FoundationTile;
         static readonly Dictionary<int, TileChange> changes = new Dictionary<int, TileChange>();
+        static readonly Dictionary<int, TileChange> planChanges = new Dictionary<int, TileChange>();
         static BlockTileRenderer renderer;
 
         readonly struct Tile
@@ -19,13 +20,16 @@ namespace Queyang.Game
             internal readonly SimHashes Element;
             internal readonly int RenderLayer;
             internal readonly int? Connector;
+            internal readonly bool Blueprint, Replacement;
 
-            internal Tile(BuildingDef def, SimHashes element, GameObject prefab)
+            internal Tile(BuildingDef def, SimHashes element, GameObject prefab, bool blueprint=false, bool replacement=false)
             {
                 Def = def;
                 Element = element;
                 RenderLayer = prefab.layer;
                 Connector = prefab.GetComponent<IBlockTileInfo>()?.GetBlockTileConnectorID();
+                Blueprint = blueprint;
+                Replacement = replacement;
             }
         }
 
@@ -52,8 +56,10 @@ namespace Queyang.Game
             if (renderer != active)
             {
                 changes.Clear();
+                planChanges.Clear();
                 renderer = active;
             }
+            ApplyPlan(cell,sample,definition);
             bool receivedTile = (sample.Flags & 48) == 16 && UsesBlockRenderer(definition) &&
                 sample.AnchorDX == 0 && sample.AnchorDY == 0;
             // A solid occupied sample can report a building ahead of a foundation tile.
@@ -89,6 +95,34 @@ namespace Queyang.Game
             Refresh(cell);
         }
 
+        static void ApplyPlan(int cell, ColonyCell sample, BuildingDef definition)
+        {
+            var desired = (sample.Flags & 48) == 32 && sample.AnchorDX == 0 && sample.AnchorDY == 0 &&
+                UsesBlockRenderer(definition) && definition.BuildingUnderConstruction != null ? definition : null;
+            bool changed = planChanges.TryGetValue(cell,out var previous);
+            if (changed && previous.After.Def == desired) return;
+            var original = changed ? previous.Original : Grid.Objects[cell,(int)Foundation];
+            var construction = original == null ? null : original.GetComponent<Constructable>();
+            var building = original == null ? null : original.GetComponent<BuildingUnderConstruction>();
+            var before = changed ? previous.Before :
+                construction != null && building != null && UsesBlockRenderer(building.Def) ?
+                    new Tile(building.Def,SimHashes.Void,original,true,construction.IsReplacementTile) : default;
+            if (!changed && before.Def == desired) return;
+            Remove(changed ? previous.After : before,cell);
+            if (desired == before.Def)
+            {
+                Add(before,cell);
+                planChanges.Remove(cell);
+            }
+            else
+            {
+                var after = desired == null ? default : new Tile(desired,SimHashes.Void,desired.BuildingUnderConstruction,true);
+                Add(after,cell);
+                planChanges[cell] = new TileChange(original,before,after);
+            }
+            Refresh(cell);
+        }
+
         static SimHashes Material(ColonyCell sample)
         {
             var supplied = (SimHashes)sample.Structure.Element;
@@ -101,12 +135,12 @@ namespace Queyang.Game
 
         static void Add(Tile tile, int cell)
         {
-            if (tile.Def != null) renderer.AddBlock(tile.RenderLayer, tile.Def, false, tile.Element, cell);
+            if (tile.Def != null) renderer.AddBlock(tile.RenderLayer, tile.Def, tile.Replacement, tile.Element, cell,tile.Blueprint);
         }
 
         static void Remove(Tile tile, int cell)
         {
-            if (tile.Def != null) renderer.RemoveBlock(tile.Def, false, tile.Element, cell);
+            if (tile.Def != null) renderer.RemoveBlock(tile.Def, tile.Replacement, tile.Element, cell);
         }
 
         static void Refresh(int cell)
@@ -187,18 +221,25 @@ namespace Queyang.Game
         {
             if (renderer != null && renderer == World.Instance?.blockTileRenderer && Grid.Element != null)
             {
-                foreach (var entry in changes)
-                {
-                    int cell = entry.Key;
-                    if (!Grid.IsValidCell(cell)) continue;
-                    Remove(entry.Value.After, cell);
-                    if (entry.Value.Original != null && Grid.Objects[cell, (int)Foundation] == entry.Value.Original)
-                        Add(entry.Value.Before, cell);
-                    Refresh(cell);
-                }
+                Restore(changes);
+                Restore(planChanges);
             }
             changes.Clear();
+            planChanges.Clear();
             renderer = null;
+        }
+
+        static void Restore(Dictionary<int,TileChange> registered)
+        {
+            foreach (var entry in registered)
+            {
+                int cell = entry.Key;
+                if (!Grid.IsValidCell(cell)) continue;
+                Remove(entry.Value.After,cell);
+                if (entry.Value.Original != null && Grid.Objects[cell,(int)Foundation] == entry.Value.Original)
+                    Add(entry.Value.Before,cell);
+                Refresh(cell);
+            }
         }
     }
 }

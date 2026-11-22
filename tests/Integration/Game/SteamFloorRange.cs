@@ -105,6 +105,7 @@ namespace Queyang.Integration
             var solid = Grid.Solid[cell];
             var blockRenderer = World.Instance.blockTileRenderer;
             int count = RenderCount(blockRenderer, def, cell);
+            int outlines = RenderCount(blockRenderer,def,cell,BlockTileRenderer.RenderInfoLayer.UnderConstruction);
             Grid.CellToXY(neighbor, out int nx, out int ny);
             var direction = cell > neighbor ? BlockTileRenderer.Bits.Right : BlockTileRenderer.Bits.Left;
             bool joined = (blockRenderer.GetConnectionBits(nx, ny, (int)def.TileLayer) & direction) != 0;
@@ -120,7 +121,7 @@ namespace Queyang.Integration
             int neighborCount = RenderCount(blockRenderer, def, neighbor);
             bool observedBuilt = stage == 1 && completeId > 0 && (host ? nativeBuilding?.GetComponent<BuildingComplete>() != null :
                 NativeWorldMirror.GetBuildingSelectable(cell, completeId) != null);
-            bool valid = noGuestGridOccupier && (stage == 0 ? (host ? pending : hasSample) && !solid && count == 0 :
+            bool valid = noGuestGridOccupier && outlines == (stage == 0 ? 1 : 0) && (stage == 0 ? (host ? pending : hasSample) && !solid && count == 0 :
                 neighborCount == 1 && (stage == 1 ? observedBuilt && !pending && solid && count == 1 && joined && decorated :
                     !pending && !solid && count == 0 && !joined && !decorated &&
                     (host ? nativeBuilding == null : NativeWorldMirror.GetBuildingSelectable(cell, completeId) == null)));
@@ -145,7 +146,7 @@ namespace Queyang.Integration
             string ack = Key + "seen_" + stage;
             if (host && SteamMatchmaking.GetLobbyMemberData(room, peer, ack) != "1") return false;
             if (!host) SteamMatchmaking.SetLobbyMemberData(room, ack, "1");
-            log($"FLOOR_RANGE stage={stage} cell={cell} neighbor={neighbor} plan={planId} complete={completeId} pending={pending} solid={solid} blocks={count} neighborCount={neighborCount} connected={joined} decor={decorated} noGuestGridOccupier={noGuestGridOccupier} raw={hasSample}/{observed.Flags}/{observed.BuildingHash}/{observed.BuildingSaveId}");
+            log($"FLOOR_RANGE stage={stage} cell={cell} neighbor={neighbor} plan={planId} complete={completeId} pending={pending} solid={solid} blocks={count} outlines={outlines} neighborCount={neighborCount} connected={joined} decor={decorated} noGuestGridOccupier={noGuestGridOccupier} raw={hasSample}/{observed.Flags}/{observed.BuildingHash}/{observed.BuildingSaveId}");
             stage++;
             frame = null;
             activated = false;
@@ -220,10 +221,10 @@ namespace Queyang.Integration
             return true;
         }
 
-        static int RenderCount(BlockTileRenderer renderer, BuildingDef def, int cell)
+        static int RenderCount(BlockTileRenderer renderer, BuildingDef def, int cell, BlockTileRenderer.RenderInfoLayer layer=BlockTileRenderer.RenderInfoLayer.Built)
         {
             var records = (IDictionary)RenderInfo.GetValue(renderer);
-            var info = records[new KeyValuePair<BuildingDef, BlockTileRenderer.RenderInfoLayer>(def, BlockTileRenderer.RenderInfoLayer.Built)];
+            var info = records[new KeyValuePair<BuildingDef, BlockTileRenderer.RenderInfoLayer>(def,layer)];
             var occupied = info == null ? null : (IDictionary)AccessTools.Field(info.GetType(), "occupiedCells").GetValue(info);
             return occupied != null && occupied.Contains(cell) ? (int)occupied[cell] : 0;
         }
