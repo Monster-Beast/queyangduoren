@@ -26,7 +26,7 @@ namespace Queyang.Game
         {
             var selected = SelectTool.Instance == null ? null : Selection.GetValue(SelectTool.Instance) as KSelectable;
             PollBuildingReadings(selected);
-            PollBuildingName(selected);
+            PollBuildingName(DetailsScreen.Instance?.target?.GetComponent<KSelectable>());
             if (selected != null)
             {
                 var proxy = selected.GetComponent<NativeProxySettings>();

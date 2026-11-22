@@ -119,7 +119,7 @@ namespace Queyang.Game
             Send("buildingname/"+id,x,y);
         }
 
-        internal static string ApplyBuildingName(GameObject target, string[] fields)
+        internal static string ApplyBuildingName(GameObject target, int cell, string[] fields)
         {
             if (!NameableBuilding(target) || fields.Length != 3 && fields.Length != 5) return Conflict;
             var nameable = target.GetComponent<UserNameable>();
@@ -131,18 +131,19 @@ namespace Queyang.Game
             }
             // Send the full revision even when the viewport compacts long display names.
             string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(name)).Replace('/','_');
-            return encoded.Length <= 2048 ? Prefix+"bn/"+fields[2]+"/"+Digest(name)+"/"+encoded : Conflict;
+            return encoded.Length <= 2048 ? Prefix+"bn/"+cell+"/"+fields[2]+"/"+Digest(name)+"/"+encoded : Conflict;
         }
 
         static void ReceiveBuildingName(string[] fields)
         {
-            if (fields.Length != 5 || !TryBuildingNameTarget(buildingNameTarget,out _,out int id) || id != Number(fields[2])) return;
-            string name = RenameEncoding.GetString(Convert.FromBase64String(fields[4].Replace('_','/')));
-            buildingNameVersion = fields[3];
-            var selected = buildingNameTarget.GetComponent<KSelectable>();
-            if (selected.GetProperName() == name) return;
-            selected.SetName(name);
-            if (DetailsScreen.Instance?.target == buildingNameTarget) DetailsScreen.Instance.UpdateTitle();
+            if (fields.Length != 6) return;
+            var selectable = NativeWorldMirror.GetBuildingSelectable(Number(fields[2]),Number(fields[3]));
+            if (selectable == null) return;
+            string name = RenameEncoding.GetString(Convert.FromBase64String(fields[5].Replace('_','/')));
+            if (selectable.gameObject == buildingNameTarget) buildingNameVersion = fields[4];
+            if (selectable.GetProperName() == name) return;
+            selectable.SetName(name);
+            if (DetailsScreen.Instance?.target == selectable.gameObject) DetailsScreen.Instance.UpdateTitle();
         }
 
         static bool ValidName(string name)

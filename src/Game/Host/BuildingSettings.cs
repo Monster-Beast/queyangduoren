@@ -106,7 +106,7 @@ namespace Queyang.Game
             var toggle = target == null ? null : target.GetComponent<Toggleable>();
             if (target == null || target.GetComponent<BuildingComplete>() == null ||
                 target.GetComponent<KPrefabID>().InstanceID != NativeManagement.Number(p[2])) return "ERROR Building changed";
-            if (p[1] == "buildingname") return NativeManagement.ApplyBuildingName(target,p);
+            if (p[1] == "buildingname") return NativeManagement.ApplyBuildingName(target,cell,p);
             if (p[1] == "settings" || p[1] == "filter" || p[1] == "recipe")
                 return NativeManagement.BuildingSettings(target, p);
             if (button == null || toggle == null || p.Length != (p[1] == "switch" ? 5 : 3)) return "ERROR No building switch";
