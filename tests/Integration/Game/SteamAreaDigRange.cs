@@ -34,12 +34,17 @@ namespace Queyang.Integration
                 if(awaiting.cells.Contains(Grid.XYToCell(x,y))) awaiting.spans++;
             }
         }
-        static int Find(int reserved)
+        static Navigator[] Workers(int world) => Components.LiveMinionIdentities.Items
+            .Where(p=>p!=null && ClusterUtil.GetMyWorldId(p)==world)
+            .Select(p=>p.GetComponent<Navigator>()).Where(n=>n!=null).ToArray();
+
+        static int Find(int reserved,Action<string> log)
         {
             int world=ClusterManager.Instance.activeWorldId;
-            var workers=Components.LiveMinionIdentities.Items.Where(p=>p!=null && ClusterUtil.GetMyWorldId(p)==world).ToArray();
-            var nav=workers.Select(p=>p.GetComponent<Navigator>()).Where(n=>n!=null).ToArray();
+            var nav=Workers(world);
             var placement=Assets.GetPrefab(DigPlacerConfig.ID).GetComponent<Diggable>();
+            int best=Grid.InvalidCell, bestReach=0;
+            bool bestGrounded=false;
             Grid.CellToXY(reserved,out int ox,out int oy);
             for(int radius=2;radius<=16;radius++)
             for(int dy=-radius;dy<=radius;dy++)
@@ -53,7 +58,20 @@ namespace Queyang.Integration
                 if(row.Any(c=>c==reserved || Grid.WorldIdx[c]!=world || Grid.Visible[c]==0 || !Grid.Solid[c] ||
                     !Diggable.IsDiggable(c) || Diggable.Undiggable(Grid.Element[c]) || Grid.Element[c].hardness>=50 ||
                     Diggable.GetDiggable(c)!=null || HostWorld.FindBuilding(c)!=null)) continue;
-                if(row.Any(c=>nav.Any(n=>n.CanReach(c,placement.GetOffsets(c))))) return cell;
+                int reach=row.Count(c=>nav.Any(n=>n.CanReach(c,placement.GetOffsets(c))));
+                bool grounded=row.Take(Width).All(c=>Grid.Solid[Grid.CellBelow(c)]);
+                if(reach==0 || (grounded==bestGrounded ? reach<=bestReach : bestGrounded)) continue;
+                best=cell; bestReach=reach; bestGrounded=grounded;
+                if(grounded && reach==row.Length)
+                {
+                    log($"AREA_DIG_BAY origin={cell} directlyReachable={reach}/{row.Length} grounded=True");
+                    return cell;
+                }
+            }
+            if(best!=Grid.InvalidCell)
+            {
+                log($"AREA_DIG_BAY origin={best} directlyReachable={bestReach}/{Width*Height} grounded={bestGrounded}");
+                return best;
             }
             throw new InvalidDataException("No reachable visible 3x2 native excavation rectangle");
         }
@@ -74,7 +92,7 @@ namespace Queyang.Integration
                 {
                     if(!CoopSession.IsHosting || Util.GetKleiRootPath()!=Environment.GetEnvironmentVariable("QY_SMOKE_ROOT"))
                         throw new InvalidOperationException("Area excavation requires an isolated host");
-                    start=Find(reserved);
+                    start=Find(reserved,log);
                     SteamMatchmaking.SetLobbyData(room,"qy_area_start",start.ToString());
                 }
                 else if(!int.TryParse(SteamMatchmaking.GetLobbyData(room,"qy_area_start"),out start))
@@ -183,7 +201,22 @@ namespace Queyang.Integration
                 stage++;frame=null;
             }
             if(host && SpeedControlScreen.Instance.IsPaused) SpeedControlScreen.Instance.Unpause(false);
-            if(Grid.Solid[tracked] || Reading(tracked,host)!=null) return false;
+            int finished=cells.Count(c=>!Grid.Solid[c] && Reading(c,host)==null &&
+                (host ? Diggable.GetDiggable(c)==null : !NativeWorldMirror.IsDigVisible(c)));
+            if(finished!=cells.Length)
+            {
+                if(Time.realtimeSinceStartup>=nextLog)
+                {
+                    nextLog=Time.realtimeSinceStartup+4;
+                    var remaining=cells.Where(c=>Grid.Solid[c]).ToArray();
+                    var nav=host ? Workers(ClusterManager.Instance.activeWorldId) : Array.Empty<Navigator>();
+                    var placement=Assets.GetPrefab(DigPlacerConfig.ID).GetComponent<Diggable>();
+                    string reach=host ? string.Join(",",remaining.Select(c=>$"{c}:{nav.Any(n=>n.CanReach(c,placement.GetOffsets(c)))}")) : "";
+                    log($"AREA_DIG_FINISH_WAIT finished={finished}/{cells.Length} solid={string.Join(",",remaining)} reachable={reach}");
+                }
+                return false;
+            }
+            if(!Picture(host,"finished")) return false;
             if(host)
             {
                 if(SteamMatchmaking.GetLobbyMemberData(room,peer,"qy_area_finished")!="1") return false;
@@ -197,7 +230,7 @@ namespace Queyang.Integration
                     SteamMatchmaking.SetLobbyMemberData(room,"qy_area_finished","1");
                 if(SteamMatchmaking.GetLobbyData(room,"qy_area_host_finished")!="1") return false;
             }
-            log($"AREA_DIG_BAR_CLEARED cell={tracked} excavated={cells.Count(c=>!Grid.Solid[c])}/{cells.Length}");
+            log($"AREA_DIG_BAR_CLEARED cell={tracked} excavated={finished}/{cells.Length}");
             stage++;
             camera.SetTargetPos(oldCamera,oldZoom,false);camera.SetPosition(oldCamera);camera.OrthographicSize=oldZoom;
             return true;

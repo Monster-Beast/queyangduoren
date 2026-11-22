@@ -553,7 +553,10 @@ try {
                     throw "Missing area excavation checkpoint $marker for $role."
                 }
             }
-            foreach($stage in 'orders','work') {
+            if(!(Select-String -LiteralPath $report -Pattern '^AREA_DIG_BAR_CLEARED .* excavated=6/6$' -Quiet)) {
+                throw "Expected all six excavation cells to finish for $role."
+            }
+            foreach($stage in 'orders','work','finished') {
                 if(!(Test-Path -LiteralPath (Get-Physical $d (Join-Path $d.base "area-$role-$stage.png")))) {
                     throw "Missing area excavation screenshot $stage for $role."
                 }
@@ -743,7 +746,7 @@ try {
         if ($p -and !$p.HasExited) { $p.Kill(); [void]$p.WaitForExit(10000) }
         if ($role -eq 'guest') {
             if($CheckAreaDig) {
-                foreach($stage in 'orders','work'){
+                foreach($stage in 'orders','work','finished'){
                     $dest=Join-Path $d.base "area-guest-$stage.png"
                     $src=Get-Physical $d $dest
                     if($src -ne $dest -and (Test-Path $src)){Copy-Item -LiteralPath $src -Destination $dest}

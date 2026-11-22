@@ -121,7 +121,9 @@ namespace Queyang.Integration
             int neighborCount = RenderCount(blockRenderer, def, neighbor);
             bool observedBuilt = stage == 1 && completeId > 0 && (host ? nativeBuilding?.GetComponent<BuildingComplete>() != null :
                 NativeWorldMirror.GetBuildingSelectable(cell, completeId) != null);
-            bool valid = noGuestGridOccupier && outlines == (stage == 0 ? 1 : 0) && (stage == 0 ? (host ? pending : hasSample) && !solid && count == 0 :
+            var target=host ? nativeBuilding?.GetComponent<KSelectable>() : NativeWorldMirror.GetBuildingSelectable(cell,stage==0?planId:completeId);
+            bool worldIcon=SteamAlertRange.HasEmergencyIcon(target);
+            bool valid = worldIcon==(stage==0) && noGuestGridOccupier && outlines == (stage == 0 ? 1 : 0) && (stage == 0 ? (host ? pending : hasSample) && !solid && count == 0 :
                 neighborCount == 1 && (stage == 1 ? observedBuilt && !pending && solid && count == 1 && joined && decorated :
                     !pending && !solid && count == 0 && !joined && !decorated &&
                     (host ? nativeBuilding == null : NativeWorldMirror.GetBuildingSelectable(cell, completeId) == null)));
@@ -130,7 +132,7 @@ namespace Queyang.Integration
                 if (now >= nextLog)
                 {
                     nextLog = now + 4;
-                    log($"FLOOR_RANGE_WAIT stage={stage} cell={cell} plan={planId} pending={pending} built={observedBuilt} solid={solid} count={count} neighborCount={neighborCount} connected={joined} decor={decorated} noGuestGridOccupier={noGuestGridOccupier} raw={hasSample}/{observed.Flags}/{observed.BuildingHash}/{observed.BuildingSaveId}");
+                    log($"FLOOR_RANGE_WAIT stage={stage} cell={cell} plan={planId} pending={pending} built={observedBuilt} solid={solid} count={count} neighborCount={neighborCount} connected={joined} decor={decorated} noGuestGridOccupier={noGuestGridOccupier} worldIcon={worldIcon} raw={hasSample}/{observed.Flags}/{observed.BuildingHash}/{observed.BuildingSaveId}");
                 }
                 return false;
             }
@@ -146,7 +148,7 @@ namespace Queyang.Integration
             string ack = Key + "seen_" + stage;
             if (host && SteamMatchmaking.GetLobbyMemberData(room, peer, ack) != "1") return false;
             if (!host) SteamMatchmaking.SetLobbyMemberData(room, ack, "1");
-            log($"FLOOR_RANGE stage={stage} cell={cell} neighbor={neighbor} plan={planId} complete={completeId} pending={pending} solid={solid} blocks={count} outlines={outlines} neighborCount={neighborCount} connected={joined} decor={decorated} noGuestGridOccupier={noGuestGridOccupier} raw={hasSample}/{observed.Flags}/{observed.BuildingHash}/{observed.BuildingSaveId}");
+            log($"FLOOR_RANGE stage={stage} cell={cell} neighbor={neighbor} plan={planId} complete={completeId} pending={pending} solid={solid} blocks={count} outlines={outlines} neighborCount={neighborCount} connected={joined} decor={decorated} noGuestGridOccupier={noGuestGridOccupier} worldIcon={worldIcon} raw={hasSample}/{observed.Flags}/{observed.BuildingHash}/{observed.BuildingSaveId}");
             stage++;
             frame = null;
             activated = false;

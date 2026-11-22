@@ -68,6 +68,9 @@ namespace Queyang.Integration
             {
                 if (!NativeWorldMirror.IsDigVisible(cell)) return false;
                 Click(PrioritizeTool.Instance, point, wanted);
+                PlayerController.Instance.ActivateTool(SelectTool.Instance);
+                if(OverlayScreen.Instance.GetMode()!=OverlayModes.None.ID)
+                    OverlayScreen.Instance.ToggleOverlay(OverlayModes.None.ID,true);
                 clicked = true;
                 log($"ALERT_RANGE_INPUT stage={stage} cell={cell} tool=PrioritizeTool class={wanted.priority_class} value={wanted.priority_value}");
             }
@@ -79,12 +82,16 @@ namespace Queyang.Integration
             bool priorityReady = host ? priority == wanted : NativeWorldMirror.IsDigVisible(cell);
             var color = image == null ? Color.clear : image.color;
             bool colorReady = image != null && image.isActiveAndEnabled && color == (yellow ? vignette.yellowAlertColor : vignette.defaultColor);
-            if (alert == null || alert.IsRedAlert() || alert.IsYellowAlert() != yellow || !colorReady || !priorityReady)
+            var target=host ? Diggable.GetDiggable(cell)?.GetComponent<KSelectable>() :
+                NativeWorldMirror.GetDigRenderer(cell)?.GetComponentInParent<KSelectable>();
+            bool worldIcon=HasEmergencyIcon(target);
+            bool normalView=SimDebugView.Instance.GetMode()==OverlayModes.None.ID;
+            if (alert == null || alert.IsRedAlert() || alert.IsYellowAlert() != yellow || !colorReady || !priorityReady || !normalView || worldIcon!=yellow)
             {
                 if (Time.realtimeSinceStartup >= nextLog)
                 {
                     nextLog = Time.realtimeSinceStartup + 4;
-                    log($"ALERT_RANGE_WAIT stage={stage} yellow={alert?.IsYellowAlert()} red={alert?.IsRedAlert()} color={ColorUtility.ToHtmlStringRGBA(color)} priority={priority?.priority_class}/{priority?.priority_value}");
+                    log($"ALERT_RANGE_WAIT stage={stage} yellow={alert?.IsYellowAlert()} red={alert?.IsRedAlert()} color={ColorUtility.ToHtmlStringRGBA(color)} priority={priority?.priority_class}/{priority?.priority_value} worldIcon={worldIcon} normalView={normalView} selectable={target?.IsSelectable} statuses={target?.GetStatusItemGroup()?.Count}");
                 }
                 return false;
             }
@@ -100,7 +107,7 @@ namespace Queyang.Integration
             string ack = Key + "seen_" + stage;
             if (host && SteamMatchmaking.GetLobbyMemberData(lobby, peer, ack) != "1") return false;
             if (!host) SteamMatchmaking.SetLobbyMemberData(lobby, ack, "1");
-            log($"ALERT_RANGE stage={stage} role={role} cell={cell} yellow={yellow} red=False color={ColorUtility.ToHtmlStringRGBA(color)} priority={priority?.priority_class}/{priority?.priority_value}");
+            log($"ALERT_RANGE stage={stage} role={role} cell={cell} yellow={yellow} red=False color={ColorUtility.ToHtmlStringRGBA(color)} priority={priority?.priority_class}/{priority?.priority_value} worldIcon={worldIcon}");
             stage++;
             frame = null;
             clicked = false;
@@ -111,6 +118,15 @@ namespace Queyang.Integration
             }
             if (stage == 3) PlayerController.Instance.ActivateTool(SelectTool.Instance);
             return false;
+        }
+
+        internal static bool HasEmergencyIcon(KSelectable target)
+        {
+            if(target==null) return false;
+            string id=Db.Get().BuildingStatusItems.EmergencyPriority.Id;
+            return global::Game.Instance.statusItemRenderer.visibleEntries.Any(entry=>
+                entry.selectable==target && entry.hasVisibleStatusItems && entry.mesh!=null &&
+                entry.mesh.vertexCount>0 && entry.statusItems.Any(status=>status.Id==id));
         }
 
         static int Designate(int reserved)

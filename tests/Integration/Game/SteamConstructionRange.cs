@@ -117,6 +117,16 @@ namespace Queyang.Integration
             float massExpected=float.Parse(record[2],Culture);
             var target=host ? HostWorld.FindBuilding(cell)?.GetComponent<KSelectable>() : NativeWorldMirror.GetBuildingSelectable(cell,id);
             if(target==null || !target.IsSelectable || target.GetComponent<KBatchedAnimController>()?.IsVisible()!=true) return false;
+            bool worldIcon=SteamAlertRange.HasEmergencyIcon(target);
+            if(worldIcon!=(stage<2))
+            {
+                if(Time.realtimeSinceStartup>=nextLog)
+                {
+                    nextLog=Time.realtimeSinceStartup+4;
+                    log($"CONSTRUCTION_ICON_WAIT stage={stage} cell={cell} id={id} worldIcon={worldIcon}");
+                }
+                return false;
+            }
             int fractionObserved=fractionExpected;
             float massObserved=0;
             ProgressBar workBar=null;
@@ -164,7 +174,7 @@ namespace Queyang.Integration
             string ack=Prefix+"seen_"+step;
             if(host && SteamMatchmaking.GetLobbyMemberData(room,peer,ack)!="1") return false;
             if(!host) SteamMatchmaking.SetLobbyMemberData(room,ack,"1");
-            log(FormattableString.Invariant($"CONSTRUCTION_RANGE stage={stage} cell={cell} id={id} workPermille={fractionObserved} nativeVisible=True deliveredKg={massObserved} barVisible={barVisible} barPermille={barValue}"));
+            log(FormattableString.Invariant($"CONSTRUCTION_RANGE stage={stage} cell={cell} id={id} workPermille={fractionObserved} nativeVisible=True deliveredKg={massObserved} barVisible={barVisible} barPermille={barValue} worldIcon={worldIcon}"));
             stage++;frame=null;
             if(stage!=3) return false;
             SelectTool.Instance.Select(null,false);

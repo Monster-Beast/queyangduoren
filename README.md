@@ -24,6 +24,8 @@
 
 动物生命条预览包同步房主原版红条的显示、填充和满血隐藏。148 周期档已完成双 Steam 验证。此包也包含 1160 周期档的冷快照恢复修复。[动物生命条预览包](dist/QueyangCoop-0.3.2-critter-health-preview.zip) · [双端验收](docs/evidence/doom-lab-148.md)
 
+紧急工单预览包在客机的对应挖掘格显示原版红色双感叹号。储物箱和普通地板的紧急蓝图、完工清除也已双端复测。[紧急工单预览包](dist/QueyangCoop-0.3.2-emergency-icon-preview.zip) · [同格截图与验收](docs/evidence/construction-batch.md)
+
 需要验证受伤复制人的血条或人工光照时，双方可安装 [0.3.2 血条与照明预览包](dist/QueyangCoop-0.3.2-health-preview.zip)。同机双账号已实测新人的 15%、55% 和满血隐藏，以及开灯、关灯。该轮客机录像短于目标时长，后置独立读档未执行；详细结果见[双端记录](docs/evidence/steam-dual-764025.md)。
 
 当前基础游戏版本可使用 [0.3.2-dev 双账号实测包](dist/QueyangCoop-0.3.2-dev.zip)，SHA-256 为 `BB0293C32F6B614EF924CBA8261B6F3257CA54FFFDD10FE2281887607651432F`。该包验证了挖掘工具、掩埋标记、掉落物和小动物运动。仍有局部照明色差，源码后续迭代的功能需查看各自验收记录。在仓库根目录先预览安装目标，第二行安装同一个 ZIP。安装器会为已有的不同版本备份，并打印回滚路径。

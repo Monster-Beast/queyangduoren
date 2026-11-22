@@ -85,20 +85,40 @@ namespace Queyang.Game
                 foreach(int id in row.Icons)
                 {
                     if(mirror.Current.ContainsKey(id) || !native.TryGetValue(id,out var original)) continue;
-                    if(!projected.TryGetValue(id,out var icon))
-                    {
-                        // Keep native artwork and overlay filters. The authoritative
-                        // side panel separately receives the host's resolved text.
-                        icon=new StatusItem(original.Id,original.Name,original.tooltipText,original.iconName,
-                            original.iconType,original.notificationType,false,original.render_overlay,original.status_overlays);
-                        icon.sprite=original.sprite;
-                        icon.unique=original.unique;
-                        projected[id]=icon;
-                    }
-                    Guid handle=target.AddStatusItem(icon);
+                    Guid handle=target.AddStatusItem(DisplayIcon(original));
                     if(handle!=Guid.Empty) mirror.Current[id]=handle;
                 }
             }
+        }
+
+        static StatusItem DisplayIcon(StatusItem original)
+        {
+            int id=Hash(original);
+            if(!projected.TryGetValue(id,out var icon))
+            {
+                // Retain native art and overlay filters without creating a local notification.
+                icon=new StatusItem(original.Id,original.Name,original.tooltipText,original.iconName,
+                    original.iconType,original.notificationType,false,original.render_overlay,original.status_overlays);
+                icon.sprite=original.sprite;
+                icon.unique=original.unique;
+                projected[id]=icon;
+            }
+            return icon;
+        }
+
+        internal static void ApplyExcavationPriority(KSelectable target,bool urgent)
+        {
+            var group=target?.GetStatusItemGroup();
+            if(group==null) return;
+            var original=Db.Get().BuildingStatusItems.EmergencyPriority;
+            if(group.HasStatusItem(original)) target.RemoveStatusItem(original,true);
+            if(urgent)
+            {
+                var icon=DisplayIcon(original);
+                if(!group.HasStatusItem(icon)) target.AddStatusItem(icon);
+            }
+            else if(projected.TryGetValue(Hash(original),out var icon) && group.HasStatusItem(icon))
+                target.RemoveStatusItem(icon,true);
         }
 
         static bool AllowLocal(StatusItemGroup group,StatusItem item)=>!NativeGuestScene.Ready ||

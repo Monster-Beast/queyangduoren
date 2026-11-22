@@ -61,7 +61,7 @@ namespace Queyang.Game
                 ApplyElement(cell, sample);
                 if(buried!=null && (view.HasEntombed || (sample.Flags&2)==0))
                     NativeBuriedVisuals.Apply(buried,cell,sample,view.HasPileAppearance);
-                ApplyDig(cell, (sample.Flags & 8) != 0);
+                ApplyDig(cell,sample);
                 if (sample.DigMaterial!=0) NativeOrderColors.ApplyDig(GetDigRenderer(cell),sample);
                 if (view.HasEnvironment) ApplyMop(cell, sample.MopOrdered);
                 ApplyBuilding(cell,sample,view.DupePoseTick);
@@ -107,8 +107,9 @@ namespace Queyang.Game
             if (redraw) World.Instance?.groundRenderer?.MarkDirty(cell);
         }
 
-        static void ApplyDig(int cell, bool ordered)
+        static void ApplyDig(int cell,ColonyCell sample)
         {
+            bool ordered=(sample.Flags & 8)!=0;
             var local = Grid.Objects[cell, (int)ObjectLayer.DigPlacer];
             if (local != null)
             {
@@ -117,6 +118,26 @@ namespace Queyang.Game
             }
             bool needed = ordered && local == null;
             ApplyDesignation(cell, needed, DigPlacerConfig.ID, DigTool.Instance, digMarkers);
+            bool urgent=ordered && (sample.OrderTargetId!=0 ? sample.SeparateOrderPriority : sample.OrderPriority)==10;
+            if(local!=null)
+            {
+                NativeBuildingWarnings.ApplyExcavationPriority(local.GetComponent<KSelectable>(),urgent);
+                return;
+            }
+            if(!digMarkers.TryGetValue(cell,out var marker) || marker==null) return;
+            var selectable=marker.GetComponent<KSelectable>();
+            if(urgent && selectable==null)
+            {
+                marker.AddComponent<KPrefabID>().PrefabTag=new Tag(DigPlacerConfig.ID);
+                selectable=marker.AddComponent<KSelectable>();
+                selectable.SetStatusIndicatorOffset(DesignationOrigin(cell,DigTool.Instance)-marker.transform.position);
+            }
+            if(selectable!=null)
+            {
+                // ONI culls world status icons on non-selectable objects.
+                selectable.IsSelectable=urgent;
+                NativeBuildingWarnings.ApplyExcavationPriority(selectable,urgent);
+            }
         }
 
         static void ApplyMop(int cell, bool ordered)
@@ -150,14 +171,19 @@ namespace Queyang.Game
             marker.transform.SetParent(markerRoot.transform, false);
             // Vanilla DigTool.PlaceDig and MopTool.OnDragTool both position the
             // prefab at the bottom centre of the tile, slightly in front of its tool layer.
-            var origin=Grid.CellToPosCBC(cell,tool.visualizerLayer);
-            origin.z-=.15f;
-            marker.transform.position = origin + (source.transform.position - prefab.transform.position);
+            marker.transform.position = DesignationOrigin(cell,tool) + (source.transform.position - prefab.transform.position);
             marker.transform.localScale = source.transform.lossyScale;
             marker.transform.rotation = source.transform.rotation;
             marker.AddComponent<MeshFilter>().sharedMesh = source.sharedMesh;
             marker.AddComponent<MeshRenderer>().sharedMaterial = sourceRenderer.sharedMaterial;
             markers.Add(cell, marker);
+        }
+
+        static Vector3 DesignationOrigin(int cell,InterfaceTool tool)
+        {
+            var origin=Grid.CellToPosCBC(cell,tool.visualizerLayer);
+            origin.z-=.15f;
+            return origin;
         }
 
         internal static MeshRenderer GetDigRenderer(int cell)
