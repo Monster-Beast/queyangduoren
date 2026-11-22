@@ -21,6 +21,8 @@ namespace Queyang.Game
         static readonly List<int> removed = new List<int>();
         static readonly Dictionary<int, PileVisual> proxies = new Dictionary<int, PileVisual>();
         static readonly HashSet<Pickupable> hidden = new HashSet<Pickupable>();
+        static readonly AccessTools.FieldRef<KAnimBatch,Dictionary<KAnimConverter.IAnimConverter,int>> BatchSlots=
+            AccessTools.FieldRefAccess<KAnimBatch,Dictionary<KAnimConverter.IAnimConverter,int>>("controllersToIdx");
 
         sealed class PileVisual
         {
@@ -64,12 +66,16 @@ namespace Queyang.Game
                 view.PileCoverage[i >> 3] |= (byte)(1 << (i & 7));
             }
             foreach (var pickup in NativeFallingOre.Active()) AddPile(view,pickup,ids,piles);
+            OrderOverlappingPiles(piles);
             piles.Sort((a, b) => a.SaveId.CompareTo(b.SaveId));
             // A dense dump can exceed an entire network frame. Each page remains authoritative
             // for its ID interval, including objects just removed, even when all stacks share a cell.
-            int pilePageCount = Math.Max(1, (piles.Count + ColonyView.MaxPiles - 1) / ColonyView.MaxPiles);
+            // Render matrices add 40 bytes per visible pile. Rotate the ID range so
+            // dense debris cells still leave room for terrain and colony entities.
+            const int pageSize=64;
+            int pilePageCount = Math.Max(1, (piles.Count + pageSize - 1) / pageSize);
             int pilePage = sequence % pilePageCount;
-            int firstPile = pilePage * ColonyView.MaxPiles, pileCount = Math.Min(ColonyView.MaxPiles, piles.Count - firstPile);
+            int firstPile = pilePage * pageSize, pileCount = Math.Min(pageSize, piles.Count - firstPile);
             view.PileFrom = pilePage == 0 ? 0 : piles[firstPile - 1].SaveId + 1;
             view.PileThrough = pilePage == pilePageCount - 1 ? int.MaxValue : piles[firstPile + pileCount - 1].SaveId;
             view.Piles = piles.GetRange(firstPile, pileCount).ToArray();
@@ -98,6 +104,41 @@ namespace Queyang.Game
             view.Stocks = hostStocks.GetRange(from, count).ToArray();
         }
 
+        // Render() offsets each native batch slightly in Z; within one mesh, instances
+        // submit triangles in increasing slot order. The two games allocate different
+        // batch IDs and slots. Preserve their visible ordering for overlapping piles.
+        static (float depth,int slot) DrawOrder(int id)
+        {
+            var anim=KPrefabIDTracker.Get().GetInstance(id)?.GetComponent<KBatchedAnimController>();
+            var batch=anim?.GetBatch();
+            if(batch==null) return (anim?.GetZ()??0,-1);
+            BatchSlots(batch).TryGetValue(anim,out int slot);
+            return (batch.position.z+.01f/(1+batch.id%256),slot);
+        }
+        static void OrderOverlappingPiles(List<ColonyPile> piles)
+        {
+            if(piles.Count<2) return;
+            piles.Sort((a,b)=>
+            {
+                int cmp=a.Cell.CompareTo(b.Cell);if(cmp!=0)return cmp;
+                cmp=a.Z.CompareTo(b.Z);if(cmp!=0)return cmp;
+                var left=DrawOrder(a.SaveId);var right=DrawOrder(b.SaveId);
+                cmp=left.depth.CompareTo(right.depth);if(cmp!=0)return cmp;
+                cmp=right.slot.CompareTo(left.slot);return cmp!=0 ? cmp : a.SaveId.CompareTo(b.SaveId);
+            });
+            for(int start=0;start<piles.Count;)
+            {
+                int end=start+1;
+                while(end<piles.Count && piles[end].Cell==piles[start].Cell && piles[end].Z==piles[start].Z) end++;
+                float spacing=Mathf.Min(.012f,Mathf.Abs(Grid.GetLayerZ(Grid.SceneLayer.Ore)-Grid.GetLayerZ(Grid.SceneLayer.Front))*.15f/(end-start));
+                for(int i=start+1;i<end;i++)
+                {
+                    var p=piles[i];p.Z+=(i-start)*spacing;piles[i]=p;
+                }
+                start=end;
+            }
+        }
+
         static void AddPile(ColonyView view,Pickupable ore,HashSet<int> ids,List<ColonyPile> piles)
         {
             if(ore.IsEntombed) return;
@@ -109,10 +150,21 @@ namespace Queyang.Game
             if ((uint)dx>=ColonyView.Width || (uint)dy>=ColonyView.Height) return;
             int i=dy*ColonyView.Width+dx;
             if ((view.Cells[i].Flags&1)==0 || !ids.Add(ore.KPrefabID.InstanceID)) return;
-            piles.Add(new ColonyPile { Cell=(ushort)i, SaveId=ore.KPrefabID.InstanceID,
+            var anim=ore.GetComponent<KBatchedAnimController>();
+            var pile=new ColonyPile { Cell=(ushort)i, SaveId=ore.KPrefabID.InstanceID,
                 SubX=(byte)Mathf.RoundToInt(255*Mathf.Clamp01(pos.x-x)), SubY=(byte)Mathf.RoundToInt(255*Mathf.Clamp01(pos.y-y)),
-                Animation=ore.GetComponent<KBatchedAnimController>()?.currentAnim.HashValue??0,
-                Material=NativeMaterialReadings.Capture(ore.PrimaryElement) });
+                Animation=anim?.currentAnim.HashValue??0,Material=NativeMaterialReadings.Capture(ore.PrimaryElement) };
+            if(anim!=null && anim.GetCurrentAnim()!=null)
+            {
+                var m=NativeDupePose.RenderMatrix(anim); Color32 color=anim.TintColour;
+                pile.HasAppearance=true; pile.File=anim.GetCurrentAnim().animFile.hashName.HashValue;
+                pile.Frame=anim.GetCurrentFrameIndex()-anim.GetFirstFrameIndex();
+                if(pile.Frame<0 || pile.Frame>=anim.GetCurrentNumFrames()) pile.Frame=-1;
+                pile.Tint=(uint)(color.r | color.g<<8 | color.b<<16 | color.a<<24);
+                pile.Z=anim.GetZ();pile.M00=m.m00;pile.M01=m.m01;pile.M02=m.m02;
+                pile.M10=m.m10;pile.M11=m.m11;pile.M12=m.m12;
+            }
+            piles.Add(pile);
         }
 
         internal static void Apply(ColonyView view, WorldContainer world, Transform parent)
@@ -171,7 +223,7 @@ namespace Queyang.Game
                     SetVisible(pickup, true);
                     NativeWorldMirror.ApplyPrimary(pickup.PrimaryElement, p.Material);
                     if (environment) NativeMaterialReadings.Apply(pickup.PrimaryElement, p.Material);
-                    Play(pickup.GetComponent<KBatchedAnimController>(), p.Animation);
+                    ApplyArt(pickup.GetComponent<KBatchedAnimController>(),p);
                     Remove(p.SaveId);
                     return;
                 }
@@ -190,7 +242,7 @@ namespace Queyang.Game
             visual.Cell = cell;
             NativeWorldMirror.ApplyPrimary(visual.Primary, p.Material);
             if (environment) NativeMaterialReadings.Apply(visual.Primary, p.Material);
-            Play(visual.Anim, p.Animation);
+            ApplyArt(visual.Anim,p);
         }
 
         static PileVisual Create(Element e, ColonyPile pile, int cell, Transform parent)
@@ -202,7 +254,7 @@ namespace Queyang.Game
             go.SetActive(false);
             go.layer = prefab.layer;
             go.transform.SetParent(parent, false);
-            go.transform.position = Grid.CellToPosCBC(cell, source.sceneLayer);
+            go.transform.position = Grid.CellToPosCBC(cell, Grid.SceneLayer.Ore);
             var anim = go.AddComponent<KBatchedAnimController>();
             anim.AnimFiles = source.AnimFiles; anim.initialAnim = source.initialAnim; anim.defaultAnim = source.defaultAnim;
             anim.animScale = source.animScale; anim.sceneLayer = source.sceneLayer; anim.fgLayer = source.fgLayer;
@@ -216,13 +268,34 @@ namespace Queyang.Game
             primary.SetElement(e.id, false); primary.KeepZeroMassObject = true;
             NativeWorldMirror.ApplyPrimary(primary, pile.Material);
             go.SetActive(true);
+            if(prefab.GetComponent<SubstanceChunk>()!=null)
+            {
+                Color color=e.substance.colour;color.a=1;
+                anim.SetSymbolTint("substance_tinter",color);anim.SetSymbolTint("substance_tinter_cap",color);
+            }
             return new PileVisual { Primary = primary, Anim = anim, Cell = cell };
         }
 
-        static void Play(KBatchedAnimController anim, int hash)
+        static void ApplyArt(KBatchedAnimController anim,ColonyPile p)
         {
-            if (anim != null && hash != 0 && anim.currentAnim.HashValue != hash && anim.HasAnimation(new HashedString(hash)))
-                anim.Play(new HashedString(hash));
+            if(anim==null) return;
+            if(p.Animation!=0 && anim.currentAnim.HashValue!=p.Animation && anim.HasAnimation(new HashedString(p.Animation)))
+                anim.Play(new HashedString(p.Animation));
+            if(!p.HasAppearance)
+            {
+                // Movement-only samples must let the next transform update move the image.
+                anim.GetBatchInstanceData()?.ClearOverrideTransformMatrix();return;
+            }
+            var pos=anim.transform.position;
+            if(pos.z!=p.Z) anim.transform.position=new Vector3(pos.x,pos.y,p.Z);
+            anim.TintColour=new Color32((byte)p.Tint,(byte)(p.Tint>>8),(byte)(p.Tint>>16),(byte)(p.Tint>>24));
+            var clip=anim.GetCurrentAnim();
+            if(clip!=null && clip.animFile.hashName.HashValue==p.File && p.Frame>=0 && p.Frame<clip.numFrames)
+            {
+                anim.PlaySpeedMultiplier=0;anim.SetPositionPercent((float)p.Frame/clip.numFrames);anim.UpdateAnim(0);
+            }
+            anim.GetBatchInstanceData()?.SetOverrideTransformMatrix(new Matrix2x3{m00=p.M00,m01=p.M01,m02=p.M02,m10=p.M10,m11=p.M11,m12=p.M12});
+            anim.SetDirty();
         }
 
         static void SetVisible(Pickupable pickup, bool visible)

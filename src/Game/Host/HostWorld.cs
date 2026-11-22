@@ -80,8 +80,7 @@ namespace Queyang.Game
                     if (VisibleCell(world, view.X + dx, view.Y + dy, out cell))
                     {
                         var sampleCell=ReadCell(cell,circuits);
-                        if(buried!=null && (sampleCell.Flags&2)!=0 && buried.IsEntombedItem(cell))
-                            sampleCell.Flags|=ColonyView.EntombedFlag;
+                        if(buried!=null && (sampleCell.Flags&2)!=0) NativeBuriedVisuals.Capture(buried,cell,ref sampleCell);
                         view.Cells[dy * ColonyView.Width + dx]=sampleCell;
                     }
                 }
@@ -125,6 +124,8 @@ namespace Queyang.Game
             view.HasDupeAppearance=view.Dupes.Length>0;
             NativeResources.Capture(view, world,sample);
             NativeManagement.CaptureHud(view,world);
+            NativeColonyLighting.Capture(view,world,sample);
+            view.HasPileAppearance=view.HasEntombed && view.HasColonyHud;
             OrderOwnership.Capture(view,sample);
             return view.Encode();
         }

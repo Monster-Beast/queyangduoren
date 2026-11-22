@@ -44,6 +44,7 @@ namespace Queyang.Game
                     buildings[new HashedString(def.PrefabID).HashValue] = def;
             }
             NativeUtilities.Clock(view);
+            NativeColonyLighting.Receive(view,world.id);
             if (view.HasColonyHud) NativeManagement.ReceiveHud(view);
             NativeUtilityDisplay.Begin(markerRoot.transform);
             var buried=global::Game.Instance.GetComponent<EntombedItemVisualizer>();
@@ -59,14 +60,7 @@ namespace Queyang.Game
                 if ((sample.Flags & 1) == 0) continue;
                 ApplyElement(cell, sample);
                 if(buried!=null && (view.HasEntombed || (sample.Flags&2)==0))
-                {
-                    bool expected=(sample.Flags&ColonyView.EntombedFlag)!=0;
-                    if(expected!=buried.IsEntombedItem(cell))
-                    {
-                        if(expected) buried.AddItem(cell);
-                        else buried.ForceClear(cell);
-                    }
-                }
+                    NativeBuriedVisuals.Apply(buried,cell,sample,view.HasPileAppearance);
                 ApplyDig(cell, (sample.Flags & 8) != 0);
                 if (sample.DigMaterial!=0) NativeOrderColors.ApplyDig(GetDigRenderer(cell),sample);
                 if (view.HasEnvironment) ApplyMop(cell, sample.MopOrdered);

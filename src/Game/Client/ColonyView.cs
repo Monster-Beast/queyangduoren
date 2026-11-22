@@ -16,6 +16,10 @@ namespace Queyang.Game
     public struct ColonyPile
     {
         public int SaveId, Animation;
+        public bool HasAppearance;
+        public int File,Frame;
+        public uint Tint;
+        public float Z, M00,M01,M02,M10,M11,M12;
         public ushort Cell;
         public byte SubX, SubY;
         public MaterialSample Material;
@@ -30,6 +34,8 @@ namespace Queyang.Game
     public struct ColonyCell
     {
         public byte Flags;
+        public int BuriedAnimation;
+        public ushort BuriedRotation;
         public int TargetId;
         public ushort Connections;
         public byte Utilities;
@@ -89,6 +95,10 @@ namespace Queyang.Game
         public bool HasResources;
         public bool HasDupeAppearance;
         public bool HasEntombed;
+        public bool HasPileAppearance;
+        public byte[] LightMask;
+        public ColonyLight[] Lights=Array.Empty<ColonyLight>();
+        public int LightFrom=int.MinValue,LightThrough=int.MaxValue;
         public const byte EntombedFlag=128;
         public bool HasColonyHud;
         public int HudWorld,HudLocalPopulation,HudTotalPopulation;
@@ -175,9 +185,12 @@ namespace Queyang.Game
                 bool extended = HasEnvironment || EntityPayload != null || dupeRange || DupePoseTick!=0 || OrderMarks!=null || HasDupeAppearance;
                 if (extended && !HasResources) throw new InvalidDataException("Extended state requires native resource state.");
                 if (HasColonyHud && !extended) throw new InvalidDataException("HUD requires a native viewport");
-                w.Write(HasColonyHud ? (ushort)9 : extended ? (ushort)8 : HasResources ? (ushort)7 : Detailed ? (ushort)6 : Native ? NativeVersion : (ushort)4);
+                if(HasPileAppearance && (!HasColonyHud || !HasEntombed)) throw new InvalidDataException("Pile appearance requires a full host viewport");
+                if (LightMask!=null && (!extended || LightMask.Length!=Width*Height/8)) throw new InvalidDataException("Invalid light coverage.");
+                w.Write(LightMask!=null ? (ushort)11 : HasPileAppearance ? (ushort)10 : HasColonyHud ? (ushort)9 : extended ? (ushort)8 : HasResources ? (ushort)7 : Detailed ? (ushort)6 : Native ? NativeVersion : (ushort)4);
                 bool orders = extended && Array.Exists(Cells,c=>c.DigMaterial!=0 || c.HasBlueprintTint || c.MopOrdered || c.OrderPriority!=0 || c.OrderTargetId!=0 || c.SeparateOrderPriority!=0);
                 if (extended) w.Write((byte)((HasEnvironment ? 1 : 0) | (EntityPayload != null ? 2 : 0) | (orders ? 4 : 0) | (dupeRange ? 8 : 0) | (DupePoseTick!=0 ? 16 : 0) | (OrderMarks!=null ? 32 : 0) | (HasDupeAppearance ? 64 : 0) | (HasEntombed ? 128 : 0)));
+                if (LightMask!=null) w.Write((byte)((HasColonyHud?1:0)|(HasPileAppearance?2:0)));
                 w.Write(X); w.Write(Y);
                 w.Write(Cycle); w.Write(CycleFraction); w.Write(Paused); w.Write(Speed);
                 w.Write((ushort)names.Count);
@@ -247,6 +260,19 @@ namespace Queyang.Game
                     ValidateHud();
                     w.Write((byte)HudWorld); w.Write(HudLocalPopulation); w.Write(HudTotalPopulation); w.Write(HudCalories); w.Write(HudStress);
                 }
+                if(HasPileAppearance)
+                {
+                    foreach(var cell in Cells) if((cell.Flags&EntombedFlag)!=0) { w.Write(cell.BuriedAnimation);w.Write(cell.BuriedRotation); }
+                    foreach(var pile in Piles)
+                    {
+                        w.Write(pile.HasAppearance);
+                        if(!pile.HasAppearance) continue;
+                        ValidatePileAppearance(pile);
+                        w.Write(pile.File);w.Write(pile.Frame);w.Write(pile.Tint);w.Write(pile.Z);
+                        w.Write(pile.M00);w.Write(pile.M01);w.Write(pile.M02);w.Write(pile.M10);w.Write(pile.M11);w.Write(pile.M12);
+                    }
+                }
+                if (LightMask!=null) WriteLighting(w);
                 if (extended && stream.Length > MaxViewport)
                 {
                     // Keep all readings and stock labels when a dense full tile compresses well.
@@ -291,10 +317,12 @@ namespace Queyang.Game
             using (var r = new BinaryReader(stream))
             {
                 ushort version = r.ReadUInt16();
-                if (version < 4 || version > 9 || (inflated && version < 8)) throw new InvalidDataException("Unknown viewport version.");
+                if (version < 4 || version > 11 || (inflated && version < 8)) throw new InvalidDataException("Unknown viewport version.");
                 byte extensions = version >= 8 ? r.ReadByte() : (byte)0;
                 if (version==8 && extensions == 128 && !inflated) return InflateViewport(r);
                 if (version >= 8 && (extensions & 123) == 0) throw new InvalidDataException("Invalid viewport extensions.");
+                int flags=version==11 ? r.ReadByte() : version==10 ? 3 : version==9 ? 1 : 0;
+                if (flags==2 || flags>3) throw new InvalidDataException("Invalid viewport features");
                 var v = new ColonyView { Native = version >= 5, Detailed = version >= 6, HasResources = version >= 7,
                     X = r.ReadInt32(), Y = r.ReadInt32(), HasEntombed=(extensions & 128)!=0 };
                 if (v.X < 0 || v.Y < 0 || v.X > int.MaxValue - Width || v.Y > int.MaxValue - Height)
@@ -391,11 +419,29 @@ namespace Queyang.Game
                         v.Dupes[i].HeadVisibility=r.ReadByte();
                         if (v.Dupes[i].HeadVisibility>7) throw new InvalidDataException("Invalid head symbols");
                     }
-                if (version>=9)
+                if ((flags&1)!=0)
                 {
                     v.HasColonyHud=true; v.HudWorld=r.ReadByte(); v.HudLocalPopulation=r.ReadInt32(); v.HudTotalPopulation=r.ReadInt32();
                     v.HudCalories=r.ReadSingle(); v.HudStress=r.ReadSingle(); v.ValidateHud();
                 }
+                if((flags&2)!=0)
+                {
+                    if(!v.HasEntombed) throw new InvalidDataException("Missing buried-item data");
+                    v.HasPileAppearance=true;
+                    for(int i=0;i<v.Cells.Length;i++) if((v.Cells[i].Flags&EntombedFlag)!=0)
+                    { v.Cells[i].BuriedAnimation=r.ReadInt32(); v.Cells[i].BuriedRotation=r.ReadUInt16(); }
+                    for(int i=0;i<v.Piles.Length;i++)
+                    {
+                        ref var p=ref v.Piles[i];
+                        p.HasAppearance=r.ReadBoolean();
+                        if(!p.HasAppearance) continue;
+                        p.File=r.ReadInt32();p.Frame=r.ReadInt32();p.Tint=r.ReadUInt32();p.Z=r.ReadSingle();
+                        p.M00=r.ReadSingle();p.M01=r.ReadSingle();p.M02=r.ReadSingle();
+                        p.M10=r.ReadSingle();p.M11=r.ReadSingle();p.M12=r.ReadSingle();
+                        ValidatePileAppearance(p);
+                    }
+                }
+                if (version==11) v.ReadLighting(r);
                 if (stream.Position != stream.Length) throw new InvalidDataException("Trailing viewport bytes.");
                 return v;
             }
@@ -407,6 +453,14 @@ namespace Queyang.Game
             if (float.IsNaN(value) || float.IsInfinity(value) || value < 0)
                 throw new InvalidDataException("Invalid physical reading.");
             return value;
+        }
+
+        static void ValidatePileAppearance(ColonyPile p)
+        {
+            bool Bounded(float n,float limit) => n>=-limit && n<=limit;
+            if(p.Frame< -1 || p.Frame>65535 || !Bounded(p.Z,10000) || !Bounded(p.M00,128) ||
+                !Bounded(p.M01,128) || !Bounded(p.M10,128) || !Bounded(p.M11,128) ||
+                !Bounded(p.M02,100000) || !Bounded(p.M12,100000)) throw new InvalidDataException("Invalid ore render state");
         }
 
         private void WriteResources(BinaryWriter w)

@@ -20,13 +20,14 @@ namespace Queyang.Integration
             return BitConverter.ToString(bytes).Replace("-","");
         }
         static Color32 Pixel(Texture texture,int x,int y)
+            => PixelAt(texture,new Vector2((x+.5f)/Grid.WidthInCells,(y+.5f)/Grid.HeightInCells));
+        internal static Color32 PixelAt(Texture texture,Vector2 uv)
         {
             var old=RenderTexture.active;
             var rt=RenderTexture.GetTemporary(1,1,0,RenderTextureFormat.ARGB32,RenderTextureReadWrite.Linear);
             var tex=new Texture2D(1,1,TextureFormat.RGBA32,false,true);
             try
             {
-                var uv=new Vector2((x+.5f)/Grid.WidthInCells,(y+.5f)/Grid.HeightInCells);
                 Graphics.Blit(texture,rt,Vector2.zero,uv);
                 RenderTexture.active=rt;
                 tex.ReadPixels(new Rect(0,0,1,1),0,0); tex.Apply();

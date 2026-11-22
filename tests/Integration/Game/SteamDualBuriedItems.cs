@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using HarmonyLib;
 using Queyang.Game;
@@ -27,6 +28,9 @@ namespace Queyang.Integration
         FixtureFrame photo;
         float centeredSince=-1;
         int centeredFrames,lastCenteredFrame=-1;
+        string published;
+        float nextArtLog;
+        static readonly FieldInfo slots=AccessTools.Field(typeof(KAnimBatch),"controllersToIdx");
 
         static void Set(CSteamID room,string field,int value)
         {
@@ -41,6 +45,59 @@ namespace Queyang.Integration
         }
         static bool Visible(KBatchedAnimController a)=>a!=null && a.enabled && a.gameObject.activeInHierarchy &&
             a.IsVisible() && a.GetBatchInstanceData()!=null;
+
+        string RenderedPiles()
+        {
+            var rows=new List<(int id,float depth,int slot,string art)>();
+            void Add(int key,KBatchedAnimController a,PrimaryElement primary)
+            {
+                if(!Visible(a) || primary==null || Grid.PosToCell(a.transform.position)!=source ||
+                    primary.gameObject.PrefabID()!=primary.Element.tag) return;
+                var gpu=SteamDupePoseChecks.Read(a);
+                var batch=a.GetBatch();
+                if(batch==null) return;
+                var order=(IDictionary)slots.GetValue(batch);
+                if(!order.Contains(a)) return;
+                Color32 c=a.TintColour;
+                var matrix=string.Join(",",gpu.Skip(2).Select(f=>Mathf.RoundToInt(1000*f).ToString()));
+                rows.Add((key,batch.position.z+.01f/(1+batch.id%256),(int)order[a],
+                    $"{key}/{(int)primary.ElementID}/{a.GetCurrentAnim()?.animFile?.hashName.HashValue}/{a.currentAnim.HashValue}/{c.r},{c.g},{c.b},{c.a}/{matrix}"));
+            }
+            for(var n=NativeResources.First(source);n!=null;n=n.nextItem)
+            {
+                var p=n.pickupable;
+                if(p!=null) Add(p.KPrefabID.InstanceID,p.GetComponent<KBatchedAnimController>(),p.PrimaryElement);
+            }
+            foreach(var p in UnityEngine.Object.FindObjectsByType<NativeEntityIdentity>(FindObjectsSortMode.None))
+                Add(p.SaveId,p.GetComponent<KBatchedAnimController>(),p.GetComponent<PrimaryElement>());
+            return string.Join("|",rows.OrderBy(row=>row.depth).ThenByDescending(row=>row.slot).ThenBy(row=>row.id).Select(row=>row.art));
+        }
+        bool SameArt(CSteamID room,bool host,string phase,KBatchedAnimController art,Action<string> log)
+        {
+            string value=phase=="before" ? $"{art.currentAnim.HashValue}/{Mathf.RoundToInt(art.transform.eulerAngles.z*65535/360)}" : RenderedPiles();
+            if(value.Length==0) return false;
+            string key="qy_buried_art_"+phase;
+            if(host)
+            {
+                if(published!=value)
+                {
+                    if(!SteamMatchmaking.SetLobbyData(room,key,value)) throw new IOException("Could not publish native buried art");
+                    published=value;log($"DUAL_BURIED_ART stage={phase} native={value}");
+                }
+                return true;
+            }
+            var expected=SteamMatchmaking.GetLobbyData(room,key);
+            if(value==expected) return true;
+            if(phase=="before")
+            {
+                var pair=expected.Split('/');
+                if(pair.Length==2 && pair[0]==art.currentAnim.HashValue.ToString() && int.TryParse(pair[1],out int quantized) &&
+                    Mathf.Abs(Mathf.DeltaAngle(quantized*360f/65535,art.transform.eulerAngles.z))<.01f) return true;
+            }
+            if(Time.unscaledTime>=nextArtLog)
+            { nextArtLog=Time.unscaledTime+3;log($"DUAL_BURIED_ART_WAIT stage={phase} native={value} expected={expected}"); }
+            return false;
+        }
 
         void Choose(EntombedItemVisualizer visual,int origin)
         {
@@ -148,7 +205,8 @@ namespace Queyang.Integration
             if(stage==0)
             {
                 initialMarker=Marker(visual,source);
-                if(!Grid.Solid[source] || !Visible(initialMarker) || !Photograph(host,"before",initialMarker,log)) return false;
+                if(!Grid.Solid[source] || !Visible(initialMarker) || !SameArt(room,host,"before",initialMarker,log) ||
+                    !Photograph(host,"before",initialMarker,log)) return false;
                 if(host && SteamMatchmaking.GetLobbyMemberData(room,guest,"qy_buried_seen")!="1") return false;
                 log($"DUAL_BURIED_MARKER cell={source} tag={tag} markerVisible=True");
                 if(host)
@@ -175,6 +233,7 @@ namespace Queyang.Integration
                 shown=NativeResources.GetSelectable(id)??NativeEntityDisplay.GetSelectable(id);
             }
             if(shown==null || shown.PrefabID().GetHash()!=tag || !Visible(shown.GetComponent<KBatchedAnimController>()) ||
+                !SameArt(room,host,"after",shown.GetComponent<KBatchedAnimController>(),log) ||
                 !Photograph(host,"after",shown.GetComponent<KBatchedAnimController>(),log)) return false;
             if(host && SteamMatchmaking.GetLobbyMemberData(room,guest,"qy_buried_done")!="1") return false;
             if(!host) SteamMatchmaking.SetLobbyMemberData(room,"qy_buried_done","1");

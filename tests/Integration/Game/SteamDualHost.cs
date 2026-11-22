@@ -22,6 +22,7 @@ namespace Queyang.Integration
         readonly SteamDualBuildings buildings=new SteamDualBuildings();
         readonly SteamDualFallingOre fallingOre=new SteamDualFallingOre();
         readonly SteamDualBuriedItems buriedItems=new SteamDualBuriedItems();
+        readonly SteamDualLighting lighting=new SteamDualLighting();
         readonly SteamDualOwnership ownership=new SteamDualOwnership();
         readonly Action<string> log;
         readonly FixtureFrame screenshot, hostOrderFrame;
@@ -146,6 +147,7 @@ namespace Queyang.Integration
                     phase=round==1?Phase.Dig:Phase.Revisit;
                     break;
                 case Phase.Dig:
+                    if (!lighting.Check(lobby,friend,true,round,log)) return false;
                     if (!buriedItems.Check(lobby,friend,true,round,log)) return false;
                     if (!fallingOre.Check(lobby,friend,true,round,log)) return false;
                     if (!buildings.Check(lobby,friend,true,round,log)) return false;

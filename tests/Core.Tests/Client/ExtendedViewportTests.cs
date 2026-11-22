@@ -25,6 +25,23 @@ namespace Queyang.Core.Tests
         }
 
         [Fact]
+        public void NativeDebrisAndBuriedArtRoundTripWithTheViewport()
+        {
+            var v=View();v.HasColonyHud=v.HasEntombed=v.HasPileAppearance=true;
+            v.Cells[9].Flags=3|ColonyView.EntombedFlag;v.Cells[9].BuriedAnimation=-189;v.Cells[9].BuriedRotation=64589;
+            v.PileCoverage[1]=2;
+            v.Piles=new[]{new ColonyPile {Cell=9,SaveId=34,HasAppearance=true,File=-19,Frame=14,Tint=0x831226ff,
+                M00=.007f,M11=-.007f,M02=123.25f,M12=151.8f,Z=-23.8f}};
+            var copy=ColonyView.Decode(v.Encode());
+            Assert.True(copy.HasPileAppearance);Assert.Equal(-189,copy.Cells[9].BuriedAnimation);
+            Assert.Equal(64589,copy.Cells[9].BuriedRotation);
+            var p=copy.Piles[0];
+            Assert.Equal((-19,14,0x831226ffu,-23.8f,123.25f),(p.File,p.Frame,p.Tint,p.Z,p.M02));
+            v.Piles[0].M01=float.NaN;
+            Assert.Throws<InvalidDataException>(()=>v.Encode());
+        }
+
+        [Fact]
         public void EnvironmentAndOpaqueEntityPageRoundTripIndependently()
         {
             var v = View();

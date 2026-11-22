@@ -15,6 +15,7 @@ param(
     [switch]$CheckBuildings,
     [switch]$CheckFallingOre,
     [switch]$CheckBuried,
+    [switch]$CheckLighting,
     [switch]$CheckCritters,
     [switch]$AcceptDeliveredInvite,
     [ValidateRange(0,600)][int]$InviteWaitSeconds=105,
@@ -146,6 +147,7 @@ foreach ($role in $roles) {
     $values.QY_CHECK_BUILDINGS=([int]$CheckBuildings.IsPresent).ToString()
     $values.QY_CHECK_FALLING_ORE=([int]$CheckFallingOre.IsPresent).ToString()
     $values.QY_CHECK_BURIED=([int]$CheckBuried.IsPresent).ToString()
+    $values.QY_CHECK_LIGHTING=([int]$CheckLighting.IsPresent).ToString()
     $values.QY_CHECK_CRITTERS=([int]$CheckCritters.IsPresent).ToString()
     $drivers[$role]=[pscustomobject]@{role=$role;exe=$exe;env=$values;mods=$mods;base=$base;restarts=0;started=$false;done=$false;wrapper=$null}
     [ordered]@{ role=$role;package=$before[0];sourceSave=$before[1];fixture=(Get-FileHash $fixture).Hash
@@ -363,6 +365,13 @@ try {
         $p=Get-Player $d
         if ($p -and !$p.HasExited) { $p.Kill(); [void]$p.WaitForExit(10000) }
         if ($role -eq 'guest') {
+            if($CheckLighting) {
+                foreach($stage in 0..2){
+                    $dest=Join-Path $d.base "light-guest-$stage.png"
+                    $src=Get-Physical $d $dest
+                    if ($src -ne $dest -and (Test-Path $src)) { Copy-Item -LiteralPath $src -Destination $dest }
+                }
+            }
             foreach ($leaf in @('buried-guest-before.png','buried-guest-after.png','drill.csv','dual-guest-drill.png','critter-motion.csv','critter-guest.png')+@(0..7 | ForEach-Object { "hat-guest-$_.png" })) {
                 $dest=Join-Path $d.base $leaf
                 $src=Get-Physical $d $dest
@@ -407,7 +416,7 @@ $joins=@(foreach ($line in $guestReport) {
 })
 if ($joins.Count -ne 2 -or $joins[0].round -ne 1 -or $joins[1].round -ne 2) { throw 'Missing exact join methods for both rounds.' }
 [ordered]@{packageSha256=$before[0];saveSha256=$before[1];protectedInputsUnchanged=$true;joins=$joins
-    checks=[ordered]@{buildings=$CheckBuildings.IsPresent;buried=$CheckBuried.IsPresent;fallingOre=$CheckFallingOre.IsPresent;critters=$CheckCritters.IsPresent;skills=!$SkipManagement;person=!$SkipManagement -and !$SkipPerson;work=!$SkipManagement -and !$SkipWork}} |
+    checks=[ordered]@{lighting=$CheckLighting.IsPresent;buildings=$CheckBuildings.IsPresent;buried=$CheckBuried.IsPresent;fallingOre=$CheckFallingOre.IsPresent;critters=$CheckCritters.IsPresent;skills=!$SkipManagement;person=!$SkipManagement -and !$SkipPerson;work=!$SkipManagement -and !$SkipWork}} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $run 'result.json') -Encoding UTF8
 Write-Output "PASS both Steam game clients; evidence in $run"
 } finally {

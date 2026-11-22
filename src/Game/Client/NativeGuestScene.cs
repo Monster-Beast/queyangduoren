@@ -58,6 +58,7 @@ namespace Queyang.Game
         internal static void End()
         {
             GuestGasTextures.Release();
+            NativeColonyLighting.Release();
             if (Active) phase = Phase.Leaving;
         }
 

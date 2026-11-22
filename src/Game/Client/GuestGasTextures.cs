@@ -42,6 +42,7 @@ namespace Queyang.Game
             }
             Shader.SetGlobalTexture(pressureId,pressure);
             Shader.SetGlobalTexture(colourId,colour);
+            NativeColonyLighting.Bind();
         }
 
         // Same gas/liquid and pressure mapping as PropertyTextures.UpdateGasColour and UpdatePressure.
@@ -51,6 +52,7 @@ namespace Queyang.Game
             Grid.GetVisibleExtents(out int left,out int bottom,out int right,out int top);
             left=Math.Max(0,left-2); bottom=Math.Max(0,bottom-2);
             right=Math.Min(Grid.WidthInCells-1,right+2); top=Math.Min(Grid.HeightInCells-1,top+2);
+            NativeColonyLighting.Refresh(left,bottom,right,top);
             var colours=colour.GetRawTextureData<Color32>();
             var pressures=pressure.GetRawTextureData<Color32>();
             bool changed=false;
