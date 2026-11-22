@@ -27,6 +27,8 @@ namespace Queyang.Game
         static readonly Dictionary<int,int> ticks=new Dictionary<int,int>();
         static readonly AccessTools.FieldRef<KBatchedAnimInstanceData,bool> Overridden=
             AccessTools.FieldRefAccess<KBatchedAnimInstanceData,bool>("isTransformOverriden");
+        static readonly AccessTools.FieldRef<KAnimControllerBase,Dictionary<HashedString,KAnimControllerBase.AnimLookupData>> AnimOverrides=
+            AccessTools.FieldRefAccess<KAnimControllerBase,Dictionary<HashedString,KAnimControllerBase.AnimLookupData>>("overrideAnims");
         static readonly FieldInfo Converter=AccessTools.Field(typeof(KBatchedAnimInstanceData),"converter");
         static readonly FieldInfo Bytes=AccessTools.Field(Converter.FieldType,"bytes");
         static readonly Type Entry=AccessTools.Inner(typeof(KBatchedAnimInstanceData),"AnimInstanceData");
@@ -130,7 +132,8 @@ namespace Queyang.Game
             if(moved) anim.transform.position=next;
             if(anim.FlipX!=d.FlipX) anim.FlipX=d.FlipX;
             int desired=t.Phase.Frame(now-t.Since);
-            if(newPose || anim.currentAnim.HashValue!=d.Animation || RenderFrame(anim)!=desired)
+            bool wrongFile=p.File!=0 && anim.GetCurrentAnim()?.animFile?.hashName.HashValue!=p.File;
+            if(newPose || wrongFile || anim.currentAnim.HashValue!=d.Animation || RenderFrame(anim)!=desired)
             {
                 var name=new HashedString(d.Animation);
                 if(t.Added!=null && new HashedString(t.Added.name).HashValue!=p.File)
@@ -140,7 +143,7 @@ namespace Queyang.Game
                 { anim.AddAnimOverrides(file,10000f); t.Added=file; }
                 if(d.Animation!=0 && anim.HasAnimation(name))
                 {
-                    if(anim.currentAnim!=name || anim.GetCurrentAnim()?.animFile?.hashName.HashValue!=p.File) anim.Play(name);
+                    if(anim.currentAnim!=name || wrongFile) PlayAsset(anim,name,p.File);
                     var current=anim.GetCurrentAnim();
                     if(current!=null && current.numFrames>0 && desired>=0 && desired<current.numFrames)
                     {
@@ -157,6 +160,36 @@ namespace Queyang.Game
                 m10=p.M10, m11=p.M11, m12=Mathf.Lerp(t.MatrixStart.y,p.M12,f)+advance.y });
             if(newPose || moved || f<1 || t.Duration>0) anim.SetDirty();
 
+        }
+        // Minions can have several overrides defining the same action (including
+        // idle/working). Temporarily direct ONI's native Play lookup to the actual
+        // host clip; preserve the minion's locally installed override ordering.
+        static void PlayAsset(KBatchedAnimController anim,HashedString name,int fileHash)
+        {
+            if(fileHash==0 || !Assets.TryGetAnim(new HashedString(fileHash),out var file))
+            { anim.Play(name);return; }
+            var data=file.GetData();
+            var playing=anim.GetCurrentAnim()?.animFile;
+            if(data==null || (playing!=null && playing.animBatchTag!=data.animBatchTag))
+            { anim.Play(name);return; }
+            for(int i=0;i<data.animCount;i++)
+            {
+                var clip=data.GetAnim(i);
+                if(clip==null || clip.hash!=name) continue;
+                ref var table=ref AnimOverrides(anim);
+                var original=table;
+                if(table==null) table=new Dictionary<HashedString,KAnimControllerBase.AnimLookupData>();
+                bool replaced=table.TryGetValue(name,out var previous);
+                table[name]=new KAnimControllerBase.AnimLookupData {animIndex=data.firstAnimIndex+i};
+                try { anim.Play(name); }
+                finally
+                {
+                    if(replaced) table[name]=previous; else table.Remove(name);
+                    if(original==null) table=null;
+                }
+                return;
+            }
+            anim.Play(name);
         }
         static bool Contains(KBatchedAnimController anim,KAnimFile file)
         {

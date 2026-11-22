@@ -82,7 +82,7 @@ namespace Queyang.Game
                     var m=new MaterialSample {Element=r.ReadInt32(),Mass=r.ReadSingle(),Temperature=r.ReadSingle()};
                     int anim=r.ReadInt32(),cell=r.ReadInt32();
                     if(id<=0 || !(pos.x>=0 && pos.x<Grid.WidthInCells && pos.y>=-.05f && pos.y<Grid.HeightInCells) ||
-                        !Grid.IsValidCell(cell) || Grid.PosToCell(pos)!=cell || !(m.Mass>=0 && m.Mass<=Sim.MaxMass) ||
+                        !Grid.IsValidCell(cell) || Grid.PosToCell(pos)!=cell || !(m.Mass>=0 && m.Mass<=PrimaryElement.MAX_MASS) ||
                         !(m.Temperature>=0 && m.Temperature<=Sim.MaxTemperature)) throw new InvalidDataException("Invalid ore position or material");
                     if(root==null || Grid.WorldIdx[cell]!=ClusterManager.Instance.activeWorldId ||
                         coverage!=null && coverage[cell]>=tick || lastTick.TryGetValue(id,out int old) && old>=tick) continue;
@@ -98,12 +98,18 @@ namespace Queyang.Game
         {
             if(view.DupePoseTick<=0) return;
             if(coverage==null || coverage.Length!=Grid.CellCount) coverage=new int[Grid.CellCount];
+            // A paged cell may omit a moving pile purely because its ID is on another page.
+            // Only a complete cell is evidence against every older motion sample there.
+            if(view.PileFrom==0 && view.PileThrough==int.MaxValue)
             for(int i=0;i<view.Cells.Length;i++)
             {
                 if(!view.CoversPiles(i)) continue;
                 int cell=Grid.XYToCell(view.X+i%ColonyView.Width,view.Y+i/ColonyView.Width);
                 if(Grid.IsValidCell(cell)) coverage[cell]=Math.Max(coverage[cell],view.DupePoseTick);
             }
+            foreach(var pile in view.Piles)
+                if(lastTick.TryGetValue(pile.SaveId,out int seen))
+                    lastTick[pile.SaveId]=Math.Max(seen,view.DupePoseTick);
             expired.Clear();
             foreach(var pair in lastTick) if(view.DupePoseTick-pair.Value>1200) expired.Add(pair.Key);
             foreach(int id in expired) lastTick.Remove(id);

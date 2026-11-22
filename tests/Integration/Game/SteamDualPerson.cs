@@ -16,6 +16,7 @@ namespace Queyang.Integration
     {
         GameObject printed;
         readonly SteamPopulation census=new SteamPopulation();
+        readonly SteamHatAppearance hats=new SteamHatAppearance();
         Clinic clinic;
         GameObject testPlan;
         int step,done,loggedStep=-1;
@@ -110,7 +111,8 @@ namespace Queyang.Integration
         internal bool Host(CSteamID lobby,int round,Action<string> log)
         {
             if (Early) return true;
-            if (done==round) return census.Check(lobby,true,round==1?"printed":"rejoined",id,log);
+            if (done==round) return census.Check(lobby,true,round==1?"printed":"rejoined",id,log) &&
+                hats.Check(lobby,true,round,Original(lobby).GetComponent<KPrefabID>().InstanceID,id,log);
             var original=Original(lobby);
             if (round==2) { done=2; return false; }
             if (step==0)
@@ -182,7 +184,8 @@ namespace Queyang.Integration
         internal bool Guest(CSteamID lobby,int round,Action<string> log)
         {
             if (Early) return true;
-            if (done==round) return census.Check(lobby,false,round==1?"printed":"rejoined",id,log);
+            if (done==round) return census.Check(lobby,false,round==1?"printed":"rejoined",id,log) &&
+                hats.Check(lobby,false,round,Original(lobby).GetComponent<KPrefabID>().InstanceID,id,log);
             if (round==2) {done=2;return false;}
             if (!int.TryParse(Data(lobby,"id"),out id)) return false;
             var original=Original(lobby);

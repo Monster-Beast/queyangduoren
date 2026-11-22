@@ -9,7 +9,7 @@ namespace Queyang.Game
     // visibility and deletion. These messages can only move an already projected actor.
     internal static class NativeMotionStream
     {
-        const int PerPacket=6, MinRowBytes=59;
+        const int WithTools=-2, PerPacket=4, MinRowBytes=59;
         internal static IEnumerable<byte[]> Capture(int left,int bottom)
         {
             bool paused=SpeedControlScreen.Instance.IsPaused;
@@ -20,7 +20,7 @@ namespace Queyang.Game
             using(var stream=new MemoryStream())
             using(var w=new BinaryWriter(stream))
             {
-                w.Write(tick); w.Write(paused); w.Write(Time.unscaledTime);
+                w.Write(WithTools); w.Write(tick); w.Write(paused); w.Write(Time.unscaledTime);
                 int count=0;
                 foreach(var dupe in Components.LiveMinionIdentities.Items)
                 {
@@ -43,9 +43,10 @@ namespace Queyang.Game
                     w.Write(pose.M10); w.Write(pose.M11); w.Write(pose.M12);
                     w.Write(pose.File); w.Write(pose.Frame); w.Write(a.GetCurrentNumFrames()); w.Write(rate); w.Write(a.PlayMode==KAnim.PlayMode.Loop);
                     NativeDigVisuals.Write(w,a);
+                    NativeToolSymbols.Write(w,a);
                     if(++count<PerPacket) continue;
                     yield return stream.ToArray();
-                    count=0; stream.SetLength(9); stream.Position=9;
+                    count=0; stream.SetLength(13); stream.Position=13;
                 }
                 if(count>0) yield return stream.ToArray();
             }
@@ -57,7 +58,10 @@ namespace Queyang.Game
                 throw new InvalidDataException("Invalid character motion payload");
             using(var r=new BinaryReader(new MemoryStream(packet,false)))
             {
-                int tick=r.ReadInt32(); bool paused=r.ReadBoolean(); float sourceTime=r.ReadSingle();
+                int tick=r.ReadInt32();
+                bool tools=tick==WithTools;
+                if(tools) tick=r.ReadInt32();
+                bool paused=r.ReadBoolean(); float sourceTime=r.ReadSingle();
                 if(tick<1 || !(sourceTime>=0 && sourceTime<float.MaxValue)) throw new InvalidDataException("Invalid character motion time");
                 while(r.BaseStream.Position<packet.Length)
                 {
@@ -73,6 +77,7 @@ namespace Queyang.Game
                         NativeWorldMirror.GetDupeSelectable(d.SaveId)?.GetComponent<KBatchedAnimController>() : null;
                     if(a!=null) NativeDupePose.Apply(a,d,tick,paused,true,rate,loop,frames,sourceTime);
                     NativeDigVisuals.Read(r,d.SaveId,a);
+                    if(tools) NativeToolSymbols.Read(r,a);
                 }
             }
         }

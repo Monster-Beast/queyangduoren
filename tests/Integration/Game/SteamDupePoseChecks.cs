@@ -18,11 +18,12 @@ namespace Queyang.Integration
         static bool observe, observeGuest, reported;
         static readonly Dictionary<int,Dictionary<int,float[]>> hostFrames=new Dictionary<int,Dictionary<int,float[]>>();
         static readonly Dictionary<int,int> guestTicks=new Dictionary<int,int>();
+        static readonly Dictionary<int,ColonyDupe> guestSamples=new Dictionary<int,ColonyDupe>();
         static readonly string[] fields={"m00","m01","m02","m10","m11","m12"};
 
         internal static void StartHost() { observe=true; hostFrames.Clear(); }
 
-        internal static void StartGuest() { observeGuest=true; guestTicks.Clear(); }
+        internal static void StartGuest() { observeGuest=true; guestTicks.Clear(); guestSamples.Clear(); }
 
         // Exercise the engine's own serialization path for the instance texture, including
         // navigation/working overrides. Offsets are taken from the actual installed game.
@@ -72,7 +73,9 @@ namespace Queyang.Integration
                 if(!observeGuest || view==null || !view.Paused) return;
                 foreach(var d in view.Dupes)
                     if(!guestTicks.TryGetValue(d.SaveId,out int last) || view.DupePoseTick>=last)
-                        guestTicks[d.SaveId]=view.DupePoseTick;
+                    {
+                        guestTicks[d.SaveId]=view.DupePoseTick;guestSamples[d.SaveId]=d;
+                    }
             }
         }
         internal static bool Guest(CSteamID room,Action<string> log)
@@ -91,6 +94,8 @@ namespace Queyang.Integration
                     d.GetComponent<KBatchedAnimController>().IsVisible())+
                     proxies.Count(p=>p.HostId==kv.Key && p.GetComponent<KBatchedAnimController>().IsVisible());
                 if(copies!=1) throw new InvalidDataException("Visible duplicant copies for "+kv.Key+": "+copies);
+                var d=guestSamples[kv.Key];
+                log($"DUAL_GUEST_CLIP id={kv.Key} tick={kv.Value} wireAction={d.Animation} wireFile={d.Pose.File} wireFrame={d.Pose.Frame} actualAction={a.currentAnim.HashValue} actualFile={a.GetCurrentAnim()?.animFile?.hashName.HashValue} actualFirst={a.GetFirstFrameIndex()} actualFrame={a.GetCurrentFrameIndex()-a.GetFirstFrameIndex()}");
                 rows.Add(Tuple.Create(kv.Key,kv.Value,Read(a)));
                 if(rows.Count==8) break;
             }

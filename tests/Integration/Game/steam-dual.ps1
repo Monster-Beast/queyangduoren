@@ -13,6 +13,7 @@ param(
     [switch]$SkipPerson,
     [switch]$SkipWork,
     [switch]$CheckBuildings,
+    [switch]$CheckFallingOre,
     [switch]$AcceptDeliveredInvite,
     [ValidateRange(0,600)][int]$InviteWaitSeconds=105,
     [ValidateRange(120,3600)][int]$TimeoutSeconds=900
@@ -122,6 +123,7 @@ foreach ($role in $roles) {
         QY_DUAL_SELF=$self; QY_DUAL_FRIEND=$friend; QY_DUAL_HOST_ID=$HostSteamId; QY_DUAL_WAIT_INVITE_SECONDS=([string]$InviteWaitSeconds); QY_DUAL_ACCEPT_INVITE=([int]$AcceptDeliveredInvite.IsPresent).ToString()
     }
     $values.QY_CHECK_BUILDINGS=([int]$CheckBuildings.IsPresent).ToString()
+    $values.QY_CHECK_FALLING_ORE=([int]$CheckFallingOre.IsPresent).ToString()
     $drivers[$role]=[pscustomobject]@{role=$role;exe=$exe;env=$values;mods=$mods;base=$base;restarts=0;started=$false;done=$false;wrapper=$null}
     [ordered]@{ role=$role;package=$before[0];sourceSave=$before[1];fixture=(Get-FileHash $fixture).Hash
         game=(Get-FileHash (Join-Path $mod 'QueyangCoop.dll')).Hash;core=(Get-FileHash (Join-Path $mod 'Queyang.Core.dll')).Hash
@@ -269,6 +271,14 @@ try {
         $path=Get-Physical $d (Join-Path $d.base $entry[1])
         if (!(Test-Path $path) -or (Get-Item $path).Length -lt 45) { throw "Missing screenshot $($entry[1])." }
     }
+    if ($CheckFallingOre) {
+        foreach ($role in $roles) {
+            $d=$drivers[$role]
+            if (!(Select-String -LiteralPath (Get-Physical $d $d.env.QY_SMOKE_REPORT) -Pattern '^DUAL_FALLING_ORE .* kg=12001 visible=1$' -Quiet)) {
+                throw "Missing falling ore motion, large mass and landing evidence for $role."
+            }
+        }
+    }
     if ($CheckBuildings) {
         foreach ($role in $roles) {
             $d=$drivers[$role]
@@ -308,6 +318,11 @@ try {
         $p=Get-Player $d
         if ($p -and !$p.HasExited) { $p.Kill(); [void]$p.WaitForExit(10000) }
         if ($role -eq 'guest') {
+            foreach ($stage in 'printed','rejoined','death') {
+                $dest=Join-Path $d.base "dual-guest-population-$stage.png"
+                $src=Get-Physical $d $dest
+                if ($src -ne $dest -and (Test-Path $src)) { Copy-Item -LiteralPath $src -Destination $dest }
+            }
             if ($CheckBuildings) {
                 foreach ($stage in 0..3) {
                     $dest=Join-Path $d.base "building-guest-$stage.png"
@@ -342,7 +357,7 @@ $joins=@(foreach ($line in $guestReport) {
 })
 if ($joins.Count -ne 2 -or $joins[0].round -ne 1 -or $joins[1].round -ne 2) { throw 'Missing exact join methods for both rounds.' }
 [ordered]@{packageSha256=$before[0];saveSha256=$before[1];protectedInputsUnchanged=$true;joins=$joins
-    checks=[ordered]@{buildings=$CheckBuildings.IsPresent;skills=!$SkipManagement;person=!$SkipManagement -and !$SkipPerson;work=!$SkipManagement -and !$SkipWork}} |
+    checks=[ordered]@{buildings=$CheckBuildings.IsPresent;fallingOre=$CheckFallingOre.IsPresent;skills=!$SkipManagement;person=!$SkipManagement -and !$SkipPerson;work=!$SkipManagement -and !$SkipWork}} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $run 'result.json') -Encoding UTF8
 Write-Output "PASS both Steam game clients; evidence in $run"
 } finally {

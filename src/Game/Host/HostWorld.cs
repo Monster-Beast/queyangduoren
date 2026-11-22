@@ -97,7 +97,7 @@ namespace Queyang.Game
                 var driver = dupe.GetComponent<ChoreDriver>();
                 var chore = driver == null ? null : driver.GetCurrentChore();
                 var anim = dupe.GetComponent<KBatchedAnimController>();
-                dupes.Add(new ColonyDupe {
+                var d=new ColonyDupe {
                     SaveId = dupe.GetComponent<KPrefabID>().InstanceID,
                     Personality = dupe.personalityResourceId.HashValue,
                     Animation = anim == null ? 0 : anim.currentAnim.HashValue,
@@ -110,9 +110,12 @@ namespace Queyang.Game
                     SubX = (byte)Mathf.RoundToInt(255 * Mathf.Clamp01(pos.x - dupeX)),
                     SubY = (byte)Mathf.RoundToInt(255 * Mathf.Clamp01(pos.y - dupeY)),
                     Activity = chore == null ? "Idle" : chore.choreType.Id
-                });
+                };
+                NativeDupeAppearance.Capture(anim,ref d);
+                dupes.Add(d);
             }
             view.SetDupePage(dupes,sample>=0 ? sample : Mathf.FloorToInt(Time.unscaledTime));
+            view.HasDupeAppearance=view.Dupes.Length>0;
             NativeResources.Capture(view, world,sample);
             OrderOwnership.Capture(view,sample);
             return view.Encode();

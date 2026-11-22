@@ -69,6 +69,8 @@ namespace Queyang.Game
         public byte AnimationPosition;
         public bool FlipX;
         public ColonyDupePose Pose;
+        public int Hat,Hair,HatHair;
+        public byte HeadVisibility;
     }
 
     public struct ColonyDupePose
@@ -85,6 +87,7 @@ namespace Queyang.Game
         public bool Native;
         public bool Detailed;
         public bool HasResources;
+        public bool HasDupeAppearance;
         public const int MaxPiles = 128, MaxStocks = 384;
         public byte[] PileCoverage = new byte[Width * Height / 8];
         public int PileFrom, PileThrough = int.MaxValue;
@@ -156,11 +159,11 @@ namespace Queyang.Game
                 if (Detailed && !Native) throw new InvalidDataException("Detailed view requires native state.");
                 if (HasResources && !Detailed) throw new InvalidDataException("Resource state requires detailed view.");
                 bool dupeRange = DupeFrom!=0 || DupeThrough!=int.MaxValue;
-                bool extended = HasEnvironment || EntityPayload != null || dupeRange || DupePoseTick!=0 || OrderMarks!=null;
+                bool extended = HasEnvironment || EntityPayload != null || dupeRange || DupePoseTick!=0 || OrderMarks!=null || HasDupeAppearance;
                 if (extended && !HasResources) throw new InvalidDataException("Extended state requires native resource state.");
                 w.Write(extended ? (ushort)8 : HasResources ? (ushort)7 : Detailed ? (ushort)6 : Native ? NativeVersion : (ushort)4);
                 bool orders = extended && Array.Exists(Cells,c=>c.DigMaterial!=0 || c.HasBlueprintTint || c.MopOrdered || c.OrderPriority!=0 || c.OrderTargetId!=0 || c.SeparateOrderPriority!=0);
-                if (extended) w.Write((byte)((HasEnvironment ? 1 : 0) | (EntityPayload != null ? 2 : 0) | (orders ? 4 : 0) | (dupeRange ? 8 : 0) | (DupePoseTick!=0 ? 16 : 0) | (OrderMarks!=null ? 32 : 0)));
+                if (extended) w.Write((byte)((HasEnvironment ? 1 : 0) | (EntityPayload != null ? 2 : 0) | (orders ? 4 : 0) | (dupeRange ? 8 : 0) | (DupePoseTick!=0 ? 16 : 0) | (OrderMarks!=null ? 32 : 0) | (HasDupeAppearance ? 64 : 0)));
                 w.Write(X); w.Write(Y);
                 w.Write(Cycle); w.Write(CycleFraction); w.Write(Paused); w.Write(Speed);
                 w.Write((ushort)names.Count);
@@ -219,6 +222,12 @@ namespace Queyang.Game
                 if (dupeRange) { w.Write(DupeFrom); w.Write(DupeThrough); }
                 if (DupePoseTick!=0) WriteDupePoses(w);
                 if (OrderMarks!=null) WriteOrderMarks(w);
+                if (HasDupeAppearance)
+                    foreach (var d in Dupes)
+                    {
+                        if (d.HeadVisibility>7) throw new InvalidDataException("Invalid head symbols");
+                        w.Write(d.Hat); w.Write(d.Hair); w.Write(d.HatHair); w.Write(d.HeadVisibility);
+                    }
                 if (extended && stream.Length > MaxViewport)
                 {
                     // Keep all readings and stock labels when a dense full tile compresses well.
@@ -266,7 +275,7 @@ namespace Queyang.Game
                 if (version < 4 || version > 8 || (inflated && version != 8)) throw new InvalidDataException("Unknown viewport version.");
                 byte extensions = version == 8 ? r.ReadByte() : (byte)0;
                 if (extensions == 128 && !inflated) return InflateViewport(r);
-                if (version == 8 && ((extensions & 59) == 0 || (extensions & ~63) != 0)) throw new InvalidDataException("Invalid viewport extensions.");
+                if (version == 8 && ((extensions & 123) == 0 || (extensions & ~127) != 0)) throw new InvalidDataException("Invalid viewport extensions.");
                 var v = new ColonyView { Native = version >= 5, Detailed = version >= 6, HasResources = version >= 7,
                     X = r.ReadInt32(), Y = r.ReadInt32() };
                 if (v.X < 0 || v.Y < 0 || v.X > int.MaxValue - Width || v.Y > int.MaxValue - Height)
@@ -355,6 +364,14 @@ namespace Queyang.Game
                 }
                 if ((extensions & 16)!=0) v.ReadDupePoses(r);
                 if ((extensions & 32)!=0) v.ReadOrderMarks(r);
+                v.HasDupeAppearance=(extensions & 64)!=0;
+                if (v.HasDupeAppearance)
+                    for (int i=0;i<v.Dupes.Length;i++)
+                    {
+                        v.Dupes[i].Hat=r.ReadInt32(); v.Dupes[i].Hair=r.ReadInt32(); v.Dupes[i].HatHair=r.ReadInt32();
+                        v.Dupes[i].HeadVisibility=r.ReadByte();
+                        if (v.Dupes[i].HeadVisibility>7) throw new InvalidDataException("Invalid head symbols");
+                    }
                 if (stream.Position != stream.Length) throw new InvalidDataException("Trailing viewport bytes.");
                 return v;
             }

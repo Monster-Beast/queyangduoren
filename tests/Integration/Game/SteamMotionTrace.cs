@@ -70,7 +70,31 @@ namespace Queyang.Integration
             }
         }
         readonly List<string> fxRows=new List<string>{"qpc,tick,cell,kind,file,anim,frame,root_x,root_y,m00,m01,m02,m10,m11,m12"};
-        int sparks,beams;
+        int sparks,beams,drillFrames;
+        FixtureFrame drillPhoto;
+        bool drillSaved;
+        readonly List<string> drillRows=new List<string>{"tick,file,symbol,body_frame,hand_x,hand_y"};
+        void MeasureDrill(KBatchedAnimController body,int tick,float bodyFrame)
+        {
+            var hand=new HashedString("snapTo_rgtHand");
+            if(!body.GetSymbolVisiblity(hand)) return;
+            var controller=body.GetComponent<SymbolOverrideController>();
+            if(controller==null) return;
+            var entry=controller.GetSymbolOverrides;
+            SymbolOverrideController.SymbolEntry winner=default;
+            foreach(var item in entry)
+                if(item.targetSymbol==hand && (winner.sourceSymbol==null || item.priority>winner.priority)) winner=item;
+            var source=winner.sourceSymbol;
+            if(source==null || source.build!=Assets.GetAnim("excavator_kanim").GetData().build) return;
+            var handMatrix=body.GetSymbolTransform(hand,out bool onFrame);
+            if(!onFrame || !body.IsVisible()) return;
+            drillFrames++;
+            drillRows.Add(string.Format(culture,"{0},{1},{2},{3},{4:R},{5:R}",tick,source.build.fileHash.HashValue,
+                source.hash.HashValue,bodyFrame,handMatrix.m03,handMatrix.m13));
+            if(drillPhoto!=null) return;
+            drillPhoto=new FixtureFrame(Path.Combine(Path.GetDirectoryName(path),"dual-"+(host?"host":"guest")+"-drill.png"));
+            drillPhoto.Capture();
+        }
         void MeasureEffects(int tick)
         {
             KBatchedAnimController contact=null,beam=null; int cell=-1;
@@ -149,6 +173,8 @@ namespace Queyang.Integration
             int poseTick=sampledFrame;
             if(!host) ((Dictionary<int,int>)ticks.GetValue(null)).TryGetValue(id,out poseTick);
             MeasureEffects(host?Time.frameCount:poseTick);
+            MeasureDrill(a,host?Time.frameCount:poseTick,p[8]);
+            if(drillPhoto!=null && !drillSaved) drillSaved=drillPhoto.Complete;
             rows.Add(string.Format(culture,"{0},{1},{2:R},{3},{4},{5},{6:R},{7:R},{8:R},{9:R},{10},{11},{12},{13},{14},{15},{16},{17},{18},{19:R}",
                 Counter(),frequency,Time.realtimeSinceStartup,Time.frameCount,id,poseTick,
                 p[0],p[1],p[4],p[7],a.currentAnim.HashValue,a.GetCurrentAnim()?.animFile?.hashName.HashValue,p[8],
@@ -161,6 +187,9 @@ namespace Queyang.Integration
             if(Seconds<30 || rows.Count<31) throw new InvalidDataException("Insufficient rendered motion trace");
             File.WriteAllLines(path,rows);
             File.WriteAllLines(Path.Combine(Path.GetDirectoryName(path),"dig-fx.csv"),fxRows);
+            File.WriteAllLines(Path.Combine(Path.GetDirectoryName(path),"drill.csv"),drillRows);
+            log("DUAL_HAND_TOOL id="+id+" excavatorFrames="+drillFrames);
+            if(!drillSaved) throw new InvalidDataException("No captured frame with the actual excavator attached to a visible hand");
             log("DUAL_DIG_FX id="+id+" contactFrames="+sparks+" beamFrames="+beams);
             if(displayed!=null && sparks==0) throw new InvalidDataException("No actual digging contact animation was rendered");
             log("DUAL_MOTION_END id="+id+" seconds="+Seconds.ToString("F2",culture)+" samples="+(rows.Count-1)+" file=dupe-motion.csv");

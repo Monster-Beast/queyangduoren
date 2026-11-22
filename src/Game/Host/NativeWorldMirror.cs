@@ -354,6 +354,7 @@ namespace Queyang.Game
                     spawnedDupes.Add(d.SaveId, anim);
                 }
                 if (anim == null) continue;
+                if (view.HasDupeAppearance) NativeDupeAppearance.Apply(anim,d,view.DupePoseTick);
                 if (dupe == null && !string.IsNullOrEmpty(d.Name) && anim.gameObject.name != d.Name)
                 {
                     anim.gameObject.name = d.Name;

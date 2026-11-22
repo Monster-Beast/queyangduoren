@@ -14,7 +14,8 @@ namespace Queyang.Integration
     {
         string last;
         bool startedDeath,wasPaused;
-        float nextCheck;
+        float nextCheck,nextDiagnostic;
+        FixtureFrame screenshot;
         static readonly AccessTools.FieldRef<MeterScreen,LocText> counter=AccessTools.FieldRefAccess<MeterScreen,LocText>("currentMinions");
         static string Ids() => string.Join(",",Components.LiveMinionIdentities.Items.Where(m=>m!=null &&
             ClusterUtil.GetMyWorldId(m)==ClusterManager.Instance.activeWorldId).Select(m=>m.GetComponent<KPrefabID>().InstanceID).OrderBy(id=>id));
@@ -22,6 +23,13 @@ namespace Queyang.Integration
         internal bool Check(CSteamID lobby,bool host,string stage,int born,Action<string> log)
         {
             if (last==stage) return true;
+            if (screenshot!=null)
+            {
+                if (!screenshot.Complete) return false;
+                screenshot=null;
+                last=stage;
+                return true;
+            }
             if (Time.unscaledTime<nextCheck) return false;
             nextCheck=Time.unscaledTime+.25f;
             string key="qy_census_"+stage;
@@ -36,17 +44,26 @@ namespace Queyang.Integration
             var ids=expected.Split(',').Select(int.Parse).OrderBy(i=>i).ToArray();
             if ((stage!="death")!=ids.Contains(born)) throw new InvalidDataException("Printed ID inconsistent with authoritative roster");
             string label=counter(MeterScreen.Instance).text;
-            if (label!=ids.Length.ToString()) return false; // Base-game fixture has one active asteroid.
             var bodies=UnityEngine.Object.FindObjectsByType<KBatchedAnimController>(FindObjectsSortMode.None)
                 .Where(a=>a.IsVisible() && a.GetComponent<KSelectable>()?.IsSelectable==true)
                 .Select(a=>new {proxy=a.GetComponent<NativeDupeIdentityMarker>(),native=a.GetComponent<MinionIdentity>()})
                 .Where(v=>v.proxy!=null || v.native!=null && Components.LiveMinionIdentities.Items.Contains(v.native))
                 .Select(v=>v.proxy!=null ? v.proxy.HostId : v.native.GetComponent<KPrefabID>().InstanceID)
                 .OrderBy(i=>i).ToArray();
-            if (!ids.SequenceEqual(bodies)) return false;
+            if (label!=ids.Length.ToString() || !ids.SequenceEqual(bodies))
+            {
+                if (Time.unscaledTime>=nextDiagnostic)
+                {
+                    nextDiagnostic=Time.unscaledTime+5f;
+                    log("DUAL_POPULATION_WAIT stage="+stage+" hud="+label+" expected="+expected+" bodies="+string.Join(",",bodies));
+                }
+                return false;
+            }
             log("DUAL_POPULATION stage="+stage+" role="+(host?"host":"guest")+" hud="+label+" liveIds="+expected+" visibleBodies="+string.Join(",",bodies));
-            last=stage;
-            return true;
+            string name="dual-"+(host?"host":"guest")+"-population-"+stage+".png";
+            screenshot=new FixtureFrame(Path.Combine(Path.GetDirectoryName(Environment.GetEnvironmentVariable("QY_SMOKE_REPORT")),name));
+            screenshot.Capture();
+            return false;
         }
 
         internal bool Death(CSteamID lobby,bool host,GameObject subject,int born,Action<string> log)
