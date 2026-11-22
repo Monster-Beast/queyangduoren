@@ -28,6 +28,7 @@ namespace Queyang.Integration
         readonly SteamDualHealth health=new SteamDualHealth();
         readonly SteamConstructionRange constructionRange=new SteamConstructionRange();
         readonly SteamResearchRange researchRange=new SteamResearchRange();
+        readonly SteamPowerRange powerRange=new SteamPowerRange();
         readonly SteamMeterRange batteryRange=new SteamMeterRange(), reservoirRange=new SteamMeterRange(true);
         readonly SteamDualOwnership ownership=new SteamDualOwnership();
         readonly Action<string> log;
@@ -267,6 +268,7 @@ namespace Queyang.Integration
                 case Phase.Invite: Join(); break;
                 case Phase.Loading: WorldReady(); break;
                 case Phase.Dig:
+                    if (!powerRange.Check(lobby,self,false,round,log)) break;
                     if (!researchRange.Check(lobby,self,false,round,log)) break;
                     if (!batteryRange.Check(lobby,self,false,round,log)) break;
                     if (!reservoirRange.Check(lobby,self,false,round,log)) break;

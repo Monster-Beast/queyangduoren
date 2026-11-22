@@ -128,6 +128,7 @@ namespace Queyang.Game
             NativeColonyLighting.Capture(view,world,sample);
             NativeBuildingMeters.Capture(view,sample);
             NativeBuildingWork.Capture(view,world,sample);
+            NativeBuildingWarnings.Capture(view,sample);
             view.HasHealthBars=view.LightMask!=null && view.Dupes.Length>0;
             view.HasPileAppearance=view.HasEntombed && view.HasColonyHud;
             OrderOwnership.Capture(view,sample);

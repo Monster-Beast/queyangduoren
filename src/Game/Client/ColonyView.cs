@@ -195,7 +195,8 @@ namespace Queyang.Game
                 if(HasHealthBars && LightMask==null) throw new InvalidDataException("Health bars require the native v11 viewport");
                 if(WorkBars!=null && LightMask==null) throw new InvalidDataException("Work bars require the native v11 viewport");
                 if(Meters!=null && LightMask==null) throw new InvalidDataException("Building meters require a native v11 viewport");
-                if (LightMask!=null) w.Write((byte)((HasColonyHud?1:0)|(HasPileAppearance?2:0)|(HasHealthBars?4:0)|(WorkBars!=null?8:0)|(Meters!=null?16:0)));
+                if(BuildingWarnings!=null && LightMask==null) throw new InvalidDataException("Building warnings require the native v11 viewport");
+                if (LightMask!=null) w.Write((byte)((HasColonyHud?1:0)|(HasPileAppearance?2:0)|(HasHealthBars?4:0)|(WorkBars!=null?8:0)|(Meters!=null?16:0)|(BuildingWarnings!=null?32:0)));
                 w.Write(X); w.Write(Y);
                 w.Write(Cycle); w.Write(CycleFraction); w.Write(Paused); w.Write(Speed);
                 w.Write((ushort)names.Count);
@@ -285,6 +286,7 @@ namespace Queyang.Game
                 }
                 if(WorkBars!=null) WriteWorkBars(w);
                 if(Meters!=null) WriteMeters(w);
+                if(BuildingWarnings!=null) WriteBuildingWarnings(w);
                 if (extended && stream.Length > MaxViewport)
                 {
                     // Keep all readings and stock labels when a dense full tile compresses well.
@@ -334,7 +336,7 @@ namespace Queyang.Game
                 if (version==8 && extensions == 128 && !inflated) return InflateViewport(r);
                 if (version >= 8 && (extensions & 123) == 0) throw new InvalidDataException("Invalid viewport extensions.");
                 int flags=version==11 ? r.ReadByte() : version==10 ? 3 : version==9 ? 1 : 0;
-                if ((flags&3)==2 || flags>31) throw new InvalidDataException("Invalid viewport features");
+                if ((flags&3)==2 || flags>63) throw new InvalidDataException("Invalid viewport features");
                 var v = new ColonyView { Native = version >= 5, Detailed = version >= 6, HasResources = version >= 7,
                     X = r.ReadInt32(), Y = r.ReadInt32(), HasEntombed=(extensions & 128)!=0 };
                 if (v.X < 0 || v.Y < 0 || v.X > int.MaxValue - Width || v.Y > int.MaxValue - Height)
@@ -466,6 +468,7 @@ namespace Queyang.Game
                 }
                 if((flags&8)!=0) v.ReadWorkBars(r);
                 if((flags&16)!=0) v.ReadMeters(r);
+                if((flags&32)!=0) v.ReadBuildingWarnings(r);
                 if (stream.Position != stream.Length) throw new InvalidDataException("Trailing viewport bytes.");
                 return v;
             }

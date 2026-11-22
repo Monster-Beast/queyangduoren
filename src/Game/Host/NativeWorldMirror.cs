@@ -79,6 +79,7 @@ namespace Queyang.Game
             ApplyDupes(view);
             if (view.HasResources) NativeResources.Apply(view, world, markerRoot.transform);
             NativeBuildingWork.Apply(view);
+            NativeBuildingWarnings.Apply(view);
         }
 
         static unsafe void ApplyElement(int cell, ColonyCell sample)
@@ -197,6 +198,7 @@ namespace Queyang.Game
                 var anim = item.GetComponent<KBatchedAnimController>();
                 if (!match || (sample.AnchorDX == 0 && sample.AnchorDY == 0)) SetVisible(anim, match);
                 if (!match && item.GetComponent<NativeBuildingMeters>() is NativeBuildingMeters meters) meters.Hide();
+                if(!match) NativeBuildingWarnings.Hide(item.GetComponent<KSelectable>());
                 if (match && sample.AnchorDX == 0 && sample.AnchorDY == 0)
                 {
                     if (anim!=null && sample.HasBlueprintTint) anim.TintColour=NativeOrderColors.Unpack(sample.BlueprintTint);
@@ -518,6 +520,7 @@ namespace Queyang.Game
             spawnedDupes.Clear(); expiredDupes.Clear(); localDupes.Clear(); NativeUtilities.Reset(); NativeUtilityDisplay.Reset();
             NativeResources.Reset();
             NativeBuildingWork.Reset();
+            NativeBuildingWarnings.Reset();
             NativeEnvironment.Reset();
             NativeMaterialReadings.Reset();
         }

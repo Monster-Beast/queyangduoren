@@ -11,6 +11,37 @@ namespace Queyang.Core.Tests
         static ColonyView View() => new ColonyView { Native = true, Detailed = true, HasResources = true };
 
         [Fact]
+        public void BuildingWarningPagesCoverAbsentAndPresentIconsWithoutGaps()
+        {
+            var view=View();
+            view.LightMask=new byte[ColonyView.Width*ColonyView.Height/8];
+            view.HasDupeAppearance=true;
+            var rows=new System.Collections.Generic.List<ColonyBuildingWarning>();
+            for(ushort cell=1;cell<=29;cell++)
+            {
+                view.Cells[cell].Flags=17;
+                view.Cells[cell].BuildingHash=7;
+                view.Cells[cell].BuildingSaveId=cell+100;
+                rows.Add(new ColonyBuildingWarning{Cell=cell,Y=-.35f,Icons=new[]{23,-84}});
+            }
+            view.SetBuildingWarnings(rows,0);
+            var first=ColonyView.Decode(view.Encode());
+            Assert.Equal(0,first.WarningFirst);
+            Assert.Equal(24,first.WarningLast);
+            Assert.Equal(24,first.BuildingWarnings.Length);
+            Assert.Equal(new[]{23,-84},first.BuildingWarnings[0].Icons);
+            view.SetBuildingWarnings(rows,1);
+            var next=ColonyView.Decode(view.Encode());
+            Assert.Equal(first.WarningLast+1,next.WarningFirst);
+            Assert.Equal(view.Cells.Length-1,next.WarningLast);
+            Assert.Equal(5,next.BuildingWarnings.Length);
+            view.BuildingWarnings[0].Icons=new[]{3,3};
+            Assert.Throws<InvalidDataException>(()=>view.Encode());
+            view.SetBuildingWarnings(new System.Collections.Generic.List<ColonyBuildingWarning>(),0);
+            Assert.Empty(ColonyView.Decode(view.Encode()).BuildingWarnings);
+        }
+
+        [Fact]
         public void WorkBarPagesRetainNativePresentationAndBoundRemovals()
         {
             var view=View();

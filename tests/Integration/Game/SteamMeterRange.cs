@@ -24,6 +24,9 @@ namespace Queyang.Integration
         Battery battery;
         Storage water;
         GameObject building;
+        int bay=-1;
+        bool restorePause;
+        float bayPreparedAt;
         FixtureFrame frame;
         Vector3 oldCamera;
         float oldZoom;
@@ -38,6 +41,69 @@ namespace Queyang.Integration
             target.GetComponentsInChildren<KBatchedAnimController>(true)
                 .FirstOrDefault(anim=>anim!=null && anim.gameObject.name.EndsWith(".meter",StringComparison.Ordinal));
         KBatchedAnimController HostMeter()=>(reservoir?reservoirMeter(building.GetComponent<Reservoir>()):batteryMeter(battery))?.meterController;
+
+        bool PrepareReservoir(Action<string> log)
+        {
+            var world=ClusterManager.Instance.activeWorld;
+            var def=Assets.GetBuildingDef(LiquidReservoirConfig.ID);
+            if(bay<0)
+            {
+                var origin=Grid.CellToXY(Grid.PosToCell(Components.LiveMinionIdentities.Items.First(d=>d!=null && ClusterUtil.GetMyWorldId(d)==world.id)));
+                int best=int.MaxValue;
+                var lo=world.WorldOffset;var hi=world.WorldOffset+world.WorldSize;
+                // Keep every modified cell, including the two floor cells, within this world.
+                for(int y=Math.Max(lo.y+3,origin.y-25);y<Math.Min(hi.y-5,origin.y+26);y++)
+                    for(int x=Math.Max(lo.x+3,origin.x-35);x<Math.Min(hi.x-5,origin.x+36);x++)
+                    {
+                        int dist=Math.Abs(origin.x-x)+Math.Abs(origin.y-y);
+                        if(dist<6 || dist>37)continue;
+                        int edits=0;bool free=true;
+                        for(int dy=-1;dy<def.HeightInCells && free;dy++)for(int dx=0;dx<def.WidthInCells;dx++)
+                        {
+                            int c=Grid.XYToCell(x+dx,y+dy);
+                            if(Grid.WorldIdx[c]!=world.id || !Grid.IsValidBuildingCell(c) || Grid.Element[c]==null ||
+                                Grid.Element[c].hardness==byte.MaxValue || HostWorld.FindBuilding(c)!=null || NativeResources.First(c)!=null ||
+                                Grid.Objects[c,(int)ObjectLayer.Building]!=null || Grid.Objects[c,(int)ObjectLayer.FoundationTile]!=null ||
+                                Components.Brains.Items.Any(b=>b!=null && Grid.PosToCell(b)==c))
+                            {free=false;break;}
+                            if(dy<0 ? !Grid.Solid[c] : !Grid.Element[c].IsGas)edits++;
+                        }
+                        int score=edits*20+dist;
+                        if(!free || score>=best)continue;
+                        best=score;bay=Grid.XYToCell(x,y);
+                    }
+                if(bay<0)throw new InvalidDataException("No empty bounded reservoir test bay");
+                var corner=Grid.CellToXY(bay);
+                for(int dy=-1;dy<def.HeightInCells;dy++)for(int dx=0;dx<def.WidthInCells;dx++)
+                {
+                    int c=Grid.XYToCell(corner.x+dx,corner.y+dy);Grid.Reveal(c,255,true);
+                    if(dy<0 && !Grid.Solid[c]) SimMessages.ReplaceElement(c,SimHashes.Granite,CellEventLogger.Instance.SandBoxTool,1600,295);
+                    if(dy>=0 && !Grid.Element[c].IsGas) SimMessages.ReplaceElement(c,SimHashes.Oxygen,CellEventLogger.Instance.SandBoxTool,1,295);
+                }
+                restorePause=SpeedControlScreen.Instance.IsPaused;
+                bayPreparedAt=Time.realtimeSinceStartup;
+                log("RESERVOIR_TEST_BAY cell="+bay+" width="+def.WidthInCells+" height="+def.HeightInCells+" isolated=True");
+                return false;
+            }
+            var pos=Grid.CellToXY(bay);
+            bool floorReady=Enumerable.Range(0,def.WidthInCells).All(dx=>Grid.Solid[Grid.XYToCell(pos.x+dx,pos.y-1)]);
+            bool empty=def.PlacementOffsets.All(o=>!Grid.Solid[Grid.OffsetCell(bay,o)]);
+            if(!floorReady || !empty)
+            {
+                if(Time.realtimeSinceStartup-bayPreparedAt>12)throw new InvalidDataException("Reservoir test bay failed to settle");
+                if(SpeedControlScreen.Instance.IsPaused)SpeedControlScreen.Instance.Unpause(false);
+                return false;
+            }
+            if(restorePause && !SpeedControlScreen.Instance.IsPaused)SpeedControlScreen.Instance.Pause(false);
+            if(!HostWorld.VacantFootprint(def,bay,Orientation.Neutral,world))throw new InvalidDataException("Reservoir test bay occupied");
+            if(!def.IsValidPlaceLocation(def.BuildingPreview,bay,Orientation.Neutral,false,out string reason) ||
+                !def.IsValidBuildLocation(def.BuildingPreview,bay,Orientation.Neutral,false,out reason))
+                throw new InvalidDataException("Native reservoir placement rejected the prepared bay "+bay+": "+reason);
+            var materials=def.MaterialCategory.Select(kind=>MaterialSelector.GetValidMaterials(kind,true).First()).ToArray();
+            building=def.Build(bay,Orientation.Neutral,null,materials,295f,false,-1f);
+            if(building==null)throw new InvalidDataException("Native reservoir failed to spawn in its valid test bay");
+            return true;
+        }
 
         string ChangeReading()
         {
@@ -70,7 +136,8 @@ namespace Queyang.Integration
             {
                 if(!CoopSession.IsHosting || Util.GetKleiRootPath()!=Environment.GetEnvironmentVariable("QY_SMOKE_ROOT"))
                     throw new InvalidOperationException("Meter range requires an isolated host");
-                building=NativeFacilityChecks.Build(reservoir?LiquidReservoirConfig.ID:BatteryConfig.ID,ClusterManager.Instance.activeWorldId);
+                if(reservoir) {if(!PrepareReservoir(log))return false;}
+                else building=NativeFacilityChecks.Build(BatteryConfig.ID,ClusterManager.Instance.activeWorldId);
                 battery=building.GetComponent<Battery>();
                 water=building.GetComponent<Storage>();
                 cell=building.GetComponent<Building>().GetCell();
