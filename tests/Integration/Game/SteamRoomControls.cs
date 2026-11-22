@@ -15,6 +15,8 @@ namespace Queyang.Integration
         static readonly AccessTools.FieldRef<SpeedControlScreen, int> Pauses =
             AccessTools.FieldRefAccess<SpeedControlScreen, int>("pauseCount");
         int stage, id, originalSpeed;
+        int storageCell = Grid.InvalidCell, storageId;
+        Tag storageTag;
         bool clicked, finished, rechecked;
         float deadline;
         Vector3 originalCamera;
@@ -29,7 +31,8 @@ namespace Queyang.Integration
             {
                 if (rechecked) return true;
                 if (id == 0 || Find(id)?.GetProperName() != TestName) return false;
-                log($"ROOM_CONTROLS_REJOIN role={(host ? "host" : "guest")} id={id} nameRetained=True");
+                if (StorageFilter(host)?.ContainsTag(storageTag) != true) return false;
+                log($"ROOM_CONTROLS_REJOIN role={(host ? "host" : "guest")} id={id} nameRetained=True storageFilterRetained=True");
                 return rechecked = true;
             }
             if (finished) return true;
@@ -65,10 +68,7 @@ namespace Queyang.Integration
 
             var target = Find(id);
             if (target == null) return false;
-            var position = target.transform.position;
-            position.z = camera.transform.position.z;
-            camera.SetTargetPos(position, 6f, false);
-            camera.SetPosition(position);
+            if (stage < 6) Focus(camera,target.transform.position);
             camera.OrthographicSize = 6f;
             bool ready = host || Read(lobby, "gate") == stage.ToString();
             if (host && Read(lobby, "gate") != stage.ToString()) Set(lobby, "gate", stage.ToString());
@@ -97,7 +97,7 @@ namespace Queyang.Integration
             }
             bool paused = host ? speed.IsPaused : CoopSession.NativeView?.Paused == true;
             int speedValue = host ? speed.GetSpeed() : CoopSession.NativeView?.Speed == 2 ? 1 : 0;
-            if (!host && !clicked && stage >= 3)
+            if (!host && !clicked && stage >= 3 && stage <= 5)
             {
                 if (stage == 3 && CoopSession.NativeView?.Speed == 1 && paused) speed.SetSpeed(1);
                 else if (stage == 4 && paused || stage == 5 && !paused) speed.TogglePause(false);
@@ -112,7 +112,8 @@ namespace Queyang.Integration
                 case 2: verified = Research.Instance.GetResearchQueue().All(q => q.tech != tech); break;
                 case 3: verified = speedValue == 1 && paused; break;
                 case 4: verified = !paused; break;
-                default: verified = paused; break;
+                case 5: verified = paused; break;
+                default: verified = CheckStorage(lobby, host); break;
             }
             if (!verified || !host && !clicked) return false;
             string acknowledgement = Prefix + "seen_" + stage;
@@ -127,7 +128,7 @@ namespace Queyang.Integration
             stage++;
             actionAt = Time.unscaledTime + 1.5f;
             clicked = false;
-            if (stage < 6) return false;
+            if (stage < 7) return false;
             if (host) speed.SetSpeed(originalSpeed);
             camera.SetTargetPos(originalCamera,zoom,false);
             camera.SetPosition(originalCamera);
@@ -136,6 +137,67 @@ namespace Queyang.Integration
         }
 
         float actionAt;
+        bool CheckStorage(CSteamID lobby, bool host)
+        {
+            if (storageCell == Grid.InvalidCell)
+            {
+                if (host)
+                {
+                    int world = ClusterManager.Instance.activeWorldId;
+                    var storage = Components.BuildingCompletes.Items.Where(b => b != null &&
+                            ClusterUtil.GetMyWorldId(b) == world && Grid.Visible[b.GetCell()] != 0)
+                        .Select(b => b.GetComponent<TreeFilterable>())
+                        .First(f => f != null && HostWorld.EditableTags(f).Any(t => !f.ContainsTag(t)));
+                    storageCell = storage.GetComponent<Building>().GetCell();
+                    storageId = storage.GetComponent<KPrefabID>().InstanceID;
+                    storageTag = HostWorld.EditableTags(storage).First(t => !storage.ContainsTag(t));
+                    Set(lobby, "storage", $"{storageCell}|{storageId}|{storageTag}");
+                }
+                else
+                {
+                    var info = Read(lobby,"storage").Split('|');
+                    if (info.Length != 3) return false;
+                    storageCell = int.Parse(info[0]);
+                    storageId = int.Parse(info[1]);
+                    storageTag = new Tag(info[2]);
+                }
+            }
+            Focus(CameraController.Instance,Grid.CellToPosCCC(storageCell,Grid.SceneLayer.Building));
+            var filter = StorageFilter(host);
+            if (filter == null) return false;
+            if (!host && !clicked)
+            {
+                var selected = filter.GetComponent<KSelectable>();
+                if (DetailsScreen.Instance?.target != selected.gameObject)
+                {
+                    SelectTool.Instance.Select(selected,false);
+                    actionAt = Time.unscaledTime + 2f;
+                    return false;
+                }
+                if (Time.unscaledTime < actionAt) return false;
+                AccessTools.Method(typeof(TreeFilterable), "AddTagToFilter").Invoke(filter,new object[] { storageTag });
+                clicked = true;
+            }
+            if (!filter.ContainsTag(storageTag)) return false;
+            SelectTool.Instance.Select(null,false);
+            return true;
+        }
+
+        static void Focus(CameraController camera, Vector3 position)
+        {
+            position.z = camera.transform.position.z;
+            camera.SetTargetPos(position,6f,false);
+            camera.SetPosition(position);
+        }
+
+        TreeFilterable StorageFilter(bool host)
+        {
+            var target = host ? HostWorld.FindBuilding(storageCell) :
+                NativeWorldMirror.GetBuildingSelectable(storageCell,storageId)?.gameObject;
+            return target != null && target.GetComponent<KPrefabID>()?.InstanceID == storageId ?
+                target.GetComponent<TreeFilterable>() : null;
+        }
+
         static KSelectable Find(int saveId) => CoopSession.IsHosting
             ? Components.LiveMinionIdentities.Items.FirstOrDefault(d => d != null && d.GetComponent<KPrefabID>().InstanceID == saveId)?.GetComponent<KSelectable>()
             : NativeWorldMirror.GetDupeSelectable(saveId);
