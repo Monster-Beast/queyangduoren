@@ -50,6 +50,7 @@ namespace Queyang.Integration
         readonly bool acceptDelivered;
         readonly bool colonyJoin=Env("QY_CHECK_COLONY_JOIN")=="1";
         readonly SteamMapBaseline mapBaseline=new SteamMapBaseline();
+        readonly SteamColonyBatch colonyBatch=new SteamColonyBatch();
         Callback<LobbyInvite_t> delivered;
         Callback<GameLobbyJoinRequested_t> requested;
         CSteamID lobby;
@@ -147,6 +148,7 @@ namespace Queyang.Integration
                 else if (Time.realtimeSinceStartup>=inviteDeadline && lobby.IsValid())
                     method=gotRequest ? "lobby-number-after-unhandled-join-request" : "lobby-number";
                 else return;
+                colonyBatch.Begin(false,round,log);
                 CoopSession.Join(lobby.ToString(),true);
                 if (!CoopSession.IsNativeClient) throw new IOException("Steam join failed: "+CoopSession.Status);
             }
@@ -192,6 +194,7 @@ namespace Queyang.Integration
         void WorldReady()
         {
             if (!NativeGuestScene.Ready || CoopSession.NativeView==null || CameraController.Instance==null || !global::Game.Instance.GameStarted()) return;
+            colonyBatch.ToolReady();
             if (CoopSession.Endpoint!=lobby.ToString() || SteamMatchmaking.GetLobbyOwner(lobby)!=host ||
                 !Enumerable.Range(0,SteamMatchmaking.GetNumLobbyMembers(lobby)).Any(i=>SteamMatchmaking.GetLobbyMemberByIndex(lobby,i)==self))
                 throw new InvalidDataException("Steam lobby ownership or membership did not match the two expected accounts.");
@@ -210,7 +213,7 @@ namespace Queyang.Integration
                     throw new InvalidDataException("Guest colony building IDs differ from the host baseline: "+signature);
                 SteamMatchmaking.SetLobbyMemberData(lobby,"qy_colony_verified",round.ToString());
                 log("COLONY_JOIN role=guest round="+round+" buildings="+signature);
-                Set(Phase.Colony,SteamMapBaseline.Enabled || Env("QY_CHECK_CRITTER_HEALTH")=="1" ? 120 : 55);
+                Set(Phase.Colony,SteamMapBaseline.Enabled || SteamColonyBatch.Enabled || Env("QY_CHECK_CRITTER_HEALTH")=="1" ? 120 : 55);
                 return;
             }
             frame=new FixtureFrame(Path.Combine(folder,"dual-guest-"+round+".png"));
@@ -292,6 +295,7 @@ namespace Queyang.Integration
                 case Phase.Loading: WorldReady(); break;
                 case Phase.Colony:
                     if (!health.Check(lobby,self,false,round,log)) break;
+                    if (!colonyBatch.CameraSweep(lobby,self)) break;
                     if (!mapBaseline.Check(lobby,self,false,log)) break;
                     if (SteamMatchmaking.GetLobbyData(lobby,"qy_colony_ack")!=round.ToString()) break;
                     CoopSession.Disconnect(); Set(Phase.Leaving,90); break;

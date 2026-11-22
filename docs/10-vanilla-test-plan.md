@@ -57,8 +57,8 @@
 | ID | 操作与场景 | 通过条件与已有样例 |
 |---|---|---|
 | MAP-01 | 对 `M` 做原版单人、同机双 Steam 短测，遇到回归再做带 Mod 不开房和空房对照。大图压力使用 `L`。同一地图保持倍速、镜头和持续时间。 | `M` 短时推进通过，同机画面流畅度仍失败。`L` 的冷快照旧动物任务异常已修复，1 倍速流畅度仍失败。运行中改设置和 10 分钟压力分别待测。[1160 周期实测](evidence/map01-spacerock.md) · [148 周期实测](evidence/doom-lab-148.md) |
-| MAP-02 | 分段打点从接受房间到存档创建、传输、校验、原版载入、Native Ready、首个可靠视区、原版工具可操作。首次加入和重连都执行。 | 两次都加载并到达可操作状态，保存每段毫秒数、基线大小、头部签名、拷贝及队列峰值。近期已有两个暂停入房和 24,851 个实例对账。未暂停及阶段指标待测。 |
-| MAP-03 | 先在 `M` 做工业区、畜牧区和主基地的平移、拖动、缩放、跳转及快速来回，再在 `L` 跑密集工业区和火箭区压力。测暂停和 1 倍速。 | 新中心视区及边缘视区覆盖正确，旧页不串入新位置。记录各次实际视区到达与稳定的时间、帧时间、首幅完整截图和普通速度视频。 |
+| MAP-02 | 分段打点从接受房间到存档创建、传输、校验、原版载入、Native Ready、首个可靠视区、原版工具可操作。首次加入和重连都执行。 | 148 周期暂停首次入房和 1 倍速重连通过，工具激活 22.602、19.464 秒。已收集快照大小/哈希、局部队列及阶段时长，Steam 内部队列与单独拷贝时长待测。[148 周期批次](evidence/doom-lab-148.md#map-02-与-map-03-联合回归) |
+| MAP-03 | 先在 `M` 做工业区、畜牧区和主基地的平移、拖动、缩放、跳转及快速来回，再在 `L` 跑密集工业区和火箭区压力。测暂停和 1 倍速。 | 暂停独立镜头跳转三个工位及宽镜头外围页已通过。连续拖动、旧页过期、快速重复跳转、运行中画面及录像待测。[视区实测](evidence/doom-lab-148.md#map-02-与-map-03-联合回归) |
 | MAP-04 | 两人各选一个密集区，正常速度一人挖掘或拉管、一人连续打开设备侧栏，期间第三人晚加入或一端故意慢。持续 10 分钟以上。 | 同一对象工单和库存对账，无断线、无视区长期停滞，记录新客机加入对现有两端的峰值影响。单人基线和正常联机压测都留状态。 |
 | NET-01 | 同机两个独立 Steam 拷贝、不同设备 Steam 好友、房间号、好友邀请、覆盖层接受、重复邀请、好友取消、离线恢复。 | 记录每轮真实加入入口和结果。房间号成功、收到邀请通知、从邀请进入各自取证。 |
 | NET-02 | 不同游戏版本、Mod 包/协议差异、房主已退出、非成员、房满、重复登录、错误房间号。 | 原版场景能安全返回，玩家读到准确原因。房满和不匹配不会影响已联机成员。 |
@@ -158,24 +158,26 @@ dotnet test .\tests\Core.Tests\Core.Tests.csproj -c Release --nologo
 dotnet build .\tests\Integration\Game\SmokeDriver.csproj -c Release --nologo
 ~~~
 
-成功时核心测试输出通过计数，驱动能使用对应的游戏程序集构建。构建时若 Steam 安装不在默认位置，将 `ONI_GAME_DIR` 指向包含 `OxygenNotIncluded.exe` 的目录。两端选择同一份固定包。大图连通性回归使用以下开关，预期两次入房各有主机和客机截图、相同的建筑摘要及 `colony-join-result.json`。
+成功时核心测试输出通过计数，驱动能使用对应的游戏程序集构建。构建时若 Steam 安装不在默认位置，将 `ONI_GAME_DIR` 指向包含 `OxygenNotIncluded.exe` 的目录。两端选择同一份固定包。同组工位共享一次开房，按各自的前置条件依次执行，每项单独记状态。148 周期连通性批次可同时覆盖首次入房、重连、独立镜头与动物红条。
 
 ~~~powershell
 $test = @{
     HostSteamId = $hostSteamId
     GuestSteamId = $guestSteamId
-    PackagePath = '.\dist\QueyangCoop-0.3.2-large-map-join-preview.zip'
+    PackagePath = '.\dist\QueyangCoop-0.3.2-critter-health-preview.zip'
     SavePath = '.\artifacts\qa\mature-range\The-Doomed-Laboratory-148.sav'
 }
-.\tests\Integration\Game\steam-dual.ps1 @test -CheckColonyJoin -InviteWaitSeconds 0
+.\tests\Integration\Game\steam-dual.ps1 @test -CheckColonyJoin -CheckColonyBatch -CheckCritterHealth -InviteWaitSeconds 0
 ~~~
 
 | 已有入口 | 适用的计划项 | 有待另测 |
 |---|---|---|
 | `-CheckColonyJoin` | MAP-02、NET-01/03 的大图暂停场景 | 正常运行、切视区压力、长稳和跨设备。此模式跑独立的入房检查。 |
+| `-CheckColonyJoin -CheckColonyBatch -InviteWaitSeconds 0` | 148 周期档，暂停首次入房、1 倍速重连、入房阶段打点、客机原版挖掘工具激活、客机异地跳转和缩放 | 客机真实写命令、连续拖动和不同倍速长时间轮换、跨设备。可加 `-CheckCritterHealth` 一起复测红条。 |
 | `-SurveyColony`、`-PrepareFacilityRange`、`-FacilityRangeManifest` | 盘点建筑与现场记录，准备 FAC-01/02/03 起点 | 入房看到初始面板后再完成实际操作。准备和双人测试分开运行。 |
 | `-CheckConstruction -CheckFloor -CheckAreaDig -CheckAlert -CheckSweepSymbol` | BUILD-02、CMD-01/03、MGR-07 的一部分 | 冲突双方、新区域、其他建筑如蓝图跨层、紧急声音。 |
 | `-CheckBuildings -CheckRoomControls -CheckResearch -CheckPower -CheckBattery -CheckReservoir` | 建筑/研究/供电/表计/过滤及部分通用侧栏 | 与大图自然运行、类目全矩阵和断电恢复的联合回归。 |
+| `-CheckSweepSymbol -CheckPower -CheckResearch -CheckBattery -CheckReservoir -SkipManagement` | 隔离档的设备状态批次，五项各验三个阶段，最后复测单格挖掘、重连与原版回读 | 设备自然运行和面板操作分别保留。已有本轮成组运行和双端证据。[建筑状态批量回归](evidence/device-batch.md) |
 | `-CheckBuildingMotion -CheckResearchMotion -CheckDupeFeedback -CheckUpgradeVisual -CheckHealth -CheckCritters -CheckFallingOre -CheckBuried -CheckLighting` | DUPE、RES、VIEW、ENV 部分场景，有的开关会保存录像 | 未暂停大图、逐建筑对应动画与不同阶段声音。 |
 | `-CheckPrinting` 及默认角色/工作管理 | MGR-02/03/05、DUPE-04 | 专用侧栏、打印服装、多人争用。 |
 
@@ -209,6 +211,6 @@ $test = @{
 | 优先级 | 下一条记录 |
 |---|---|
 | P0 | MAP-01，148 周期档的常规运行短测已记录，可推进交互和视区测试。同机帧间歇与两档的 10 分钟压力分别保留。 |
-| P0 | MAP-02、MAP-03，复现现有暂停入房成功，补分段时延、长范围切镜头与两个独立视区。 |
+| P0 | MAP-02、MAP-03 已跑首次入房、重连和暂停独立视区。后续合跑连续换位、运行中快速切视区和 MAP-04 压力。 |
 | P1 | FAC-01、FAC-02、FAC-03。先验 148 周期档可用的冷藏箱和原版交互，缺失的医疗床、洗手设施与配给类型按建筑清点结果在独立工位补齐。用原版操作、运行阶段和重连证据验收。 |
 | P1 | BUILD-01、BUILD-02、DUPE-02、MGR-04。复查图标偏移、蓝图遗留、掉落、研究进度闪烁和运行动画这些已反馈的场景。 |

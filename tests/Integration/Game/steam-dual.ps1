@@ -18,6 +18,7 @@ param(
     [switch]$PrepareFacilityRange,
     [switch]$SurveyColony,
     [switch]$CheckColonyJoin,
+    [switch]$CheckColonyBatch,
     [switch]$CheckColonyRun,
     [switch]$Map01VSyncOff,
     [switch]$Map01Video,
@@ -76,6 +77,9 @@ $hostOnly=$PrepareFacilityRange -or $SurveyColony
 if ($PrepareFacilityRange -and $SurveyColony) { throw 'Run preparation and colony survey separately.' }
 if ($CheckColonyJoin -and ($hostOnly -or $FacilityRangeManifest)) { throw 'A colony join check uses two players and a colony save.' }
 if ($CheckColonyRun -and !$CheckColonyJoin) { throw 'Run CheckColonyRun with CheckColonyJoin.' }
+if ($CheckColonyBatch -and (!$CheckColonyJoin -or $CheckColonyRun -or $InviteWaitSeconds -ne 0)) {
+    throw 'Run CheckColonyBatch with CheckColonyJoin and InviteWaitSeconds 0 on the 148-cycle fixture.'
+}
 if ($CheckCritterHealth -and (!$CheckColonyJoin -or $CheckColonyRun -or $CheckHealth)) {
     throw 'Run CheckCritterHealth with only the paused colony join check.'
 }
@@ -215,6 +219,7 @@ foreach ($role in $roles) {
     $values.QY_PREPARE_FACILITY_RANGE=([int]$PrepareFacilityRange.IsPresent).ToString()
     $values.QY_SURVEY_COLONY=([int]$SurveyColony.IsPresent).ToString()
     $values.QY_CHECK_COLONY_JOIN=([int]$CheckColonyJoin.IsPresent).ToString()
+    $values.QY_COLONY_BATCH=([int]$CheckColonyBatch.IsPresent).ToString()
     $values.QY_CHECK_COLONY_RUN=([int]$CheckColonyRun.IsPresent).ToString()
     $values.QY_MAP01_VSYNC_OFF=([int]$Map01VSyncOff.IsPresent).ToString()
     $values.QY_MAP01_PUMP_CONTROL=([int]$Map01PumpControl.IsPresent).ToString()
@@ -427,7 +432,39 @@ try {
                 $line.Matches[0].Groups[1].Value
             }
         })
-        if (@($signatures | Select-Object -Unique).Count -ne 1) { throw 'Colony signatures differ after Steam join.' }
+        for ($i=0; $i -lt $signatures.Count; $i+=2) {
+            if ($signatures[$i] -cne $signatures[$i+1]) { throw 'Colony signatures differ between host and guest.' }
+        }
+        if (!$CheckColonyBatch -and @($signatures | Select-Object -Unique).Count -ne 1) { throw 'Colony signature changed between joins.' }
+        if ($CheckColonyBatch) {
+            foreach ($endpoint in $roles) {
+                $d=$drivers[$endpoint]
+                $report=Get-Physical $d $d.env.QY_SMOKE_REPORT
+                $required=if ($endpoint -eq 'host') { 'invite','hello','snapshot_begin','snapshot_end' } else {
+                    'join','welcome','transfer_begin','transfer_end','verified','native_ready','view_applied','tool_ready'
+                }
+                foreach ($round in 1,2) {
+                    foreach ($mark in $required) {
+                        if (!(Select-String -LiteralPath $report -Pattern "^MAP02_MARK role=$endpoint round=$round stage=$mark " -Quiet)) {
+                            throw "Missing $endpoint join round $round trace $mark."
+                        }
+                    }
+                    if ($endpoint -eq 'host') {
+                        $expected=if ($round -eq 1) { 'paused=True speed=[123]' } else { 'paused=False speed=1' }
+                        if (!(Select-String -LiteralPath $report -Pattern "^MAP02_MARK role=host round=$round stage=snapshot_begin .* $expected$" -Quiet)) {
+                            throw "Host did not capture in the expected speed state for round $round."
+                        }
+                    }
+                }
+                foreach ($step in 0..2) {
+                    $dest=Join-Path $d.base "map03-$endpoint-$step.png"
+                    $photo=Get-Physical $d $dest
+                    if (!(Select-String -LiteralPath $report -Pattern "^MAP03_VIEW role=$endpoint step=$step " -Quiet) -or
+                        !(Test-Path -LiteralPath $photo) -or (Get-Item -LiteralPath $photo).Length -lt 45) { throw "Missing $endpoint view evidence for step $step." }
+                    if ($photo -ne $dest) { Copy-Item -LiteralPath $photo -Destination $dest }
+                }
+            }
+        }
         if ($CheckColonyRun) {
             foreach ($endpoint in $roles) {
                 $d=$drivers[$endpoint]
@@ -460,7 +497,7 @@ try {
             }
         }
         if (($before -join '/') -ne (@(Get-InputHashes) -join '/')) { throw 'A protected input changed during the colony join check.' }
-        [ordered]@{packageSha256=$before[0];saveSha256=$before[1];joins=$colonyRounds.Count;runtimeSamplesCaptured=$CheckColonyRun.IsPresent;critterHealthChecked=$CheckCritterHealth.IsPresent;buildings=$signatures[0];protectedInputsUnchanged=$true} |
+        [ordered]@{packageSha256=$before[0];saveSha256=$before[1];joins=$colonyRounds.Count;runtimeSamplesCaptured=$CheckColonyRun.IsPresent;colonyBatchChecked=$CheckColonyBatch.IsPresent;critterHealthChecked=$CheckCritterHealth.IsPresent;buildings=$signatures[0];protectedInputsUnchanged=$true} |
             ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'colony-join-result.json') -Encoding UTF8
         Write-Output "PASS both Steam game clients loaded the same mature colony; evidence in $run"
         return

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -49,6 +50,9 @@ namespace Queyang.Integration
             if(bay<0)
             {
                 var origin=Grid.CellToXY(Grid.PosToCell(Components.LiveMinionIdentities.Items.First(d=>d!=null && ClusterUtil.GetMyWorldId(d)==world.id)));
+                var occupiedPorts=new HashSet<int>(global::Game.Instance.logicCircuitManager.GetVisElements().Select(port=>port.GetLogicUICell()));
+                var portOffsets=(def.LogicInputPorts?.Select(port=>port.cellOffset)??Enumerable.Empty<CellOffset>())
+                    .Concat(def.LogicOutputPorts?.Select(port=>port.cellOffset)??Enumerable.Empty<CellOffset>()).ToArray();
                 int best=int.MaxValue;
                 var lo=world.WorldOffset;var hi=world.WorldOffset+world.WorldSize;
                 // Keep every modified cell, including the two floor cells, within this world.
@@ -57,6 +61,8 @@ namespace Queyang.Integration
                     {
                         int dist=Math.Abs(origin.x-x)+Math.Abs(origin.y-y);
                         if(dist<6 || dist>37)continue;
+                        int anchor=Grid.XYToCell(x,y);
+                        if(portOffsets.Any(offset=>occupiedPorts.Contains(Grid.OffsetCell(anchor,offset)))) continue;
                         int edits=0;bool free=true;
                         for(int dy=-1;dy<def.HeightInCells && free;dy++)for(int dx=0;dx<def.WidthInCells;dx++)
                         {
@@ -70,7 +76,7 @@ namespace Queyang.Integration
                         }
                         int score=edits*20+dist;
                         if(!free || score>=best)continue;
-                        best=score;bay=Grid.XYToCell(x,y);
+                        best=score;bay=anchor;
                     }
                 if(bay<0)throw new InvalidDataException("No empty bounded reservoir test bay");
                 var corner=Grid.CellToXY(bay);
@@ -96,9 +102,21 @@ namespace Queyang.Integration
             }
             if(restorePause && !SpeedControlScreen.Instance.IsPaused)SpeedControlScreen.Instance.Pause(false);
             if(!HostWorld.VacantFootprint(def,bay,Orientation.Neutral,world))throw new InvalidDataException("Reservoir test bay occupied");
-            if(!def.IsValidPlaceLocation(def.BuildingPreview,bay,Orientation.Neutral,false,out string reason) ||
-                !def.IsValidBuildLocation(def.BuildingPreview,bay,Orientation.Neutral,false,out reason))
-                throw new InvalidDataException("Native reservoir placement rejected the prepared bay "+bay+": "+reason);
+            var preview=def.BuildingPreview;
+            var oldPreviewPosition=preview.transform.position;
+            try
+            {
+                // Vanilla evaluates automation visualizers at the preview transform.
+                preview.transform.position=Grid.CellToPosCBC(bay,Grid.SceneLayer.Building);
+                if(!def.IsValidPlaceLocation(preview,bay,Orientation.Neutral,false,out string reason) ||
+                    !def.IsValidBuildLocation(preview,bay,Orientation.Neutral,false,out reason))
+                    throw new InvalidDataException("Native reservoir placement rejected the prepared bay "+bay+": "+reason);
+            }
+            finally
+            {
+                preview.transform.position=oldPreviewPosition;
+                preview.GetComponent<LogicPorts>()?.HackRefreshVisualizers();
+            }
             var materials=def.MaterialCategory.Select(kind=>MaterialSelector.GetValidMaterials(kind,true).First()).ToArray();
             building=def.Build(bay,Orientation.Neutral,null,materials,295f,false,-1f);
             if(building==null)throw new InvalidDataException("Native reservoir failed to spawn in its valid test bay");

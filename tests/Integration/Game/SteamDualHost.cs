@@ -42,6 +42,7 @@ namespace Queyang.Integration
         readonly SteamDualOwnership ownership=new SteamDualOwnership();
         readonly bool colonyJoin=Environment.GetEnvironmentVariable("QY_CHECK_COLONY_JOIN")=="1";
         readonly SteamMapBaseline mapBaseline=new SteamMapBaseline();
+        readonly SteamColonyBatch colonyBatch=new SteamColonyBatch();
         int arrivalRound;
         int colonyVerifiedRound;
         readonly Action<string> log;
@@ -112,7 +113,8 @@ namespace Queyang.Integration
         {
             if (colonyJoin)
             {
-                if (!SteamMapBaseline.Enabled || !SpeedControlScreen.Instance.IsPaused) SpeedControlScreen.Instance.Pause(false);
+                if ((!SteamMapBaseline.Enabled && !SteamColonyBatch.Enabled) || !SpeedControlScreen.Instance.IsPaused)
+                    SpeedControlScreen.Instance.Pause(false);
                 return true;
             }
             if(Time.realtimeSinceStartup<nextCandidate) return false;
@@ -138,7 +140,8 @@ namespace Queyang.Integration
                     if(!lobby.IsLobby() || HasGuest() || SteamMatchmaking.GetLobbyMemberLimit(lobby)!=4 ||
                         SteamMatchmaking.GetLobbyData(lobby,"queyang_coop")!="1")
                         throw new InvalidOperationException("Initial Steam lobby metadata does not match a private test session");
-                    if (!SteamMapBaseline.Enabled || !SpeedControlScreen.Instance.IsPaused) SpeedControlScreen.Instance.Pause(false);
+                    if ((!SteamMapBaseline.Enabled && !SteamColonyBatch.Enabled) || !SpeedControlScreen.Instance.IsPaused)
+                        SpeedControlScreen.Instance.Pause(false);
                     if (colonyJoin)
                     {
                         SetData("qy_colony_buildings", ColonyRangeSurvey.BuildingSignature());
@@ -166,6 +169,7 @@ namespace Queyang.Integration
                         SteamFriends.RequestFriendRichPresence(friend);
                     }
                     if(!joined && SteamFriends.GetFriendRichPresence(friend,"qy_dual_ready")!=RoundText()) return false;
+                    colonyBatch.Begin(true,round,log,signature=>SetData("qy_colony_buildings",signature));
                     if(SteamFriends.GetFriendRelationship(friend)!=EFriendRelationship.k_EFriendRelationshipFriend ||
                         !SteamMatchmaking.InviteUserToLobby(lobby,friend))
                         throw new InvalidOperationException("Steam rejected the targeted invitation");
@@ -184,11 +188,13 @@ namespace Queyang.Integration
                         if (SteamMatchmaking.GetLobbyMemberData(lobby,friend,"qy_colony_verified")!=RoundText()) return false;
                         if (colonyVerifiedRound != round)
                         {
-                            log("COLONY_JOIN role=host round="+round+" buildings="+ColonyRangeSurvey.BuildingSignature());
+                            log("COLONY_JOIN role=host round="+round+" buildings="+(colonyBatch.BuildingSignature??ColonyRangeSurvey.BuildingSignature()));
                             colonyVerifiedRound = round;
                         }
                         if (!health.Check(lobby,friend,true,round,log)) return false;
+                        if (!colonyBatch.CameraSweep(lobby,friend)) return false;
                         if (!mapBaseline.Check(lobby,friend,true,log)) return false;
+                        colonyBatch.CaptureSummary();
                         SetData("qy_colony_ack", RoundText());
                         phase=Phase.Leave;
                         break;
@@ -332,7 +338,12 @@ namespace Queyang.Integration
                     {
                         round=2;
                         SteamDupePoseChecks.StartHost();
-                        SpeedControlScreen.Instance.Pause(false);
+                        if (SteamColonyBatch.Enabled)
+                        {
+                            SpeedControlScreen.Instance.SetSpeed(0);
+                            if (SpeedControlScreen.Instance.IsPaused) SpeedControlScreen.Instance.Unpause(false);
+                        }
+                        else SpeedControlScreen.Instance.Pause(false);
                         phase=Phase.Invite;
                     }
                     else
