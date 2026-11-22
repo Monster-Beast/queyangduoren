@@ -9,12 +9,12 @@ param(
     [string]$BoxRoot,
     [string]$SandboxStart="$env:ProgramFiles/Sandboxie-Plus/Start.exe",
     [string]$FixtureDriverPath,
-    [ValidatePattern('^[0-9a-f]{32}$')][string]$PrivateAssetRun,
     [Alias('MotionBaselineOnly')][switch]$SkipManagement,
     [switch]$SkipPerson,
     [switch]$SkipWork,
     [switch]$CheckBuildings,
     [switch]$CheckFallingOre,
+    [switch]$CheckCritters,
     [switch]$AcceptDeliveredInvite,
     [ValidateRange(0,600)][int]$InviteWaitSeconds=105,
     [ValidateRange(120,3600)][int]$TimeoutSeconds=900
@@ -64,21 +64,7 @@ if (!$FixtureDriverPath) {
 }
 $cecil=Get-ChildItem "$env:USERPROFILE/.nuget/packages/microsoft.codecoverage" -Filter Mono.Cecil.dll -Recurse | Select-Object -First 1
 [void][Reflection.Assembly]::LoadFrom($cecil.FullName)
-function Copy-PrivateGame([string]$from,[string]$to,[string]$privateAssets) {
-    if ($privateAssets) {
-        # Link only immutable Unity and FMOD data between our isolated copies.
-        # Never point a link at files in the user's Steam installation.
-        $seed=Get-CheckedPath $qaRoot (Resolve-Path -LiteralPath $privateAssets).Path
-        foreach ($asset in Get-ChildItem -LiteralPath $seed -Recurse -File | Where-Object { $_.Extension -in '.resS','.bank','.assets','.resource' }) {
-            $relative=$asset.FullName.Substring($seed.Length+1)
-            $original=Get-Item -LiteralPath (Join-Path $from $relative) -ErrorAction SilentlyContinue
-            if (!$original -or $original.Length -ne $asset.Length -or $original.LastWriteTimeUtc -ne $asset.LastWriteTimeUtc) { continue }
-            if ((Get-FileHash -LiteralPath $original.FullName).Hash -ne (Get-FileHash -LiteralPath $asset.FullName).Hash) { continue }
-            $dest=Join-Path $to $relative
-            [IO.Directory]::CreateDirectory((Split-Path $dest)) | Out-Null
-            New-Item -ItemType HardLink -Path $dest -Target $asset.FullName -ErrorAction Stop | Out-Null
-        }
-    }
+function Copy-PrivateGame([string]$from,[string]$to) {
     # Share private read-only copies of large art/audio assets between fixture runs.
     # All binaries, configuration and writable files still get independent copies.
     $patterns=@('*.resS','*.assets','*.resource','*.bank')
@@ -102,8 +88,7 @@ function Copy-PrivateGame([string]$from,[string]$to,[string]$privateAssets) {
     }
 }
 $copy=Join-Path $run 'host-game'
-$seed=if ($PrivateAssetRun) { Join-Path $qaRoot "steam-dual-$PrivateAssetRun/host-game" }
-Copy-PrivateGame $GameDir $copy $seed
+Copy-PrivateGame $GameDir $copy
 $managed=Get-CheckedPath $copy (Join-Path $copy 'OxygenNotIncluded_Data/Managed')
 $firstpass=Get-CheckedPath $managed (Join-Path $managed 'Assembly-CSharp-firstpass.dll')
 $resolver=New-Object Mono.Cecil.DefaultAssemblyResolver
@@ -127,7 +112,7 @@ try {
 } finally { $module.Dispose(); $resolver.Dispose() }
 [IO.File]::Replace("$firstpass.isolated",$firstpass,[System.Management.Automation.Language.NullString]::Value)
 
-Copy-PrivateGame $copy (Join-Path $run 'guest-game') $(if ($PrivateAssetRun) { $copy })
+Copy-PrivateGame $copy (Join-Path $run 'guest-game')
 $roles=@('host','guest')
 $drivers=@{}
 foreach ($role in $roles) {
@@ -159,6 +144,7 @@ foreach ($role in $roles) {
     }
     $values.QY_CHECK_BUILDINGS=([int]$CheckBuildings.IsPresent).ToString()
     $values.QY_CHECK_FALLING_ORE=([int]$CheckFallingOre.IsPresent).ToString()
+    $values.QY_CHECK_CRITTERS=([int]$CheckCritters.IsPresent).ToString()
     $drivers[$role]=[pscustomobject]@{role=$role;exe=$exe;env=$values;mods=$mods;base=$base;restarts=0;started=$false;done=$false;wrapper=$null}
     [ordered]@{ role=$role;package=$before[0];sourceSave=$before[1];fixture=(Get-FileHash $fixture).Hash
         game=(Get-FileHash (Join-Path $mod 'QueyangCoop.dll')).Hash;core=(Get-FileHash (Join-Path $mod 'Queyang.Core.dll')).Hash
@@ -314,6 +300,15 @@ try {
             }
         }
     }
+    if ($CheckCritters) {
+        foreach ($role in $roles) {
+            $d=$drivers[$role]
+            foreach ($leaf in 'critter-motion.csv',"critter-$role.png") {
+                $file=Get-Physical $d (Join-Path $d.base $leaf)
+                if (!(Test-Path $file) -or (Get-Item $file).Length -lt 45) { throw "Missing $role critter evidence $leaf." }
+            }
+        }
+    }
     if ($CheckBuildings) {
         foreach ($role in $roles) {
             $d=$drivers[$role]
@@ -353,7 +348,7 @@ try {
         $p=Get-Player $d
         if ($p -and !$p.HasExited) { $p.Kill(); [void]$p.WaitForExit(10000) }
         if ($role -eq 'guest') {
-            foreach ($leaf in @('drill.csv','dual-guest-drill.png')+@(0..7 | ForEach-Object { "hat-guest-$_.png" })) {
+            foreach ($leaf in @('drill.csv','dual-guest-drill.png','critter-motion.csv','critter-guest.png')+@(0..7 | ForEach-Object { "hat-guest-$_.png" })) {
                 $dest=Join-Path $d.base $leaf
                 $src=Get-Physical $d $dest
                 if ($src -ne $dest -and (Test-Path $src)) { Copy-Item -LiteralPath $src -Destination $dest }
@@ -397,7 +392,7 @@ $joins=@(foreach ($line in $guestReport) {
 })
 if ($joins.Count -ne 2 -or $joins[0].round -ne 1 -or $joins[1].round -ne 2) { throw 'Missing exact join methods for both rounds.' }
 [ordered]@{packageSha256=$before[0];saveSha256=$before[1];protectedInputsUnchanged=$true;joins=$joins
-    checks=[ordered]@{buildings=$CheckBuildings.IsPresent;fallingOre=$CheckFallingOre.IsPresent;skills=!$SkipManagement;person=!$SkipManagement -and !$SkipPerson;work=!$SkipManagement -and !$SkipWork}} |
+    checks=[ordered]@{buildings=$CheckBuildings.IsPresent;fallingOre=$CheckFallingOre.IsPresent;critters=$CheckCritters.IsPresent;skills=!$SkipManagement;person=!$SkipManagement -and !$SkipPerson;work=!$SkipManagement -and !$SkipWork}} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $run 'result.json') -Encoding UTF8
 Write-Output "PASS both Steam game clients; evidence in $run"
 } finally {

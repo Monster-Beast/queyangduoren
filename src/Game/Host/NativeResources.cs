@@ -100,6 +100,7 @@ namespace Queyang.Game
 
         static void AddPile(ColonyView view,Pickupable ore,HashSet<int> ids,List<ColonyPile> piles)
         {
+            if(ore.IsEntombed) return;
             var pos=ore.transform.position;
             int cell=Grid.PosToCell(pos);
             if (!Grid.IsValidCell(cell)) return;
@@ -163,7 +164,7 @@ namespace Queyang.Game
         {
             var original = KPrefabIDTracker.Get().GetInstance(p.SaveId);
             var pickup = original == null ? null : original.GetComponent<Pickupable>();
-            if (IsOre(pickup) && pickup.PrimaryElement.ElementID == element.id)
+            if (IsOre(pickup) && !pickup.IsEntombed && pickup.PrimaryElement.ElementID == element.id)
             {
                 if (Vector2.Distance(pickup.transform.position,position)<=.006f)
                 {
@@ -245,7 +246,7 @@ namespace Queyang.Game
             if (proxies.TryGetValue(hostSaveId, out var p)) return p.Primary.GetComponent<KSelectable>();
             var original = KPrefabIDTracker.Get().GetInstance(hostSaveId);
             var pickup = original == null ? null : original.GetComponent<Pickupable>();
-            return IsOre(pickup) && !hidden.Contains(pickup) ? pickup.GetComponent<KSelectable>() : null;
+            return IsOre(pickup) && !pickup.IsEntombed && !hidden.Contains(pickup) ? pickup.GetComponent<KSelectable>() : null;
         }
 
         static void ApplyStocks(ColonyView view, WorldInventory inventory)

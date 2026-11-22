@@ -21,6 +21,8 @@ namespace Queyang.Game
             internal Guid Status;
             internal bool Proxy;
             internal int Cell;
+            internal int ViewTick;
+            internal float LastCritterMotion=float.NegativeInfinity;
         }
 
         static readonly Dictionary<int, NativeEntitySampler.Candidate> locals = new Dictionary<int, NativeEntitySampler.Candidate>();
@@ -87,15 +89,23 @@ namespace Queyang.Game
                     item.Status = target.AddStatusItem(status, item);
                     active[e.Id] = item;
                 }
-                item.State = e; item.Cell = cell;
+                item.State = e;
+                bool tracked=e.Kind==ColonyEntityKind.Critter && NativeDupePose.Knows(e.Id);
+                if(!tracked || NativeDupePose.Current(e.Id,view.DupePoseTick)) item.Cell = cell;
+                item.ViewTick=Math.Max(item.ViewTick,view.DupePoseTick);
                 if (building) { NativeFacilityStorage.ApplyMeter(target,e); continue; }
                 SetVisible(target, true);
+                NativeWorldMirror.ApplyPrimary(target.GetComponent<PrimaryElement>(),
+                    new MaterialSample { Element = e.Element, Mass = e.Mass, Temperature = e.Temperature });
+                if(tracked)
+                {
+                    if(Time.unscaledTime-item.LastCritterMotion<.55f || !NativeDupePose.Current(e.Id,view.DupePoseTick)) continue;
+                    NativeDupePose.Forget(e.Id,view.DupePoseTick);
+                }
                 float px = x + e.SubX / 255f, py = y + e.SubY / 255f;
                 var t = target.transform;
                 var pos = t.position;
                 if (pos.x != px || pos.y != py) t.position = new Vector3(px, py, pos.z);
-                NativeWorldMirror.ApplyPrimary(target.GetComponent<PrimaryElement>(),
-                    new MaterialSample { Element = e.Element, Mass = e.Mass, Temperature = e.Temperature });
                 var anim = target.GetComponent<KBatchedAnimController>();
                 var name = new HashedString(e.Animation);
                 if (anim != null)
@@ -111,7 +121,8 @@ namespace Queyang.Game
             }
             foreach (var pair in locals)
                 if (pair.Key >= page.From && pair.Key <= page.Through && !present.Contains(pair.Key) &&
-                    pair.Value.Kind != ColonyEntityKind.Storage && pair.Value.Kind != ColonyEntityKind.Construction)
+                    pair.Value.Kind != ColonyEntityKind.Storage && pair.Value.Kind != ColonyEntityKind.Construction &&
+                    (pair.Value.Kind!=ColonyEntityKind.Critter || NativeDupePose.Current(pair.Key,view.DupePoseTick)))
                 {
                     if (pair.Value.Place==ColonyItemPlace.Carried && pair.Value.Kind==ColonyEntityKind.Item)
                         NativeWearDisplay.HideBaseline(pair.Key);
@@ -121,6 +132,7 @@ namespace Queyang.Game
             foreach (var pair in active)
             {
                 if (present.Contains(pair.Key) || pair.Key < page.From || pair.Key > page.Through) continue;
+                if(pair.Value.State.Kind==ColonyEntityKind.Critter && !NativeDupePose.Current(pair.Key,view.DupePoseTick)) continue;
                 var xy = Grid.CellToXY(pair.Value.Cell);
                 int x = xy.x - view.X, y = xy.y - view.Y;
                 if (x >= 0 && x < ColonyView.Width && y >= 0 && y < ColonyView.Height &&
@@ -141,7 +153,7 @@ namespace Queyang.Game
             var original = KPrefabIDTracker.Get().GetInstance(e.Id);
             if (original == null || original.PrefabTag.GetHash() != e.Prefab) return null;
             var pickup = original.GetComponent<Pickupable>();
-            if (pickup != null && pickup.storage != null) return null;
+            if (pickup != null && (pickup.storage != null || pickup.IsEntombed)) return null;
             if (e.Kind==ColonyEntityKind.Item && original.GetComponent<Equippable>()?.isEquipped==true) return null;
             return original.GetComponent<KSelectable>();
         }
@@ -164,6 +176,7 @@ namespace Queyang.Game
             anim.initialAnim = source.initialAnim; anim.defaultAnim = source.defaultAnim;
             anim.animScale = source.animScale; anim.materialType = source.materialType; anim.Offset = source.Offset;
             anim.isMovable = e.Kind != ColonyEntityKind.Plant;
+            if(e.Kind==ColonyEntityKind.Critter) SymbolOverrideControllerUtil.AddToPrefab(obj);
             var shape = obj.AddComponent<KBoxCollider2D>();
             var baseShape = prefab.GetComponent<KBoxCollider2D>();
             shape.size = baseShape == null ? Vector2.one : baseShape.size;
@@ -296,12 +309,21 @@ namespace Queyang.Game
         {
             if (!active.TryGetValue(id, out var old)) return;
             active.Remove(id);
+            if(old.State.Kind==ColonyEntityKind.Critter) NativeDupePose.Forget(id,0);
             if (old.Target == null) return;
             old.Target.RemoveStatusItem(old.Status);
             if (old.Proxy) NativeWorldMirror.DestroySelectableProxy(old.Target.gameObject);
         }
 
         internal static KSelectable GetSelectable(int hostId) => active.TryGetValue(hostId, out var s) ? s.Target : null;
+        internal static KBatchedAnimController MovingCritter(int id,int tick,int cell)
+        {
+            if(!active.TryGetValue(id,out var s) || s.State.Kind!=ColonyEntityKind.Critter ||
+                !NativeDupePose.Current(id,tick) || tick<s.ViewTick || s.Target==null || !s.Target.IsSelectable) return null;
+            s.Cell=cell;
+            s.LastCritterMotion=Time.unscaledTime;
+            return s.Target.GetComponent<KBatchedAnimController>();
+        }
         internal static ColonyEntity GetObservedState(int hostId) => active.TryGetValue(hostId, out var s) ? s.State : null;
         internal static void Reset()
         {

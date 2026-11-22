@@ -8,6 +8,7 @@ namespace Queyang.Integration
     {
         readonly string path;
         float deadline;
+        bool complete;
         internal bool Requested { get; private set; }
         internal FixtureFrame(string path) { this.path = path; }
 
@@ -25,20 +26,24 @@ namespace Queyang.Integration
             get
             {
                 if (!Requested) return false;
-                if (Time.realtimeSinceStartup > deadline) throw new TimeoutException("Incomplete gameplay screenshot: " + path);
+                if (complete) return true;
                 try
                 {
                     using (var file = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read))
                     using (var reader = new BinaryReader(file))
                     {
-                        if (file.Length < 45) return false;
-                        // Check the PNG signature and the complete final IEND chunk (including its CRC).
-                        if (reader.ReadUInt64() != 0x0A1A0A0D474E5089UL) throw new InvalidDataException("Invalid gameplay screenshot: " + path);
-                        file.Seek(-12, SeekOrigin.End);
-                        return reader.ReadUInt32() == 0 && reader.ReadUInt64() == 0x826042AE444E4549UL;
+                        if (file.Length >= 45)
+                        {
+                            // Check the PNG signature and complete final IEND chunk (including its CRC).
+                            if (reader.ReadUInt64() != 0x0A1A0A0D474E5089UL) throw new InvalidDataException("Invalid gameplay screenshot: " + path);
+                            file.Seek(-12, SeekOrigin.End);
+                            complete = reader.ReadUInt32() == 0 && reader.ReadUInt64() == 0x826042AE444E4549UL;
+                        }
                     }
                 }
-                catch (IOException) { return false; } // Unity may still own the file or not have opened it.
+                catch (IOException) { } // Unity may still own the file or not have opened it.
+                if (!complete && Time.realtimeSinceStartup > deadline) throw new TimeoutException("Incomplete gameplay screenshot: " + path);
+                return complete;
             }
         }
     }

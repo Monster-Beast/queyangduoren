@@ -7,8 +7,8 @@ using UnityEngine;
 
 namespace Queyang.Game
 {
-    // The worker's own animation contains its tool grip. The aimed beam is a
-    // child tracker, and the contact splash is a distinct native effect object.
+    // The attached tool is a body symbol. Its aimed beam and work target effect
+    // are separate renderers and can start or stop independently.
     internal static class NativeDigVisuals
     {
         sealed class Source
@@ -22,6 +22,7 @@ namespace Queyang.Game
             internal KBatchedAnimController Contact, Beam;
             internal int Cell=-1;
             internal float Last, OriginalDamage, LastDamage;
+            internal bool Digging;
         }
         // This follows the actual native worker lifetime, including work begun
         // before a room is created. Old saves cannot alias a new worker with the same ID.
@@ -36,12 +37,12 @@ namespace Queyang.Game
         {
             static void Postfix(MultitoolController.Instance __instance)
             {
-                if(NativeGuestScene.Active || !(__instance.workable is Diggable dig) || dig.worker==null || Hit(__instance)==null) return;
-                var w=dig.worker;
+                if(NativeGuestScene.Active || __instance.workable?.worker==null) return;
+                var w=__instance.workable.worker;
                 var owner=w.GetComponent<KBatchedAnimController>();
                 if(owner==null) return;
                 sources.Remove(owner);
-                sources.Add(owner,new Source { Work=__instance,Contact=Hit(__instance).GetComponent<KBatchedAnimController>(),
+                sources.Add(owner,new Source { Work=__instance,Contact=Hit(__instance)?.GetComponent<KBatchedAnimController>(),
                     Children=w.GetComponentsInChildren<KBatchedAnimTracker>(true) });
             }
         }
@@ -71,14 +72,16 @@ namespace Queyang.Game
             a.IsVisible() && a.GetCurrentAnim()!=null && a.GetBatchInstanceData()!=null;
         internal static void Write(BinaryWriter w,KBatchedAnimController owner)
         {
-            if(!sources.TryGetValue(owner,out var source) || !Visible(source.Contact))
+            if(!sources.TryGetValue(owner,out var source) || source.Work.workable==null)
             { w.Write((byte)0); return; }
             var beam=FindBeam(source.Children);
+            bool contact=Visible(source.Contact);
             int cell=Grid.PosToCell(source.Work.workable);
-            if(!Grid.IsValidCell(cell)) { w.Write((byte)0); return; }
-            w.Write((byte)(beam==null?1:3)); w.Write(cell);
-            w.Write(Grid.Damage[cell]);
-            WriteEffect(w,source.Contact);
+            if(!Grid.IsValidCell(cell) || (!contact && beam==null)) { w.Write((byte)0); return; }
+            bool digging=source.Work.workable is Diggable;
+            w.Write((byte)((contact?1:0)|(beam==null?0:2)|(digging?0:4))); w.Write(cell);
+            w.Write(digging ? Grid.Damage[cell] : 0f);
+            if(contact) WriteEffect(w,source.Contact);
             if(beam!=null) WriteEffect(w,beam);
         }
         static void WriteEffect(BinaryWriter w,KBatchedAnimController a)
@@ -93,7 +96,7 @@ namespace Queyang.Game
         internal static void Read(BinaryReader r,int id,KBatchedAnimController owner)
         {
             byte mask=r.ReadByte();
-            if(mask!=0 && mask!=1 && mask!=3) throw new InvalidDataException("Bad digging visual flags");
+            if(mask==4 || mask>7) throw new InvalidDataException("Bad work visual flags");
             if(mask==0) { if(owner!=null) Clear(id); return; }
             int cell=r.ReadInt32(); float damage=r.ReadSingle();
             if(!Grid.IsValidCell(cell) || !(damage>=0 && damage<=1)) throw new InvalidDataException("Bad digging target");
@@ -102,17 +105,18 @@ namespace Queyang.Game
             if(owner!=null)
             {
                 visuals[id]=v; v.Last=Time.unscaledTime;
-                if(v.Cell!=cell)
+                bool digging=(mask&4)==0;
+                if(v.Cell!=cell || v.Digging!=digging)
                 {
                     RestoreDamage(v);
-                    v.Cell=cell; v.OriginalDamage=Grid.Damage[cell];
+                    v.Cell=cell; v.Digging=digging; v.OriginalDamage=Grid.Damage[cell];
                 }
-                v.LastDamage=damage;
-                SetDamage(cell,damage);
+                if(digging) {v.LastDamage=damage; SetDamage(cell,damage);}
                 owner.GetComponent<AnimEventHandler>()?.UpdateWorkTarget(Grid.CellToPosCCC(cell,Grid.SceneLayer.FXFront));
             }
-            ApplyEffect(r,owner,ref v.Contact);
-            if(mask==3) ApplyEffect(r,owner,ref v.Beam);
+            if((mask&1)!=0) ApplyEffect(r,owner,ref v.Contact);
+            else if(owner!=null) Remove(ref v.Contact);
+            if((mask&2)!=0) ApplyEffect(r,owner,ref v.Beam);
             else if(owner!=null) Remove(ref v.Beam);
         }
         static void ApplyEffect(BinaryReader r,KBatchedAnimController owner,ref KBatchedAnimController a)
@@ -163,7 +167,7 @@ namespace Queyang.Game
         }
         static void RestoreDamage(Visual v)
         {
-            if(v.Cell>=0 && Grid.Damage!=null && v.Cell<Grid.Damage.Length && Grid.Damage[v.Cell]==v.LastDamage)
+            if(v.Digging && v.Cell>=0 && Grid.Damage!=null && v.Cell<Grid.Damage.Length && Grid.Damage[v.Cell]==v.LastDamage)
                 SetDamage(v.Cell,Grid.Solid[v.Cell]?v.OriginalDamage:0);
         }
         internal static void Expire(float now)

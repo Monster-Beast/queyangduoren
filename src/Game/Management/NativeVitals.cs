@@ -374,7 +374,18 @@ namespace Queyang.Game
             panel.SetTitle(STRINGS.UI.DETAILTABS.SIMPLEINFO.GROUPNAME_CONDITION);
             if (data == null) panel.SetLabel("CoopWaiting","正在读取房主生理状态…","");
             else foreach (var v in data.Values)
-                panel.SetLabel("CoopVital" + v.Key, amounts[v.Key].Name + ": " + v.Value.Formatted,"");
+            {
+                var a=amounts[v.Key];
+                string label=a.Name;
+                if (string.IsNullOrWhiteSpace(label) || label.StartsWith("MISSING.",StringComparison.OrdinalIgnoreCase))
+                {
+                    bool zh=(Localization.GetCurrentLanguageCode()??"").StartsWith("zh",StringComparison.OrdinalIgnoreCase);
+                    if (a==Db.Get().Amounts.ImmuneLevel) label=zh?"免疫水平":"Immunity";
+                    else if (a==Db.Get().Amounts.Toxicity) label=zh?"毒性":"Toxicity";
+                    else label=a.Id;
+                }
+                panel.SetLabel("CoopVital"+v.Key,label+": "+v.Value.Formatted,"");
+            }
             NativeManagement.DrawProfile(panel,target);
             panel.Commit();
         }

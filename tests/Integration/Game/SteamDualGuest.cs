@@ -271,7 +271,8 @@ namespace Queyang.Integration
                         if(!int.TryParse(SteamMatchmaking.GetLobbyData(lobby,"qy_motion_id"),out int id)) break;
                         if(motion==null)
                         {
-                            motion=SteamMotionTrace.Create(folder,id,false); motion.Begin();
+                            if (SteamCritterMotion.Enabled && !int.TryParse(SteamMatchmaking.GetLobbyData(lobby,"qy_critter_id"),out _)) break;
+                            motion=SteamMotionTrace.Create(folder,id,false,SteamCritterMotion.Enabled ? int.Parse(SteamMatchmaking.GetLobbyData(lobby,"qy_critter_id")) : 0); motion.Begin();
                             SteamMatchmaking.SetLobbyMemberData(lobby,"qy_motion_ready","1");
                         }
                         if(motion.Seconds<35) break;

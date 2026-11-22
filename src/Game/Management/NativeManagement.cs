@@ -56,7 +56,7 @@ namespace Queyang.Game
         static void Send(string route, int x = 0, int y = 0)
         {
             if (!NativeGuestScene.Ready || !CoopSession.IsNativeClient || CoopSession.NativeView == null) return;
-            if (route == "research" || route == "overview" || route.StartsWith("population/",StringComparison.Ordinal) || route.StartsWith("schedules/", StringComparison.Ordinal) || route.StartsWith("schedule/", StringComparison.Ordinal) ||
+            if (route == "research" || route == "overview" || route.StartsWith("workers/",StringComparison.Ordinal) || route.StartsWith("population/",StringComparison.Ordinal) || route.StartsWith("schedules/", StringComparison.Ordinal) || route.StartsWith("schedule/", StringComparison.Ordinal) ||
                 route.StartsWith("choices/", StringComparison.Ordinal) || route.StartsWith("diet/", StringComparison.Ordinal) ||
                 route.StartsWith("vitals/", StringComparison.Ordinal) || route.StartsWith("profile/", StringComparison.Ordinal) ||
                 route.StartsWith("proxy/", StringComparison.Ordinal) ||
@@ -87,6 +87,7 @@ namespace Queyang.Game
             bool priorities = menu?.jobsScreen != null && menu.jobsScreen.isActiveAndEnabled && menu.jobsScreen.gameObject.activeInHierarchy;
             bool foods = menu?.consumablesScreen != null && menu.consumablesScreen.isActiveAndEnabled && menu.consumablesScreen.gameObject.activeInHierarchy;
             if (schedules || priorities) Send("schedules/" + nextSchedulePage);
+            if (schedules || priorities) Send("workers/"+workerPage);
             if (OverviewOpen && PauseScreen.Instance != null && PauseScreen.Instance.IsActive()) Send("overview");
             if (schedules)
             {
@@ -117,6 +118,7 @@ namespace Queyang.Game
             observed.Clear(); pendingEdits.Clear(); lastResearch = null; nextPoll = nextEdit = 0; scheduleCursor = dupeCursor = 0;
             ResetBuilding();
             ResetColony();
+            ResetWorkers();
             populationWorld=-1;
             hasHud=false; hudInventory=null; sampledWorld=null;
             ResetVitals();
@@ -134,6 +136,9 @@ namespace Queyang.Game
             {
                 case "population":
                     if (p.Length==3) result=Population(Number(p[2]));
+                    break;
+                case "workers":
+                    if (p.Length==3) result=WorkerPage(Number(p[2]));
                     break;
                 case "overview":
                     if (p.Length == 2) result = ColonyOverview();
@@ -246,6 +251,7 @@ namespace Queyang.Game
             try
             {
                 if (p[1] == "pop" && p.Length==5) ApplyPopulation(Number(p[2]),Number(p[3]),Number(p[4]));
+                else if (p[1]=="workers" && p.Length==6) ApplyWorkerPage(p);
                 else if (p[1] == "diet") ApplyDietPage(p);
                 else if (p[1] == "permit") ApplyDiet(p);
                 else if (p[1] == "g") ReceiveReadings(p);
@@ -272,7 +278,13 @@ namespace Queyang.Game
                 {
                     var dupe = FindDupe(Number(p[2]));
                     var jobs = Jobs();
-                    if (dupe == null || jobs.Count != p[4].Length || p[4].Any(c => c < '0' || c > '5')) return;
+                    if (jobs.Count != p[4].Length || p[4].Any(c => c < '0' || c > '5')) return;
+                    if (dupe==null)
+                    {
+                        if (workerCards.TryGetValue(Number(p[2]),out var card) && card!=null)
+                            UpdateWorker(card,p[3],jobs,p[4]);
+                        return;
+                    }
                     var person = dupe.GetComponent<Schedulable>();
                     var s = FindSchedule(p[3]);
                     if (person != null && s != null && person.GetSchedule() != s)
@@ -309,7 +321,7 @@ namespace Queyang.Game
                 var current=__1==null ? null : LocalScheduleKey(__1.GetSchedule());
                 var next=LocalScheduleKey(__0);
                 if (current!=null && next!=null)
-                    Send("assign/" + Id(__1) + "/" + current + "/" + next);
+                    Send("assign/" + (__1.GetComponent<GuestWorkerCard>()?.HostId ?? Id(__1)) + "/" + current + "/" + next);
                 return false;
             }
         }

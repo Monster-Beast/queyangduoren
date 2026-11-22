@@ -16,7 +16,7 @@ namespace Queyang.Integration
         static SteamDualFallingOre awaitingDig;
         static bool inCallback;
         int source=-1, id, stage, moves, speed, measuredCell=-1;
-        float firstY, lastY, stillSince, started;
+        float firstY, lastY, stillSince, started, nextDiagnostic;
         bool paused, gravity, done;
         Pickupable hostOre;
 
@@ -36,7 +36,7 @@ namespace Queyang.Integration
                         int cx=x+sign*offset,cy=y+dy;
                         if(cx<2 || cx>=Grid.WidthInCells-2 || cy<Height+3 || cy>=Grid.HeightInCells-2) continue;
                         bool clear=true;
-                        for(int column=-1;column<=1 && clear;column++)
+                        for(int column=-2;column<=2 && clear;column++)
                             for(int row=-Height;row<=0;row++)
                             {
                                 int cell=Grid.XYToCell(cx+column,cy+row);
@@ -52,12 +52,13 @@ namespace Queyang.Integration
         void Seed()
         {
             Grid.CellToXY(source,out int x,out int y);
-            for(int dx=-1;dx<=1;dx++)
+            for(int dx=-2;dx<=2;dx++)
                 for(int dy=-Height;dy<=0;dy++)
                 {
                     int cell=Grid.XYToCell(x+dx,y+dy);
                     Grid.Reveal(cell,255,true);
-                    var element=dx!=0 || dy==-Height ? SimHashes.Granite : dy==0 ? SimHashes.Obsidian : SimHashes.Oxygen;
+                    var element=Math.Abs(dx)==2 || dy==-Height || dy==-1 ? SimHashes.Granite :
+                        dx==0 && dy==0 ? SimHashes.Obsidian : SimHashes.Oxygen;
                     SimMessages.ReplaceElement(cell,element,CellEventLogger.Instance.SandBoxTool,element==SimHashes.Oxygen?1:1600,295);
                 }
         }
@@ -78,7 +79,6 @@ namespace Queyang.Integration
                 if(!NativeResources.IsOre(ore) || ore.PrimaryElement.ElementID!=SimHashes.Obsidian) return;
                 awaitingDig.hostOre=ore;
                 ore.PrimaryElement.Mass=TestMass;
-                SpeedControlScreen.Instance.Pause(false);
             }
         }
 
@@ -120,7 +120,8 @@ namespace Queyang.Integration
             if(host && stage==0)
             {
                 if(Grid.Element[source].id!=SimHashes.Obsidian || !Grid.Solid[source-Height*Grid.WidthInCells]) return false;
-                for(int i=1;i<Height;i++) if(Grid.Solid[source-i*Grid.WidthInCells]) return false;
+                if(!Grid.Solid[source-Grid.WidthInCells]) return false;
+                for(int i=2;i<Height;i++) if(Grid.Solid[source-i*Grid.WidthInCells]) return false;
                 if(SteamMatchmaking.GetLobbyMemberData(lobby,guest,"qy_ore_armed")!="1") return false;
                 awaitingDig=this;SimMessages.Dig(source);stage=1;log("DUAL_ORE_DIG source="+source);return false;
             }
@@ -139,6 +140,11 @@ namespace Queyang.Integration
                 }
                 else if(!int.TryParse(Get(lobby,"id"),out id)) return false;
                 stage=2;
+            }
+            if(host && Time.unscaledTime>=nextDiagnostic)
+            {
+                nextDiagnostic=Time.unscaledTime+3;
+                log($"DUAL_ORE_NATIVE_STATE stage={stage} id={id} present={hostOre!=null} y={hostOre?.transform.position.y} paused={SpeedControlScreen.Instance.IsPaused} timeScale={Time.timeScale} sourceSolid={Grid.Solid[source]} supportSolid={Grid.Solid[source-Grid.WidthInCells]} faller={hostOre!=null && GameComps.Fallers.Has(hostOre.gameObject)} gravity={hostOre!=null && GameComps.Gravities.Has(hostOre.gameObject)}");
             }
             var selected=host ? hostOre?.GetComponent<KSelectable>() : NativeResources.GetSelectable(id);
             if(selected==null) return false;
@@ -160,7 +166,14 @@ namespace Queyang.Integration
                 firstY=lastY=pos.y;
                 if(!host) SteamMatchmaking.SetLobbyMemberData(lobby,"qy_ore_start","1");
                 if(host && SteamMatchmaking.GetLobbyMemberData(lobby,guest,"qy_ore_start")!="1") return false;
-                if(host) SpeedControlScreen.Instance.Unpause(false);
+                if(host)
+                {
+                    // Remove support only after BOTH renderers have seen the original ore.
+                    // ONI's solidChangedLayer then wakes the pickup's own FallerComponent.
+                    for(int dx=-1;dx<=1;dx++)
+                        SimMessages.ReplaceElement(source-Grid.WidthInCells+dx,SimHashes.Oxygen,CellEventLogger.Instance.SandBoxTool,1,295);
+                    SpeedControlScreen.Instance.Unpause(false);
+                }
                 stage=3;
             }
             if(pos.y<lastY-.015f) { moves++;stillSince=Time.unscaledTime; }

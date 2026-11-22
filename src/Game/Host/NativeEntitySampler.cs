@@ -47,7 +47,7 @@ namespace Queyang.Game
                 for (var entry = NativeResources.First(cell); entry != null; entry = entry.nextItem)
                 {
                     var pickup = entry.pickupable;
-                    if (pickup == null || pickup.storage != null || pickup.KPrefabID == null ||
+                    if (pickup == null || pickup.IsEntombed || pickup.storage != null || pickup.KPrefabID == null ||
                         pickup.KPrefabID.HasTag(GameTags.BaseMinion) || pickup.KPrefabID.HasTag(GameTags.Creature) ||
                         NativeResources.IsOre(pickup) || Grid.PosToCell(pickup) != cell) continue;
                     Add(found, pickup.gameObject, ItemKind(pickup), i);
@@ -70,7 +70,7 @@ namespace Queyang.Game
             // Several critters can occupy one cell and flying species do not need a floor.
             foreach (var brain in Components.Brains.Items)
             {
-                if (!(brain is CreatureBrain) || brain == null) continue;
+                if (!(brain is CreatureBrain) || brain == null || brain.GetComponent<Pickupable>()?.IsEntombed==true) continue;
                 int cell = Grid.PosToCell(brain);
                 if (!Grid.IsValidCell(cell) || Grid.WorldIdx[cell] != world.id) continue;
                 Grid.CellToXY(cell, out int x, out int y);

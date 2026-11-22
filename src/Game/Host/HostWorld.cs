@@ -70,13 +70,20 @@ namespace Queyang.Game
                 speed.GetSpeed() == 1 ? speed.fastSpeed : speed.ultraSpeed;
             view.Speed = (byte)Mathf.Clamp(Mathf.RoundToInt(selectedSpeed), 0, 10);
             var circuits = new Dictionary<ushort, ColonyCell>();
+            var buried=global::Game.Instance.GetComponent<EntombedItemVisualizer>();
+            view.HasEntombed=buried!=null;
             for (int dy = 0; dy < ColonyView.Height; dy++)
             {
                 for (int dx = 0; dx < ColonyView.Width; dx++)
                 {
                     int cell;
                     if (VisibleCell(world, view.X + dx, view.Y + dy, out cell))
-                        view.Cells[dy * ColonyView.Width + dx] = ReadCell(cell, circuits);
+                    {
+                        var sampleCell=ReadCell(cell,circuits);
+                        if(buried!=null && (sampleCell.Flags&2)!=0 && buried.IsEntombedItem(cell))
+                            sampleCell.Flags|=ColonyView.EntombedFlag;
+                        view.Cells[dy * ColonyView.Width + dx]=sampleCell;
+                    }
                 }
             }
             var dupes = new List<ColonyDupe>();

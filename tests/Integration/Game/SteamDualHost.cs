@@ -92,6 +92,7 @@ namespace Queyang.Integration
             nextCandidate=Time.realtimeSinceStartup+1;
             if(!ChooseReachableExcavation()) { SpeedControlScreen.Instance.Unpause(false); return false; }
             SpeedControlScreen.Instance.Pause(false);
+            if (!SteamCritterMotion.Prepare(candidate,log)) return false;
             ownership.PrepareLegacy(candidate,log);
             return true;
         }
@@ -116,6 +117,7 @@ namespace Queyang.Integration
                     ColonyView.Decode(HostWorld.Capture(-1,-1));
                     ownership.PublishLegacy(lobby);
                     skills.Prepare(lobby,log);
+                    if (SteamCritterMotion.Enabled) SetData("qy_critter_id",SteamCritterMotion.HostId.ToString());
                     SetData("qy_dual_dig_x",digX.ToString(CultureInfo.InvariantCulture));
                     SetData("qy_dual_dig_y",digY.ToString(CultureInfo.InvariantCulture));
                     log($"DUAL_HOST_CANDIDATE x={digX} y={digY} worker={suggestedWorker.GetComponent<KPrefabID>().InstanceID} nativeOffsetsReachable=True hardness={Grid.Element[candidate].hardness}");
@@ -168,7 +170,8 @@ namespace Queyang.Integration
                     {
                         log("DUAL_HOST_SCREENSHOT dual-host.png");
                         SetData("qy_motion_id",motionId.ToString(CultureInfo.InvariantCulture));
-                        motion=SteamMotionTrace.Create(Path.GetDirectoryName(Environment.GetEnvironmentVariable("QY_SMOKE_REPORT")),motionId,true);
+                        motion=SteamMotionTrace.Create(Path.GetDirectoryName(Environment.GetEnvironmentVariable("QY_SMOKE_REPORT")),motionId,true,
+                            SteamCritterMotion.Enabled ? SteamCritterMotion.HostId : 0);
                     }
                     if(SteamMatchmaking.GetLobbyMemberData(lobby,friend,"qy_motion_ready")!="1") return false;
                     if(recordingArm==0)

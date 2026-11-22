@@ -139,10 +139,12 @@ namespace Queyang.Integration
         float since=-1;
         string path;
         KSelectable target;
-        internal static SteamMotionTrace Create(string folder,int id,bool host)
+        SteamCritterMotion critter;
+        internal static SteamMotionTrace Create(string folder,int id,bool host,int critterId=0)
         {
             var trace=new GameObject("Co-op motion observer").AddComponent<SteamMotionTrace>();
             active=trace; trace.id=id; trace.host=host; trace.path=Path.Combine(folder,"dupe-motion.csv");
+            if (SteamCritterMotion.Enabled && critterId>0) trace.critter=new SteamCritterMotion(critterId,host,folder);
             trace.rows.Add("qpc,qpc_hz,time,unity_frame,id,pose_tick,root_x,root_y,render_x,render_y,animation,asset,gpu_frame,in_view,world_running,sample_qpc,asset_first,asset_frames,play_mode,play_speed");
             return trace;
         }
@@ -169,6 +171,7 @@ namespace Queyang.Integration
                 since=Time.realtimeSinceStartup;
             }
             var p=SteamDupePoseChecks.Read(a);
+            critter?.Frame(Counter(),frequency,running);
             var v=camera.baseCamera.WorldToViewportPoint(target.transform.position);
             int poseTick=sampledFrame;
             if(!host) ((Dictionary<int,int>)ticks.GetValue(null)).TryGetValue(id,out poseTick);
@@ -186,6 +189,7 @@ namespace Queyang.Integration
             recording=false; active=null;
             if(Seconds<30 || rows.Count<31) throw new InvalidDataException("Insufficient rendered motion trace");
             File.WriteAllLines(path,rows);
+            critter?.End(log);
             File.WriteAllLines(Path.Combine(Path.GetDirectoryName(path),"dig-fx.csv"),fxRows);
             File.WriteAllLines(Path.Combine(Path.GetDirectoryName(path),"drill.csv"),drillRows);
             log("DUAL_HAND_TOOL id="+id+" excavatorFrames="+drillFrames);

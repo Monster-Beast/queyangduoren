@@ -41,10 +41,19 @@ namespace Queyang.Integration
             if (Environment.GetEnvironmentVariable("QY_BASELINE_ONLY")=="1" || Environment.GetEnvironmentVariable("QY_SKIP_WORK")=="1" || doneRound==round) return true;
             var manager=ManagementMenu.Instance;
             if (manager==null) return false;
-            if (!int.TryParse(SteamMatchmaking.GetLobbyData(lobby,"qy_skill_id"),out int id)) return false;
+            bool newcomer=Environment.GetEnvironmentVariable("QY_SKIP_PERSON")!="1";
+            if (!int.TryParse(SteamMatchmaking.GetLobbyData(lobby,newcomer?"qy_person_id":"qy_skill_id"),out int id)) return false;
+            if (stage<5 && !opened)
+            {
+                manager.OnButtonClick(Field<ManagementMenu.ManagementMenuToggleInfo>(manager,"scheduleInfo"));
+                opened=true;
+            }
             var dupe=Components.LiveMinionIdentities.Items.FirstOrDefault(m=>m!=null && m.GetComponent<KPrefabID>().InstanceID==id);
-            if (dupe==null) return false;
-            var consumer=dupe.GetComponent<ChoreConsumer>();
+            var stored=dupe!=null ? null : UnityEngine.Object.FindObjectsByType<StoredMinionIdentity>(FindObjectsSortMode.None)
+                .FirstOrDefault(m=>m.GetComponent("GuestWorkerCard") is Component card && Field<int>(card,"HostId")==id);
+            IAssignableIdentity identity=(IAssignableIdentity)dupe??stored;
+            if (identity==null) return false;
+            var consumer=dupe!=null ? (IPersonalPriorityManager)dupe.GetComponent<ChoreConsumer>() : stored;
             if (host && jobId==null)
             {
                 var j=Db.Get().ChoreGroups.resources.First(k=>k.userPrioritizable && !consumer.IsChoreGroupDisabled(k) && k.Id!="Dig");
@@ -63,11 +72,6 @@ namespace Queyang.Integration
             {
                 log($"DUAL_WORK_PROGRESS round={round} stage={stage} schedules={list.Count} renamed={s!=null} clicked={clicked} status={Queyang.Game.CoopSession.Status}");
                 reportedStage=stage;lastReport=Time.unscaledTime;
-            }
-            if (stage<5 && !opened)
-            {
-                manager.OnButtonClick(Field<ManagementMenu.ManagementMenuToggleInfo>(manager,"scheduleInfo"));
-                opened=true;
             }
             if (stage<5 && !scheduleScreen.gameObject.activeInHierarchy) return false;
             var entries=stage<5 ? scheduleScreen.GetComponentsInChildren<ScheduleScreenEntry>(false) : null;
@@ -128,7 +132,7 @@ namespace Queyang.Integration
                 if (s.GetBlock(9).GroupId!=groupId) return false;
                 stage++;clicked=false;
             }
-            var person=dupe.GetComponent<Schedulable>();
+            var person=((Component)identity).GetComponent<Schedulable>();
             if (stage==3)
             {
                 if (!host && round==1 && !clicked)
@@ -155,7 +159,7 @@ namespace Queyang.Integration
                 var group=Db.Get().ChoreGroups.resources.First(g=>g.Id==jobId);
                 if (!host && round==1 && !clicked)
                 {
-                    var row=jobs.rows.FirstOrDefault(r=>r.GetIdentity() as MinionIdentity==dupe);
+                    var row=jobs.rows.FirstOrDefault(r=>r.GetIdentity()==identity);
                     var cols=Field<Dictionary<string,TableColumn>>(jobs,"columns");
                     if (row==null || !cols.TryGetValue(jobId,out var col)) return false;
                     var button=row.GetWidget(col);
@@ -165,7 +169,7 @@ namespace Queyang.Integration
                 int target=(prior+1)%6;
                 if (consumer.GetPersonalPriority(group)!=target) return false;
                 if (!Picture("priorities",round,host)) return false;
-                log($"DUAL_{(host?"HOST":"GUEST")}_PRIORITY round={round} id={id} group={jobId} old={prior} confirmed={target} nativeTable=True");
+                log($"DUAL_{(host?"HOST":"GUEST")}_PRIORITY round={round} id={id} group={jobId} old={prior} confirmed={target} nativeTable=True afterBaselinePerson={newcomer}");
                 manager.CloseAll();doneRound=round;stage=0;clicked=opened=false;return true;
             }
             return false;

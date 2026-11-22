@@ -46,6 +46,7 @@ namespace Queyang.Game
             NativeUtilities.Clock(view);
             if (view.HasColonyHud) NativeManagement.ReceiveHud(view);
             NativeUtilityDisplay.Begin(markerRoot.transform);
+            var buried=global::Game.Instance.GetComponent<EntombedItemVisualizer>();
             for (int i = 0; i < view.Cells.Length; i++)
             {
                 int x = view.X + i % ColonyView.Width, y = view.Y + i / ColonyView.Width;
@@ -57,6 +58,15 @@ namespace Queyang.Game
                 var sample = view.Cells[i];
                 if ((sample.Flags & 1) == 0) continue;
                 ApplyElement(cell, sample);
+                if(buried!=null && (view.HasEntombed || (sample.Flags&2)==0))
+                {
+                    bool expected=(sample.Flags&ColonyView.EntombedFlag)!=0;
+                    if(expected!=buried.IsEntombedItem(cell))
+                    {
+                        if(expected) buried.AddItem(cell);
+                        else buried.ForceClear(cell);
+                    }
+                }
                 ApplyDig(cell, (sample.Flags & 8) != 0);
                 if (sample.DigMaterial!=0) NativeOrderColors.ApplyDig(GetDigRenderer(cell),sample);
                 if (view.HasEnvironment) ApplyMop(cell, sample.MopOrdered);

@@ -88,6 +88,8 @@ namespace Queyang.Game
         public bool Detailed;
         public bool HasResources;
         public bool HasDupeAppearance;
+        public bool HasEntombed;
+        public const byte EntombedFlag=128;
         public bool HasColonyHud;
         public int HudWorld,HudLocalPopulation,HudTotalPopulation;
         public float HudCalories,HudStress;
@@ -167,13 +169,15 @@ namespace Queyang.Game
             {
                 if (Detailed && !Native) throw new InvalidDataException("Detailed view requires native state.");
                 if (HasResources && !Detailed) throw new InvalidDataException("Resource state requires detailed view.");
-                bool dupeRange = DupeFrom!=0 || DupeThrough!=int.MaxValue;
+                // Flag 128 alone is the compressed v8 envelope. Include the explicit
+                // identity range when publishing authoritative buried-item markers.
+                bool dupeRange = DupeFrom!=0 || DupeThrough!=int.MaxValue || HasEntombed;
                 bool extended = HasEnvironment || EntityPayload != null || dupeRange || DupePoseTick!=0 || OrderMarks!=null || HasDupeAppearance;
                 if (extended && !HasResources) throw new InvalidDataException("Extended state requires native resource state.");
                 if (HasColonyHud && !extended) throw new InvalidDataException("HUD requires a native viewport");
                 w.Write(HasColonyHud ? (ushort)9 : extended ? (ushort)8 : HasResources ? (ushort)7 : Detailed ? (ushort)6 : Native ? NativeVersion : (ushort)4);
                 bool orders = extended && Array.Exists(Cells,c=>c.DigMaterial!=0 || c.HasBlueprintTint || c.MopOrdered || c.OrderPriority!=0 || c.OrderTargetId!=0 || c.SeparateOrderPriority!=0);
-                if (extended) w.Write((byte)((HasEnvironment ? 1 : 0) | (EntityPayload != null ? 2 : 0) | (orders ? 4 : 0) | (dupeRange ? 8 : 0) | (DupePoseTick!=0 ? 16 : 0) | (OrderMarks!=null ? 32 : 0) | (HasDupeAppearance ? 64 : 0)));
+                if (extended) w.Write((byte)((HasEnvironment ? 1 : 0) | (EntityPayload != null ? 2 : 0) | (orders ? 4 : 0) | (dupeRange ? 8 : 0) | (DupePoseTick!=0 ? 16 : 0) | (OrderMarks!=null ? 32 : 0) | (HasDupeAppearance ? 64 : 0) | (HasEntombed ? 128 : 0)));
                 w.Write(X); w.Write(Y);
                 w.Write(Cycle); w.Write(CycleFraction); w.Write(Paused); w.Write(Speed);
                 w.Write((ushort)names.Count);
@@ -290,9 +294,9 @@ namespace Queyang.Game
                 if (version < 4 || version > 9 || (inflated && version < 8)) throw new InvalidDataException("Unknown viewport version.");
                 byte extensions = version >= 8 ? r.ReadByte() : (byte)0;
                 if (version==8 && extensions == 128 && !inflated) return InflateViewport(r);
-                if (version >= 8 && ((extensions & 123) == 0 || (extensions & ~127) != 0)) throw new InvalidDataException("Invalid viewport extensions.");
+                if (version >= 8 && (extensions & 123) == 0) throw new InvalidDataException("Invalid viewport extensions.");
                 var v = new ColonyView { Native = version >= 5, Detailed = version >= 6, HasResources = version >= 7,
-                    X = r.ReadInt32(), Y = r.ReadInt32() };
+                    X = r.ReadInt32(), Y = r.ReadInt32(), HasEntombed=(extensions & 128)!=0 };
                 if (v.X < 0 || v.Y < 0 || v.X > int.MaxValue - Width || v.Y > int.MaxValue - Height)
                     throw new InvalidDataException("Invalid viewport origin.");
                 v.Cycle = r.ReadInt32(); v.CycleFraction = r.ReadSingle();
@@ -470,7 +474,7 @@ namespace Queyang.Game
 
         private static void Validate(ColonyCell c)
         {
-            if ((c.Flags & ~127) != 0 || (c.Utilities & ~31) != 0 || c.TargetId < 0 || c.Progress > 100 ||
+            if (((c.Flags & EntombedFlag)!=0 && (c.Flags&3)!=3) || (c.Utilities & ~31) != 0 || c.TargetId < 0 || c.Progress > 100 ||
                 float.IsNaN(c.Mass) || float.IsInfinity(c.Mass) ||
                 float.IsNaN(c.Temperature) || float.IsInfinity(c.Temperature))
                 throw new InvalidDataException("Invalid viewport cell.");

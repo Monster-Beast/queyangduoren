@@ -47,7 +47,7 @@ namespace Queyang.Game
                 foreach (var pair in flying)
                 {
                     var f=pair.Value;var p=f.Ore;
-                    if (!NativeResources.IsOre(p) || !p.gameObject.activeInHierarchy) {expired.Add(pair.Key);continue;}
+                    if (!NativeResources.IsOre(p) || p.IsEntombed || !p.gameObject.activeInHierarchy) {expired.Add(pair.Key);continue;}
                     if (GameComps.Gravities.Has(p.gameObject)) f.Until=Time.unscaledTime+1f;
                     if (Time.unscaledTime>f.Until) {expired.Add(pair.Key);continue;}
                     Vector2 pos=p.transform.position;
