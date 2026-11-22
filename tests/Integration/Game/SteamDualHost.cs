@@ -25,6 +25,8 @@ namespace Queyang.Integration
         readonly SteamDualLighting lighting=new SteamDualLighting();
         readonly SteamDualHealth health=new SteamDualHealth();
         readonly SteamConstructionRange constructionRange=new SteamConstructionRange();
+        readonly SteamResearchRange researchRange=new SteamResearchRange();
+        readonly SteamMeterRange batteryRange=new SteamMeterRange(), reservoirRange=new SteamMeterRange(true);
         readonly SteamDualOwnership ownership=new SteamDualOwnership();
         readonly Action<string> log;
         readonly FixtureFrame screenshot, hostOrderFrame;
@@ -149,6 +151,11 @@ namespace Queyang.Integration
                     phase=round==1?Phase.Dig:Phase.Revisit;
                     break;
                 case Phase.Dig:
+                    if (!researchRange.Check(lobby,friend,true,round,log)) return false;
+                    if (!batteryRange.Check(lobby,friend,true,round,log)) return false;
+                    if (!reservoirRange.Check(lobby,friend,true,round,log)) return false;
+                    // Other fixture stages let the colony run, and a worker may finish this old order.
+                    if (!ownership.Legacy(lobby,true,log) || SteamMatchmaking.GetLobbyMemberData(lobby,friend,"qy_legacy_checked")!="1") return false;
                     if (!constructionRange.Check(lobby,friend,true,round,log)) return false;
                     if (!health.Check(lobby,friend,true,round,log)) return false;
                     if (!lighting.Check(lobby,friend,true,round,log)) return false;
@@ -167,7 +174,7 @@ namespace Queyang.Integration
                     if(!screenshot.Requested)
                     {
                         if(Time.realtimeSinceStartup-designatedAt<1) return false;
-                        if(!ownership.Legacy(lobby,true,log) || !ownership.Initial(cell)) return false;
+                        if(!ownership.Initial(cell)) return false;
                         if(!DigMarkerGeometry.Publish(lobby,1,cell,log)) return false;
                         screenshot.Capture();
                     }

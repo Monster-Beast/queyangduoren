@@ -92,10 +92,13 @@ namespace Queyang.Game
         internal static string ReadBuilding(GameObject target, int id,int page=0)
         {
             var lines = new List<string>();
+            NativeBuildingWork.AddSelectedReadings(target,lines);
             var assignment = target.GetComponent<Assignable>();
             if (assignment != null)
                 lines.Add("使用者 " + (assignment.assignee?.GetProperName() ?? "未分配"));
             var priority = target.GetComponent<Prioritizable>();
+            var research = target.GetComponent<ResearchCenter>();
+            if (research!=null) lines.Add(ResearchBuildingReading(research));
             if (priority != null && priority.IsPrioritizable())
             {
                 var setting = priority.GetMasterPriority();
@@ -136,6 +139,23 @@ namespace Queyang.Game
                 Convert.ToBase64String(Encoding.UTF8.GetBytes(text.ToString())).Replace('/', '_') +
                 "/" + (NativeFacilityStorage.Supported(target)?NativeFacilityStorage.Encode(target,page):"-") +
                 "/" + EncodeStatuses(target);
+        }
+
+        internal static string ResearchBuildingReading(ResearchCenter station)
+        {
+            var research=Research.Instance;
+            var active=research?.GetActiveResearch();
+            if(active==null) return STRINGS.RESEARCH.MESSAGING.NORESEARCHSELECTED;
+            string type=station.GetResearchType();
+            var points=active.progressInventory.PointsByTypeID;
+            var text=new StringBuilder(active.tech.Name);
+            if(!active.tech.costsByResearchTypeID.TryGetValue(type,out float cost) || cost<=0)
+                return text.Append("\n此科技不需要本研究站的点数").ToString();
+            points.TryGetValue(type,out float earned);
+            text.Append("\n").Append(research.GetResearchType(type).name).Append(" ")
+                .Append(earned.ToString("0.##",CultureInfo.InvariantCulture)).Append("/")
+                .Append(cost.ToString("0.##",CultureInfo.InvariantCulture));
+            return text.ToString();
         }
 
         static string EncodeStatuses(GameObject target)

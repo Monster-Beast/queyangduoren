@@ -126,6 +126,8 @@ namespace Queyang.Game
             NativeResources.Capture(view, world,sample);
             NativeManagement.CaptureHud(view,world);
             NativeColonyLighting.Capture(view,world,sample);
+            NativeBuildingMeters.Capture(view,sample);
+            NativeBuildingWork.Capture(view,world,sample);
             view.HasHealthBars=view.LightMask!=null && view.Dupes.Length>0;
             view.HasPileAppearance=view.HasEntombed && view.HasColonyHud;
             OrderOwnership.Capture(view,sample);

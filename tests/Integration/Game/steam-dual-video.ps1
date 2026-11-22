@@ -37,7 +37,9 @@ function Start-DualRecording([object]$driver) {
     $window=[QyWindowCapture]::GameWindow([uint32]$game.Id)
     $out=Join-Path $driver.base 'dupe-motion.mp4'
     $log=Join-Path $driver.base 'capture.log'
-    $graph="gfxcapture=hwnd=${window}:width=1280:height=720:resize_mode=scale:max_framerate=30:capture_cursor=0:display_border=0,hwdownload,format=bgra,format=yuv420p[v]"
+    # Background windows can deliver fewer graphics updates than the nominal source rate.
+    # Use elapsed capture time for frame presentation, including gaps between updates.
+    $graph="gfxcapture=hwnd=${window}:width=1280:height=720:resize_mode=scale:max_framerate=30:capture_cursor=0:display_border=0,hwdownload,format=bgra,settb=AVTB,setpts=(RTCTIME-RTCSTART)/1000000/TB,fps=30,format=yuv420p[v]"
     $opts=@('-hide_banner','-nostdin','-loglevel','error','-filter_complex',$graph,'-map','[v]','-an','-c:v','libx264','-preset','veryfast','-threads','2','-crf','19','-r','30','-fps_mode','cfr','-t','24','-movflags','+faststart',('"' + $out + '"'))
     $p=Start-Process -FilePath (Get-Command ffmpeg).Source -ArgumentList $opts -WindowStyle Hidden -PassThru -RedirectStandardError $log
     [ordered]@{utc=[DateTime]::UtcNow.ToString('o');qpc=[Diagnostics.Stopwatch]::GetTimestamp();qpcHz=[Diagnostics.Stopwatch]::Frequency;gameProcess=$game.Id;window=$window} |

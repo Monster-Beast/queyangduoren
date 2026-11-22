@@ -39,7 +39,7 @@ namespace Queyang.Game
             return false;
         }
 
-        static bool HasKnownMeter(GameObject obj) => obj!=null && (obj.GetComponent<HandSanitizer>()!=null ||
+        internal static bool HasKnownMeter(GameObject obj) => obj!=null && (obj.GetComponent<HandSanitizer>()!=null ||
             obj.GetComponent<RationBox>()!=null || obj.GetComponent<Refrigerator>()!=null);
 
         internal static string Encode(GameObject obj,int page)

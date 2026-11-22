@@ -27,6 +27,8 @@ namespace Queyang.Integration
         readonly SteamDualLighting lighting=new SteamDualLighting();
         readonly SteamDualHealth health=new SteamDualHealth();
         readonly SteamConstructionRange constructionRange=new SteamConstructionRange();
+        readonly SteamResearchRange researchRange=new SteamResearchRange();
+        readonly SteamMeterRange batteryRange=new SteamMeterRange(), reservoirRange=new SteamMeterRange(true);
         readonly SteamDualOwnership ownership=new SteamDualOwnership();
         readonly Action<string> log;
         readonly FixtureDialogs dialogs;
@@ -265,6 +267,12 @@ namespace Queyang.Integration
                 case Phase.Invite: Join(); break;
                 case Phase.Loading: WorldReady(); break;
                 case Phase.Dig:
+                    if (!researchRange.Check(lobby,self,false,round,log)) break;
+                    if (!batteryRange.Check(lobby,self,false,round,log)) break;
+                    if (!reservoirRange.Check(lobby,self,false,round,log)) break;
+                    if (!ownership.Legacy(lobby,false,log)) break;
+                    if (SteamMatchmaking.GetLobbyMemberData(lobby,self,"qy_legacy_checked")!="1")
+                        SteamMatchmaking.SetLobbyMemberData(lobby,"qy_legacy_checked","1");
                     if (!constructionRange.Check(lobby,self,false,round,log)) break;
                     if (!health.Check(lobby,self,false,round,log)) break;
                     if (!lighting.Check(lobby,self,false,round,log)) break;
@@ -294,7 +302,7 @@ namespace Queyang.Integration
                     {
                         if (!markerFrame.Requested)
                         {
-                            if (!ownership.Legacy(lobby,false,log) || !ownership.Initial(Cell)) break;
+                            if (!ownership.Initial(Cell)) break;
                             if (!DigMarkerGeometry.Verify(lobby,1,Cell,log)) break;
                             markerFrame.Capture(); break;
                         }

@@ -11,6 +11,122 @@ namespace Queyang.Core.Tests
         static ColonyView View() => new ColonyView { Native = true, Detailed = true, HasResources = true };
 
         [Fact]
+        public void WorkBarPagesRetainNativePresentationAndBoundRemovals()
+        {
+            var view=View();
+            view.HasEnvironment=true;
+            view.LightMask=new byte[ColonyView.Width*ColonyView.Height/8];
+            view.Cells[3].Flags=1;
+            var bars=Enumerable.Range(1,40).Reverse().Select(i=>new ColonyWorkBar
+            {
+                Owner=27,Token=i%2==0?-i:i,Cell=3,Fill=i%2==0?.25f:.75f,
+                X=i+.43f,Y=122.5f,Z=-6,Color=0x7F31BFFF,AutoHide=i%3==0
+            }).ToList();
+            Assert.Null(ColonyView.Decode(view.Encode()).WorkBars);
+            view.SetWorkBars(bars,0);
+            var first=ColonyView.Decode(view.Encode());
+            view.SetWorkBars(bars,1);
+            var last=ColonyView.Decode(view.Encode());
+            Assert.Equal(32,first.WorkBars.Length);
+            Assert.Equal(8,last.WorkBars.Length);
+            Assert.Equal(0L,first.WorkBarFrom);
+            Assert.Equal(first.WorkBarThrough+1,last.WorkBarFrom);
+            Assert.Equal(long.MaxValue,last.WorkBarThrough);
+            Assert.Equal(bars,first.WorkBars.Concat(last.WorkBars).ToList());
+            bars.Clear();
+            view.SetWorkBars(bars,2);
+            var empty=ColonyView.Decode(view.Encode());
+            Assert.Empty(empty.WorkBars);
+            Assert.Equal((0L,long.MaxValue),(empty.WorkBarFrom,empty.WorkBarThrough));
+        }
+
+        [Fact]
+        public void WorkBarPagesRejectInvalidPositionsAndReusedNativeToken()
+        {
+            var view=View();
+            view.HasEnvironment=true;
+            view.LightMask=new byte[ColonyView.Width*ColonyView.Height/8];
+            view.Cells[3].Flags=1;
+            var bar=new ColonyWorkBar{Cell=3,Owner=27,Token=-44,Fill=.5f};
+            view.WorkBars=new[]{bar,bar};
+            Assert.Throws<InvalidDataException>(()=>view.Encode());
+            view.Cells[4].Flags=1;
+            view.WorkBars[1].Cell=4;
+            Assert.Throws<InvalidDataException>(()=>view.Encode());
+            view.WorkBars=new[]{bar};
+            view.WorkBars[0].X=float.NaN;
+            Assert.Throws<InvalidDataException>(()=>view.Encode());
+            view.WorkBars[0]=bar;
+            view.Cells[3].Flags=0;
+            Assert.Throws<InvalidDataException>(()=>view.Encode());
+        }
+
+        [Fact]
+        public void BuildingMeterPageRetainsAnimationAndRejectsMissingAnchor()
+        {
+            var v=View();v.HasEnvironment=true;v.LightMask=new byte[ColonyView.Width*ColonyView.Height/8];
+            v.Cells[2]=new ColonyCell{Flags=17,BuildingHash=7,BuildingSaveId=18};
+            v.MeterFirst=512;v.MeterLast=767;
+            v.Meters=new[]{new ColonyMeter{Key=513,Target="meter_target",Clip="meter",Offset=1,Layer=-2,
+                Position=.65f,Rotation=-11.5f,Animation=99,Visible=true,X=.125f,Hidden=new[]{"meter_frame","meter_fill"},
+                TintSymbols=new[]{13},Tints=new[]{0x7F10A0FFu}}};
+            var copy=ColonyView.Decode(v.Encode());
+            var row=Assert.Single(copy.Meters);
+            Assert.Equal(v.MeterFirst,copy.MeterFirst);Assert.Equal(v.MeterLast,copy.MeterLast);
+            Assert.Equal(513,row.Key);Assert.Equal(.65f,row.Position);Assert.Equal(-11.5f,row.Rotation);
+            Assert.Equal(v.Meters[0].Hidden,row.Hidden);Assert.Equal(v.Meters[0].Tints,row.Tints);Assert.True(row.Visible);
+            v.Cells[2].BuildingSaveId=0;
+            Assert.Throws<InvalidDataException>(()=>v.Encode());
+            v.Meters=null;Assert.Null(ColonyView.Decode(v.Encode()).Meters);
+        }
+
+        [Fact]
+        public void MeterPagesCoverEveryOrdinalAndCapTheirEncodedSize()
+        {
+            var v=View();v.HasEnvironment=true;v.LightMask=new byte[ColonyView.Width*ColonyView.Height/8];
+            v.Cells[0]=new ColonyCell{Flags=17,BuildingHash=7,BuildingSaveId=18};
+            var all=Enumerable.Range(0,11).Select(i=>new ColonyMeter {Key=i,Target="meter_target",Clip="meter",
+                Hidden=i==8?Enumerable.Repeat(new string('h',120),32).ToArray():Array.Empty<string>()}).ToList();
+            var seen=new System.Collections.Generic.List<int>();int first=0;
+            for(int page=0;first<v.Cells.Length*256;page++)
+            {
+                Assert.InRange(page,0,10);
+                v.SelectMeterPage(all,page);var copy=ColonyView.Decode(v.Encode());
+                Assert.Equal(first,copy.MeterFirst);
+                Assert.InRange(copy.Meters.Length,1,ColonyView.MaxMeterPageEntries);
+                Assert.InRange(copy.Meters.Sum(s=>s.WireBytes())+9,1,ColonyView.MaxMeterPageBytes);
+                first=copy.MeterLast+1;seen.AddRange(copy.Meters.Select(s=>s.Key));
+            }
+            Assert.Equal(all.Select(s=>s.Key),seen);
+            v.MeterFirst=0;v.MeterLast=v.Cells.Length*256-1;
+            v.Meters=new[]{all[8],all[8].Copy()};v.Meters[1].Key=9;
+            Assert.Throws<InvalidDataException>(()=>v.Encode());
+        }
+
+        [Fact]
+        public void MeterCodecRejectsOverlongUtf8AndSymbolCountsOnBothSides()
+        {
+            var s=new ColonyMeter{Key=1,Target="target",Clip=new string('表',41)};
+            Assert.Throws<InvalidDataException>(()=>s.WireBytes());
+            s.Clip="meter";s.Hidden=new string[33];
+            Assert.Throws<InvalidDataException>(()=>s.WireBytes());
+            s.Hidden=Array.Empty<string>();s.Tints=new uint[17];s.TintSymbols=new int[17];
+            Assert.Throws<InvalidDataException>(()=>s.WireBytes());
+            s.Tints=Array.Empty<uint>();s.TintSymbols=Array.Empty<int>();
+            using(var bytes=new MemoryStream())
+            {
+                var writer=new BinaryWriter(bytes);
+                s.Write(writer);Assert.Equal(s.WireBytes(),bytes.Length);
+                var raw=bytes.ToArray();raw[raw.Length-1]=17;
+                using(var bad=new BinaryReader(new MemoryStream(raw)))
+                    Assert.Throws<InvalidDataException>(()=>ColonyMeter.Read(bad));
+                raw[4]=121;raw[5]=0;
+                using(var bad=new BinaryReader(new MemoryStream(raw)))
+                    Assert.Throws<InvalidDataException>(()=>ColonyMeter.Read(bad));
+            }
+        }
+
+        [Fact]
         public void HealthBarsStayWithTheirPersonAndOlderViewsOmitThem()
         {
             var v=View();

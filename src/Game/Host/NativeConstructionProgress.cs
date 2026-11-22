@@ -9,7 +9,7 @@ namespace Queyang.Game
         static readonly AccessTools.FieldRef<Workable,ProgressBar> barOf=
             AccessTools.FieldRefAccess<Workable,ProgressBar>("progressBar");
 
-        internal static ProgressBar Source(Constructable plan)=>barOf(plan);
+        internal static ProgressBar Source(Workable workable)=>barOf(workable);
 
         internal static void Apply(KSelectable target,ColonyEntity state,Func<float> fraction,ref ProgressBar bar)
         {

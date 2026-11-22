@@ -16,6 +16,7 @@ namespace Queyang.Integration
     {
         int pending = Grid.InvalidCell;
         bool issued;
+        bool focusedInitial;
         bool legacyVerified;
         int legacy=Grid.InvalidCell;
         readonly Dictionary<int,int> oldDigIds=new Dictionary<int,int>();
@@ -175,6 +176,18 @@ namespace Queyang.Integration
         }
         internal bool Initial(int cell)
         {
+            if (!focusedInitial)
+            {
+                // Optional close-up checks finish at a different position and zoom.
+                var camera=CameraController.Instance;
+                var point=Grid.CellToPosCCC(cell,Grid.SceneLayer.Move);
+                point.z=camera.transform.position.z;
+                camera.SetTargetPos(point,10f,false);
+                camera.SetPosition(point);
+                camera.OrthographicSize=10f;
+                focusedInitial=true;
+                return false;
+            }
             if (!Visible(cell, 2)) return false;
             firstGuestColor = Color(2);
             return true;
