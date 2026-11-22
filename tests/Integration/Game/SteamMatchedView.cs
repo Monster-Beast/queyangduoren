@@ -78,7 +78,36 @@ namespace Queyang.Integration
                 if (tint!=parts[2]) throw new InvalidDataException("Blueprint renderer tint mismatch: host="+parts[2]+" guest="+tint);
                 SteamMatchmaking.SetLobbyMemberData(lobby,"qy_matched_scene","ready");
             }
-            if (!frame.Requested) { frame.Capture(); return false; }
+            string pair=SteamMatchmaking.GetLobbyData(lobby,"qy_native_dig_tints");
+            if (host && string.IsNullOrEmpty(pair))
+            {
+                var digs=UnityEngine.Object.FindObjectsByType<Diggable>(FindObjectsSortMode.None)
+                    .Where(d=>d!=null && d.materialDisplay!=null && d.materialDisplay.enabled)
+                    .Select(d=>new {dig=d,cell=Grid.PosToCell(d),vp=cam.baseCamera.WorldToViewportPoint(d.transform.position)})
+                    .Where(d=>Grid.IsValidCell(d.cell) && Grid.Visible[d.cell]>0 && d.vp.x>.05f && d.vp.x<.95f && d.vp.y>.05f && d.vp.y<.95f)
+                    .OrderBy(d=>Grid.GetCellDistance(digCell,d.cell)).ToList();
+                var yes=digs.FirstOrDefault(d=>d.dig.Reachable);
+                if (yes==null) return false;
+                string yesAsset=DigMarkerGeometry.Asset(yes.dig.materialDisplay);
+                var no=digs.FirstOrDefault(d=>!d.dig.Reachable && DigMarkerGeometry.Asset(d.dig.materialDisplay).Split('=').Last()!=yesAsset.Split('=').Last());
+                if (no==null) return false;
+                pair=yes.cell+","+yesAsset.Split('=').Last()+","+no.cell+","+DigMarkerGeometry.Asset(no.dig.materialDisplay).Split('=').Last();
+                if (!SteamMatchmaking.SetLobbyData(lobby,"qy_native_dig_tints",pair)) throw new IOException("Could not publish native order colors");
+            }
+            if (string.IsNullOrEmpty(pair)) return false;
+            var tints=pair.Split(',');
+            if (tints.Length!=4) throw new InvalidDataException("Bad native order colors");
+            if (!host)
+                for (int i=0;i<=2;i+=2)
+                {
+                    var renderer=NativeWorldMirror.GetDigRenderer(int.Parse(tints[i],CultureInfo.InvariantCulture));
+                    if (renderer==null || !renderer.enabled || DigMarkerGeometry.Asset(renderer).Split('=').Last()!=tints[i+1]) return false;
+                }
+            if (!frame.Requested)
+            {
+                log("DUAL_DIG_TINTS reachableCell="+tints[0]+" rgba="+tints[1]+" unreachableCell="+tints[2]+" rgba="+tints[3]);
+                frame.Capture(); return false;
+            }
             if (!frame.Complete) return false;
             log(string.Format(CultureInfo.InvariantCulture,"DUAL_MATCHED_RENDER dig={0} blueprint={1} tint={2} viewport={3:F6},{4:F6} zoom={5:F3} tool=DigTool overlay=None",
                 digCell,blueprintCell,tint,vp.x,vp.y,cam.baseCamera.orthographicSize));

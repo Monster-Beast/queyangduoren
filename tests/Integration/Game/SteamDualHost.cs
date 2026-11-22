@@ -19,6 +19,7 @@ namespace Queyang.Integration
         readonly SteamDualPerson person=new SteamDualPerson();
         readonly SteamDualSkills skills=new SteamDualSkills();
         readonly SteamDualWork work=new SteamDualWork();
+        readonly SteamDualBuildings buildings=new SteamDualBuildings();
         readonly SteamDualOwnership ownership=new SteamDualOwnership();
         readonly Action<string> log;
         readonly FixtureFrame screenshot, hostOrderFrame;
@@ -141,6 +142,7 @@ namespace Queyang.Integration
                     phase=round==1?Phase.Dig:Phase.Revisit;
                     break;
                 case Phase.Dig:
+                    if (!buildings.Check(lobby,friend,true,round,log)) return false;
                     if (!skills.Verify(lobby,round,true,log)) return false;
                     if (!person.Host(lobby,round,log)) return false;
                     if (!work.Verify(lobby,round,true,log)) return false;
@@ -209,6 +211,7 @@ namespace Queyang.Integration
                     phase=Phase.Leave;
                     break;
                 case Phase.Revisit:
+                    if (!buildings.Check(lobby,friend,true,round,log)) return false;
                     if (!skills.Verify(lobby,round,true,log)) return false;
                     if (!person.Host(lobby,round,log)) return false;
                     if (!work.Verify(lobby,round,true,log)) return false;

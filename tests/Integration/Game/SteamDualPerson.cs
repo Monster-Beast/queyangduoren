@@ -24,6 +24,8 @@ namespace Queyang.Integration
         FixtureFrame screenshot;
         static readonly AccessTools.FieldRef<UserMenuScreen,List<KIconButtonMenu.ButtonInfo>> buttons=
             AccessTools.FieldRefAccess<UserMenuScreen,List<KIconButtonMenu.ButtonInfo>>("buttonInfos");
+        static readonly AccessTools.FieldRef<UserMenuScreen,GameObject> menuSelection=
+            AccessTools.FieldRefAccess<UserMenuScreen,GameObject>("selected");
         static readonly AccessTools.FieldRef<TableScreen,List<TableRow>> tableRows=
             AccessTools.FieldRefAccess<TableScreen,List<TableRow>>("rows");
         static readonly AccessTools.FieldRef<TableScreen,Dictionary<string,TableColumn>> tableColumns=
@@ -31,7 +33,7 @@ namespace Queyang.Integration
         static string Data(CSteamID lobby,string key)=>SteamMatchmaking.GetLobbyData(lobby,"qy_person_"+key);
         static void Set(CSteamID lobby,string key,string value)
         { if (!SteamMatchmaking.SetLobbyData(lobby,"qy_person_"+key,value)) throw new IOException("Steam rejected personal control metadata"); }
-        static bool Early => Environment.GetEnvironmentVariable("QY_BASELINE_ONLY")=="1";
+        static bool Early => Environment.GetEnvironmentVariable("QY_BASELINE_ONLY")=="1" || Environment.GetEnvironmentVariable("QY_SKIP_PERSON")=="1";
         static MinionIdentity Original(CSteamID lobby)
         {
             int id=int.Parse(SteamMatchmaking.GetLobbyData(lobby,"qy_skill_id"));
@@ -107,10 +109,12 @@ namespace Queyang.Integration
             // A patient may have left after recovering while the colony ran.
             log("DUAL_GUEST_PERSON_BASELINE newNativeDuplicant=True skillAndHat=True foodPermission=True beforeFirstViewport=True");
         }
+        static UserMenuScreen Menu(GameObject target) => UnityEngine.Object.FindObjectsByType<UserMenuScreen>(
+            FindObjectsInactive.Include,FindObjectsSortMode.None).FirstOrDefault(m=>menuSelection(m)==target);
         static bool Click(GameObject target,Func<string,bool> label)
         {
-            var menu=UnityEngine.Object.FindObjectsByType<UserMenuScreen>(FindObjectsSortMode.None).FirstOrDefault(m=>m.gameObject.activeInHierarchy);
-            if (menu==null || DetailsScreen.Instance.target!=target) return false;
+            var menu=Menu(target);
+            if (menu==null || !menu.gameObject.activeInHierarchy || DetailsScreen.Instance.target!=target) return false;
             var match=buttons(menu)?.FirstOrDefault(b=>b!=null && label(b.text));
             if (match?.onClick==null) return false;
             match.onClick(); return true;
@@ -125,8 +129,12 @@ namespace Queyang.Integration
             if (loggedStep!=step || Time.unscaledTime-lastProgress>8)
             {
                 var screen=ManagementMenu.Instance.consumablesScreen;
+                var target=NativeWorldMirror.GetDupeSelectable(id);
+                var panel=target==null ? null : Menu(target.gameObject);
                 log("DUAL_GUEST_PERSON_PROGRESS step="+step+" foodTable="+(screen!=null && screen.isActiveAndEnabled && screen.gameObject.activeInHierarchy)+
-                    " proxy="+(NativeWorldMirror.GetDupeSelectable(id)!=null)+" status="+CoopSession.Status);
+                    " proxy="+(target!=null)+" selected="+(target!=null && DetailsScreen.Instance.target==target.gameObject)+
+                    " menuActive="+(panel!=null && panel.gameObject.activeInHierarchy)+" buttons="+(panel==null || buttons(panel)==null?"-":string.Join(",",buttons(panel).Select(b=>b.text)))+
+                    " status="+CoopSession.Status);
                 lastProgress=Time.unscaledTime; loggedStep=step;
             }
             if (step==0)

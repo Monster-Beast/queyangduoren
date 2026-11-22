@@ -41,6 +41,59 @@ def cadence(rows):
                 [(b - a) * 1000 / hz for a, b in zip(frame_times, frame_times[1:])])}
 
 
+def directions(host, guest):
+    # A forward loop that crosses its last frame is a forward transition. Use the
+    # nearest modular distance and report large jumps as ambiguous at low render FPS.
+    # The workload uses native forward-playing clips. Intentional reverse clips use
+    # the host's signed playback rate.
+    clips = {}
+    key = lambda r: (r["asset"], r["animation"])
+    for r in host + guest:
+        g = clips.setdefault(key(r), [r["gpu_frame"], r["gpu_frame"], False])
+        g[0] = min(g[0], r["gpu_frame"])
+        g[1] = max(g[1], r["gpu_frame"])
+    for a, b in zip(host, host[1:]):
+        if key(a) == key(b) and a["gpu_frame"] > b["gpu_frame"]:
+            clips[key(a)][2] = True
+    current = {r["unity_frame"]: r for r in host}
+    def counts(rows, remote):
+        forward = backwards = repeated = wraps = large = 0
+        for a, b in zip(rows, rows[1:]):
+            if key(a) != key(b):
+                continue
+            d = int(b["gpu_frame"] - a["gpu_frame"])
+            if d == 0:
+                repeated += 1
+                continue
+            g = clips[key(a)]
+            h = current.get(b["pose_tick"]) if remote else b
+            if h is not None and key(h) != key(b):
+                h = None
+            native_mode = h.get("play_mode") if h is not None else None
+            loop = native_mode == 0 if native_mode is not None else g[2]
+            n = int(a.get("asset_frames", g[1] - g[0] + 1))
+            if h is not None and h.get("play_speed", 1) < 0:
+                d = -d
+            if loop and n > 1:
+                if d < -n / 2:
+                    d += n
+                    wraps += 1
+                elif d > n / 2:
+                    large += 1
+            if d > 0:
+                forward += 1
+            else:
+                backwards += 1
+        changed = forward + backwards
+        return {"same_clip_forward": forward, "recognized_forward_wraps": wraps,
+                "small_reverse_transitions": backwards,
+                "reverse_pct_of_changes": round(100 * backwards / max(changed, 1), 2),
+                "forward_jumps_over_half_a_loop": large,
+                "repeated_rendered_frame_pct": round(100 * repeated / max(changed + repeated, 1), 2)}
+    return {"clip_bounds": "native" if "asset_frames" in host[0] else "observed_range",
+            "host": counts(host, False), "guest": counts(guest, True)}
+
+
 def effects(folder, hz):
     paths = [folder / role / "dig-fx.csv" for role in ("host", "guest")]
     if not all(path.exists() for path in paths):
@@ -85,6 +138,7 @@ def analyze(folder, independent=False):
     hz = rates.pop()
     if independent:
         return {"id": int(actors.pop()), "host": cadence(host), "guest": cadence(guest),
+                "direction": directions(host, guest),
                 "timebase": "role-local cadence; no cross-process latency calculated"}
     start = max(host[0]["qpc"], guest[0]["qpc"])
     end = min(host[-1]["qpc"], guest[-1]["qpc"])
@@ -141,7 +195,7 @@ def analyze(folder, independent=False):
     if not first:
         raise ValueError("No rendered guest sample refers to a recorded authority capture")
     return {"id": int(actors.pop()), "visible_unpaused_overlap_sec": round((end - start) / hz, 2),
-            "host": inspect(host), "guest": inspect(guest), "digging_effects": effects(folder, hz),
+            "host": inspect(host), "guest": inspect(guest), "digging_effects": effects(folder, hz), "direction": directions(host, guest),
             "capture_to_first_render_using_tick_ms": spread(first.values()),
             "capture_to_first_changed_render_using_tick_ms": spread(responding.values())}
 

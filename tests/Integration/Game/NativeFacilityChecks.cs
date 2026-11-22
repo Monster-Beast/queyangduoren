@@ -33,7 +33,7 @@ namespace Queyang.Integration
             if (door==null) door=Build(DoorConfig.ID,world).GetComponent<Door>();
         }
 
-        static GameObject Build(string prefab,int world)
+        internal static GameObject Build(string prefab,int world)
         {
             var def=Assets.GetBuildingDef(prefab);
             var origin=Grid.PosToCell(Components.LiveMinionIdentities.Items.First(d=>d!=null && ClusterUtil.GetMyWorldId(d)==world));

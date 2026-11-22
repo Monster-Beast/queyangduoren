@@ -70,7 +70,8 @@ namespace Queyang.Integration
                     if (name=="GasPressure" || name=="GasColour")
                     {
                         var property=(PropertyTextures.Property)AccessTools.Field(t,"simProperty").GetValue(prop);
-                        var raw=pt.GetTexture(property);
+                        var buffers=(TextureBuffer[])AccessTools.Field(typeof(PropertyTextures),"textureBuffers").GetValue(pt);
+                        var raw=buffers?[(int)property]?.texture;
                         if (raw!=null) line.Append(" raw").Append(name).Append("=").Append(ColorUtility.ToHtmlStringRGBA(Pixel(raw,x,y)));
                     }
                 }

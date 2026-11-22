@@ -203,7 +203,10 @@ namespace Queyang.Game
 
         protected override void OnSpawn()
         {
-            base.OnSpawn(); Subscribe((int)GameHashes.RefreshUserMenu,Build);
+            base.OnSpawn();
+            var marker=GetComponent<NativeDupeIdentityMarker>();
+            if (marker!=null) id=marker.HostId;
+            Subscribe((int)GameHashes.RefreshUserMenu,Build);
             if (NativeManagement.PersonSelected(gameObject)) global::Game.Instance.userMenu.Refresh(gameObject);
         }
 
@@ -238,7 +241,7 @@ namespace Queyang.Game
         }
         void Build(object _)
         {
-            if (!NativeManagement.PersonSelected(gameObject) || id<=0) return;
+            if (!NativeGuestScene.Ready || id<=0) return;
             if (tab<0)
             {
                 for (int i=0;i<tabs.Length;i++) { int t=i; Add(tabs[t],()=>Go(t,0)); }

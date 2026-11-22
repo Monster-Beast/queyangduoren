@@ -122,6 +122,31 @@ namespace Queyang.Integration
             }
             else log("DUAL_LEGACY_SOURCE existingInputSave=True");
             legacy=found;
+            var placement=Assets.GetPrefab("DigPlacer").GetComponent<Diggable>();
+            var navs=Components.LiveMinionIdentities.Items.Where(d=>d!=null).Select(d=>d.GetComponent<Navigator>()).Where(n=>n!=null).ToList();
+            // A second, unowned vanilla designation deep in solid rock gives both
+            // screenshots a native unreachable order as well as the reachable dig.
+            bool prepared=false;
+            for (int dy=-6;dy<=6 && !prepared;dy++)
+                for (int dx=-8;dx<=8 && !prepared;dx++)
+                {
+                    if (x+dx<=0 || y+dy<=0 || x+dx>=Grid.WidthInCells-1 || y+dy>=Grid.HeightInCells-1) continue;
+                    int c=Grid.XYToCell(x+dx,y+dy);
+                    if (c==anchor || c==legacy || Grid.Visible[c]==0 || !Grid.Solid[c] ||
+                        !Grid.Solid[Grid.CellAbove(c)] || !Grid.Solid[Grid.CellBelow(c)] ||
+                        !Grid.Solid[c-1] || !Grid.Solid[c+1] || !Diggable.IsDiggable(c) ||
+                        Diggable.Undiggable(Grid.Element[c]) || HostWorld.FindBuilding(c)!=null) continue;
+                    var offsets=placement.GetOffsets(c);
+                    if (navs.Any(n=>n.CanReach(c,offsets))) continue;
+                    if (Diggable.GetDiggable(c)==null)
+                    {
+                        PlayerController.Instance.ActivateTool(DigTool.Instance);
+                        var here=Grid.CellToPosCCC(c,Grid.SceneLayer.Move);
+                        DigTool.Instance.OnLeftClickDown(here); DigTool.Instance.OnLeftClickUp(here);
+                    }
+                    prepared=Diggable.GetDiggable(c)!=null;
+                    if (prepared) log("DUAL_UNREACHABLE_SETUP cell="+c+" nativePath=False");
+                }
             // The particular nearby order used to inspect the old baseline may be
             // completed by another worker while the colony performs the guest dig.
             foreach (var dig in UnityEngine.Object.FindObjectsByType<Diggable>(FindObjectsSortMode.None))

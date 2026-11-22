@@ -10,6 +10,9 @@ param(
     [string]$SandboxStart="$env:ProgramFiles/Sandboxie-Plus/Start.exe",
     [string]$FixtureDriverPath,
     [Alias('MotionBaselineOnly')][switch]$SkipManagement,
+    [switch]$SkipPerson,
+    [switch]$SkipWork,
+    [switch]$CheckBuildings,
     [switch]$AcceptDeliveredInvite,
     [ValidateRange(0,600)][int]$InviteWaitSeconds=105,
     [ValidateRange(120,3600)][int]$TimeoutSeconds=900
@@ -114,10 +117,11 @@ foreach ($role in $roles) {
     $friend=if ($role -eq 'host') { $GuestSteamId } else { $HostSteamId }
     $exe=Join-Path $run "$role-game/OxygenNotIncluded.exe"
     $values=[ordered]@{
-        SteamAppId='457140'; SteamGameId='457140'; QY_BASELINE_ONLY=([int]$SkipManagement.IsPresent).ToString(); QY_SMOKE_ROLE=$role; QY_DUAL_ROLE=$role
+        SteamAppId='457140'; SteamGameId='457140'; QY_BASELINE_ONLY=([int]$SkipManagement.IsPresent).ToString(); QY_SKIP_PERSON=([int]$SkipPerson.IsPresent).ToString(); QY_SKIP_WORK=([int]$SkipWork.IsPresent).ToString(); QY_SMOKE_ROLE=$role; QY_DUAL_ROLE=$role
         QY_SMOKE_REPORT=(Join-Path $base "$role.report"); QY_SMOKE_ROOT=$klei; QY_SMOKE_SAVE=$save
         QY_DUAL_SELF=$self; QY_DUAL_FRIEND=$friend; QY_DUAL_HOST_ID=$HostSteamId; QY_DUAL_WAIT_INVITE_SECONDS=([string]$InviteWaitSeconds); QY_DUAL_ACCEPT_INVITE=([int]$AcceptDeliveredInvite.IsPresent).ToString()
     }
+    $values.QY_CHECK_BUILDINGS=([int]$CheckBuildings.IsPresent).ToString()
     $drivers[$role]=[pscustomobject]@{role=$role;exe=$exe;env=$values;mods=$mods;base=$base;restarts=0;started=$false;done=$false;wrapper=$null}
     [ordered]@{ role=$role;package=$before[0];sourceSave=$before[1];fixture=(Get-FileHash $fixture).Hash
         game=(Get-FileHash (Join-Path $mod 'QueyangCoop.dll')).Hash;core=(Get-FileHash (Join-Path $mod 'Queyang.Core.dll')).Hash
@@ -260,7 +264,9 @@ try {
         foreach ($role in $roles) {
             $d=$drivers[$role]
             $lines=Get-Content -LiteralPath (Get-Physical $d $d.env.QY_SMOKE_REPORT)
-            foreach ($section in 'skills','schedule','priorities') {
+            if (!$SkipPerson -and !($lines -match "^DUAL_$($role.ToUpperInvariant())_PERSON_CONFIRMED")) { throw "Missing $role newcomer verification" }
+            $sections=if ($SkipWork) { @('skills') } else { @('skills','schedule','priorities') }
+            foreach ($section in $sections) {
                 $pattern=if ($section -eq 'priorities') { 'PRIORITY' } else { $section.ToUpperInvariant().TrimEnd('S') }
                 if (!($lines -match "^DUAL_$($role.ToUpperInvariant())_$pattern")) { throw "Missing $role $section check." }
                 $pictures=if ($section -eq 'skills') { @("dual-$role-skills.png") } else { @("dual-$role-$section-1.png","dual-$role-$section-2.png") }

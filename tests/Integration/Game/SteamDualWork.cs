@@ -38,7 +38,7 @@ namespace Queyang.Integration
 
         internal bool Verify(CSteamID lobby,int round,bool host,Action<string> log)
         {
-            if (Environment.GetEnvironmentVariable("QY_BASELINE_ONLY")=="1" || doneRound==round) return true;
+            if (Environment.GetEnvironmentVariable("QY_BASELINE_ONLY")=="1" || Environment.GetEnvironmentVariable("QY_SKIP_WORK")=="1" || doneRound==round) return true;
             var manager=ManagementMenu.Instance;
             if (manager==null) return false;
             if (!int.TryParse(SteamMatchmaking.GetLobbyData(lobby,"qy_skill_id"),out int id)) return false;

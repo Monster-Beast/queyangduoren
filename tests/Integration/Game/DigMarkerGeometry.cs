@@ -11,7 +11,7 @@ namespace Queyang.Integration
     internal static class DigMarkerGeometry
     {
         static string Key(int round) => "qy_dual_dig_mesh_"+round;
-        static string Asset(MeshRenderer r)
+        internal static string Asset(MeshRenderer r)
         {
             var mesh=r.GetComponent<MeshFilter>()?.sharedMesh;
             var mat=r.sharedMaterial;

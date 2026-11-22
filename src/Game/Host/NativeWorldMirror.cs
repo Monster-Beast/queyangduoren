@@ -444,6 +444,7 @@ namespace Queyang.Game
             marker.AddComponent<KPrefabID>().PrefabTag = new Tag(MinionConfig.ID);
             marker.AddComponent<KSelectable>().SetName(dupe.Name);
             marker.AddComponent<NativeDupeIdentityMarker>().HostId = dupe.SaveId;
+            marker.AddComponent<NativePersonMenu>();
             SymbolOverrideControllerUtil.AddToPrefab(marker);
             var appearance = marker.AddComponent<Accessorizer>();
             marker.SetActive(true);

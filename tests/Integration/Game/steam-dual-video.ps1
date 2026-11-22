@@ -61,7 +61,7 @@ function Confirm-DualRecording([object]$driver,[Diagnostics.Process]$recorder) {
     if ($means.Count -ne 24 -or ($means | Measure-Object -Minimum).Minimum -le 18 -or $hashes.Count -lt 5) {
         throw "Motion clip contains black or static colony samples: $path"
     }
-    $video | Add-Member distinctOneSecondSceneHashes $hashes.Count
-    $video | Add-Member minimumSceneLuma (($means | Measure-Object -Minimum).Minimum)
+    $video | Add-Member -NotePropertyName distinctOneSecondSceneHashes -NotePropertyValue $hashes.Count
+    $video | Add-Member -NotePropertyName minimumSceneLuma -NotePropertyValue (($means | Measure-Object -Minimum).Minimum)
     $video | ConvertTo-Json |Set-Content (Join-Path $driver.base 'capture-stream.json')
 }

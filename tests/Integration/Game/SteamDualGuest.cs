@@ -21,6 +21,7 @@ namespace Queyang.Integration
         readonly SteamDualPerson person=new SteamDualPerson();
         readonly SteamDualSkills skills=new SteamDualSkills();
         readonly SteamDualWork work=new SteamDualWork();
+        readonly SteamDualBuildings buildings=new SteamDualBuildings();
         readonly SteamDualOwnership ownership=new SteamDualOwnership();
         readonly Action<string> log;
         readonly FixtureDialogs dialogs;
@@ -257,6 +258,7 @@ namespace Queyang.Integration
                 case Phase.Invite: Join(); break;
                 case Phase.Loading: WorldReady(); break;
                 case Phase.Dig:
+                    if (!buildings.Check(lobby,self,false,round,log)) break;
                     if (!skills.Verify(lobby,round,false,log)) break;
                     if (!person.Guest(lobby,round,log)) break;
                     if (!work.Verify(lobby,round,false,log)) break;
@@ -291,6 +293,7 @@ namespace Queyang.Integration
                     if (!ownership.IssueGuest(lobby,Cell)) break;
                     log("DUAL_GUEST_EXCAVATED x="+x+" y="+y); Snapshot(); break;
                 case Phase.Revisit:
+                    if (!buildings.Check(lobby,self,false,round,log)) break;
                     if (!skills.Verify(lobby,round,false,log)) break;
                     if (!person.Guest(lobby,round,log)) break;
                     if (!work.Verify(lobby,round,false,log)) break;

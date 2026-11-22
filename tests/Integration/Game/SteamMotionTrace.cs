@@ -119,7 +119,7 @@ namespace Queyang.Integration
         {
             var trace=new GameObject("Co-op motion observer").AddComponent<SteamMotionTrace>();
             active=trace; trace.id=id; trace.host=host; trace.path=Path.Combine(folder,"dupe-motion.csv");
-            trace.rows.Add("qpc,qpc_hz,time,unity_frame,id,pose_tick,root_x,root_y,render_x,render_y,animation,asset,gpu_frame,in_view,world_running,sample_qpc,asset_first,asset_frames,play_mode");
+            trace.rows.Add("qpc,qpc_hz,time,unity_frame,id,pose_tick,root_x,root_y,render_x,render_y,animation,asset,gpu_frame,in_view,world_running,sample_qpc,asset_first,asset_frames,play_mode,play_speed");
             return trace;
         }
         internal float Seconds => since<0?0:Time.realtimeSinceStartup-since;
@@ -149,10 +149,10 @@ namespace Queyang.Integration
             int poseTick=sampledFrame;
             if(!host) ((Dictionary<int,int>)ticks.GetValue(null)).TryGetValue(id,out poseTick);
             MeasureEffects(host?Time.frameCount:poseTick);
-            rows.Add(string.Format(culture,"{0},{1},{2:R},{3},{4},{5},{6:R},{7:R},{8:R},{9:R},{10},{11},{12},{13},{14},{15},{16},{17},{18}",
+            rows.Add(string.Format(culture,"{0},{1},{2:R},{3},{4},{5},{6:R},{7:R},{8:R},{9:R},{10},{11},{12},{13},{14},{15},{16},{17},{18},{19:R}",
                 Counter(),frequency,Time.realtimeSinceStartup,Time.frameCount,id,poseTick,
                 p[0],p[1],p[4],p[7],a.currentAnim.HashValue,a.GetCurrentAnim()?.animFile?.hashName.HashValue,p[8],
-                a.IsVisible() && v.z>0 && v.x>0 && v.x<1 && v.y>0 && v.y<1?1:0,running?1:0,sampledQpc,a.GetFirstFrameIndex(),a.GetCurrentNumFrames(),(int)a.PlayMode));
+                a.IsVisible() && v.z>0 && v.x>0 && v.x<1 && v.y>0 && v.y<1?1:0,running?1:0,sampledQpc,a.GetFirstFrameIndex(),a.GetCurrentNumFrames(),(int)a.PlayMode,a.GetPlaySpeed()));
         }
         internal void End(Action<string> log,int x,int y)
         {
