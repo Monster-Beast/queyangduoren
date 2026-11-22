@@ -66,10 +66,13 @@ namespace Queyang.Game
         static void SetToggle(GameObject widget, bool value)
         {
             var toggle = widget == null ? null : widget.GetComponent<KToggle>();
-            if (toggle == null || toggle.isOn == value) return;
-            // KToggle's own setter updates the native image and flourish. The
-            // Unity setter bypasses both; the speed commands are wired to onClick.
-            toggle.isOn = value;
+            if (toggle == null) return;
+            if (toggle.isOn != value) toggle.SetIsOnWithoutNotify(value);
+            // Selecting 1x can turn off 3x through Unity's ToggleGroup before
+            // we visit it. Its value is already false, while Klei still shows
+            // the old active image and flourish until they are refreshed.
+            foreach (var image in widget.GetComponents<ImageToggleState>()) image.SetActiveState(value);
+            toggle.ActivateFlourish(value);
         }
 
         internal static void Apply(int cell, ColonyCell data, bool hasEnvironment)
