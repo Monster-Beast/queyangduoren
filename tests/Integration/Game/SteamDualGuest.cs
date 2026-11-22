@@ -34,6 +34,7 @@ namespace Queyang.Integration
         readonly SteamPowerRange powerRange=new SteamPowerRange();
         readonly SteamBuildingMotionRange buildingMotion=new SteamBuildingMotionRange();
         readonly SteamResearchMotionRange researchMotion=new SteamResearchMotionRange();
+        readonly SteamDupeFeedbackRange dupeFeedback=new SteamDupeFeedbackRange();
         readonly SteamMeterRange batteryRange=new SteamMeterRange(), reservoirRange=new SteamMeterRange(true);
         readonly SteamDualOwnership ownership=new SteamDualOwnership();
         readonly Action<string> log;
@@ -284,6 +285,7 @@ namespace Queyang.Integration
                         SteamMatchmaking.SetLobbyMemberData(lobby,"qy_legacy_checked","1");
                     if (!researchMotion.Check(lobby,self,false,round,log)) break;
                     if (!buildingMotion.Check(lobby,self,false,round,log)) break;
+                    if (!dupeFeedback.Check(lobby,self,false,round,log)) break;
                     if (!constructionRange.Check(lobby,self,false,round,log)) break;
                     if (!areaDig.Check(lobby,self,false,round,Grid.InvalidCell,log)) break;
                     if (!health.Check(lobby,self,false,round,log)) break;

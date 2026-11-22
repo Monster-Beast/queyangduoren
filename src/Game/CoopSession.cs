@@ -172,6 +172,7 @@ namespace Queyang.Game
         {
             var old = link;
             if (nativeClient) NativeGuestScene.End();
+            NativeDupeFeedback.Reset();
             NativeWorldMirror.Reset();
             NativeToolCommands.Reset();
             OrderOwnership.Reset();

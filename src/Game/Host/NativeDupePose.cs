@@ -226,6 +226,7 @@ namespace Queyang.Game
             float now=Time.unscaledTime;
             foreach(var t in tracks.Values) Draw(t,now,false);
             NativeBuildingAnimation.Draw(now);
+            NativeDupeFeedback.Expire(now);
             NativeDigVisuals.Expire(now);
         }
         internal static void Forget(int id,int tick)

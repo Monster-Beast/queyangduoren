@@ -23,6 +23,7 @@ param(
     [switch]$CheckPower,
     [switch]$CheckBuildingMotion,
     [switch]$CheckResearchMotion,
+    [switch]$CheckDupeFeedback,
     [switch]$CheckBattery,
     [switch]$CheckReservoir,
     [switch]$CheckFallingOre,
@@ -177,6 +178,7 @@ foreach ($role in $roles) {
     $values.QY_POWER_RANGE=([int]$CheckPower.IsPresent).ToString()
     $values.QY_BUILDING_MOTION_RANGE=([int]$CheckBuildingMotion.IsPresent).ToString()
     $values.QY_RESEARCH_MOTION_RANGE=([int]$CheckResearchMotion.IsPresent).ToString()
+    $values.QY_DUPE_FEEDBACK=([int]$CheckDupeFeedback.IsPresent).ToString()
     $values.QY_BATTERY_RANGE=([int]$CheckBattery.IsPresent).ToString()
     $values.QY_RESERVOIR_RANGE=([int]$CheckReservoir.IsPresent).ToString()
     $values.QY_CHECK_FALLING_ORE=([int]$CheckFallingOre.IsPresent).ToString()
@@ -405,6 +407,21 @@ try {
                 if (!(Test-Path -LiteralPath $src)) { throw "Missing $($case[1]) $ext for $role." }
                 if ($src -ne $dest) { Copy-Item -LiteralPath $src -Destination $dest }
             }
+        }
+    }
+    if ($CheckDupeFeedback) {
+        foreach ($role in $roles) {
+            $d=$drivers[$role]
+            $report=Get-Physical $d $d.env.QY_SMOKE_REPORT
+            foreach ($marker in 'VISIBLE','HIDDEN') {
+                if (!(Select-String -LiteralPath $report -Pattern "^DUPE_FEEDBACK_$marker role=$role " -Quiet)) {
+                    throw "Missing duplicant feedback checkpoint $marker for $role."
+                }
+            }
+            $dest=Join-Path $d.base "dupe-feedback-$role.png"
+            $src=Get-Physical $d $dest
+            if (!(Test-Path -LiteralPath $src)) { throw "Missing duplicant feedback screenshot for $role." }
+            if ($src -ne $dest) { Copy-Item -LiteralPath $src -Destination $dest }
         }
     }
     if ($CheckBuried) {

@@ -101,7 +101,7 @@ namespace Queyang.Integration
                     frames.Add(frame);
                     if (previousFrame - frame > count / 2) wraps++;
                     previousFrame = frame;
-                    long stamp = System.Diagnostics.Stopwatch.GetTimestamp();
+                    long stamp = SteamMotionTrace.Counter();
                     samples.Add(FormattableString.Invariant($"{stamp},{now:R},{id},{worker},{body.currentAnim.HashValue},{frame},{count},{(host ? (float?)points : null)}"));
                     if (photo == null && frames.Count >= 4)
                     {
@@ -138,7 +138,7 @@ namespace Queyang.Integration
                         throw new InvalidDataException("Guest did not render the native research station's working frames");
                 }
                 File.WriteAllLines(Path.Combine(Folder, $"research-motion-{Role(host)}.csv"), samples);
-                log($"RESEARCH_MOTION_SPEED role={Role(host)} slow=True medium=False fast=False paused=False qpcHz={System.Diagnostics.Stopwatch.Frequency}");
+                log($"RESEARCH_MOTION_SPEED role={Role(host)} slow=True medium=False fast=False paused=False qpcHz={SteamMotionTrace.frequency}");
                 log(FormattableString.Invariant($"RESEARCH_MOTION_RANGE role={Role(host)} id={id} worker={worker} clip=working_loop frames={frames.Count}/{count} wraps={wraps} researchFraction={(host ? (float?)points : null)}"));
                 if (!host) SteamMatchmaking.SetLobbyMemberData(room, Prefix + "done", "1");
                 submitted = true;

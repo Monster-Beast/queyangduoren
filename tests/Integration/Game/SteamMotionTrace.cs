@@ -16,7 +16,7 @@ namespace Queyang.Integration
         // Win32 QPC uses the same hardware epoch in both Unity processes.
         [DllImport("kernel32.dll")] static extern bool QueryPerformanceCounter(out long value);
         [DllImport("kernel32.dll")] static extern bool QueryPerformanceFrequency(out long value);
-        static long Counter()
+        internal static long Counter()
         {
             if(!QueryPerformanceCounter(out long value)) throw new InvalidOperationException("Windows QPC unavailable");
             return value;
@@ -26,7 +26,7 @@ namespace Queyang.Integration
             if(!QueryPerformanceFrequency(out long value) || value<=0) throw new InvalidOperationException("Windows QPC frequency unavailable");
             return value;
         }
-        static readonly long frequency=Frequency();
+        internal static readonly long frequency=Frequency();
         static SteamMotionTrace active;
         static readonly System.Reflection.FieldInfo ticks=AccessTools.Field(typeof(NativeDupePose),"ticks");
         int sampledFrame;

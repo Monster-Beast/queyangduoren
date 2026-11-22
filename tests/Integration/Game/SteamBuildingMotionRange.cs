@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using HarmonyLib;
 using Queyang.Game;
 using Steamworks;
@@ -19,7 +18,6 @@ namespace Queyang.Integration
         static readonly HashedString Loop = new HashedString("working_loop");
         static readonly AccessTools.FieldRef<Battery, MeterController> Meter =
             AccessTools.FieldRefAccess<Battery, MeterController>("meter");
-        [DllImport("kernel32.dll")] static extern bool QueryPerformanceCounter(out long value);
 
         readonly List<string> rows = new List<string> { "qpc,time,generator_id,generator_clip,generator_frame,battery_id,meter_frame,host_joules" };
         readonly HashSet<int> loopFrames = new HashSet<int>();
@@ -206,7 +204,7 @@ namespace Queyang.Integration
                 else fallFrames.Add(meterFrame);
                 previousMeter = meterFrame;
             }
-            if (!QueryPerformanceCounter(out long qpc)) throw new InvalidOperationException("Native presentation timestamp unavailable");
+            long qpc = SteamMotionTrace.Counter();
             rows.Add(FormattableString.Invariant($"{qpc},{now:R},{generatorId},{motor.currentAnim.HashValue},{motionFrame},{batteryId},{meterFrame},{(host?(float?)battery.JoulesAvailable:null)}"));
         }
 
