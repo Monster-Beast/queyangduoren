@@ -66,14 +66,14 @@ namespace Queyang.Game
                 return true;
             }
             string encoded = Convert.ToBase64String(RenameEncoding.GetBytes(name)).Replace('/', '_');
+            string visibleName = target.GetComponent<KSelectable>()?.GetProperName() ?? "";
             if (dupe)
-                Send($"name/{id}/{Digest(target.GetComponent<KSelectable>()?.GetProperName() ?? "")}/{encoded}");
-            else if (target != buildingNameTarget || buildingNameVersion == null)
-                NativeGuestFeedback.Show("正在同步房主的建筑名称，请稍后重试。");
+                Send($"name/{id}/{Digest(visibleName)}/{encoded}");
             else
             {
                 Grid.CellToXY(cell,out int x,out int y);
-                Send($"buildingname/{id}/{buildingNameVersion}/{encoded}",x,y);
+                string revision = target == buildingNameTarget ? buildingNameVersion : null;
+                Send($"buildingname/{id}/{revision ?? Digest(visibleName)}/{encoded}",x,y);
             }
             return true;
         }

@@ -45,7 +45,11 @@ namespace Queyang.Integration
                 originalCamera = camera.transform.position;
                 zoom = camera.OrthographicSize;
             }
-            if (Time.unscaledTime > deadline) throw new TimeoutException($"Room controls host={host} stage={stage} clicked={clicked}");
+            if (Time.unscaledTime > deadline)
+            {
+                var named = nameId > 0 ? NamedBuilding(host) : null;
+                throw new TimeoutException($"Room controls host={host} stage={stage} clicked={clicked} name={named.GetProperName()} saved={named?.GetComponent<UserNameable>()?.savedName} status={CoopSession.Status} feedback={NativeGuestFeedback.Text}");
+            }
             var speed = SpeedControlScreen.Instance;
             if (id == 0 && host)
             {
