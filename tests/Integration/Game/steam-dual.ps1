@@ -25,6 +25,7 @@ param(
     [switch]$CheckBuildingMotion,
     [switch]$CheckResearchMotion,
     [switch]$CheckDupeFeedback,
+    [switch]$CheckUpgradeVisual,
     [switch]$CheckRoomControls,
     [switch]$CheckBattery,
     [switch]$CheckReservoir,
@@ -182,6 +183,7 @@ foreach ($role in $roles) {
     $values.QY_BUILDING_MOTION_RANGE=([int]$CheckBuildingMotion.IsPresent).ToString()
     $values.QY_RESEARCH_MOTION_RANGE=([int]$CheckResearchMotion.IsPresent).ToString()
     $values.QY_DUPE_FEEDBACK=([int]$CheckDupeFeedback.IsPresent).ToString()
+    $values.QY_UPGRADE_VISUAL=([int]$CheckUpgradeVisual.IsPresent).ToString()
     $values.QY_ROOM_CONTROLS=([int]$CheckRoomControls.IsPresent).ToString()
     $values.QY_BATTERY_RANGE=([int]$CheckBattery.IsPresent).ToString()
     $values.QY_RESERVOIR_RANGE=([int]$CheckReservoir.IsPresent).ToString()
@@ -424,6 +426,21 @@ try {
             }
             if (!(Select-String -LiteralPath $report -Pattern "^ROOM_CONTROLS_REJOIN role=$role " -Quiet)) {
                 throw "Missing renamed duplicant on rejoin for $role."
+            }
+        }
+    }
+    if ($CheckUpgradeVisual) {
+        foreach ($role in $roles) {
+            $d=$drivers[$role]
+            $report=Get-Physical $d $d.env.QY_SMOKE_REPORT
+            foreach ($stage in 0..1) {
+                if (!(Select-String -LiteralPath $report -Pattern "^UPGRADE_RANGE role=$role stage=$stage .* removed=True$" -Quiet)) {
+                    throw "Missing upgrade effect stage $stage for $role."
+                }
+                $dest=Join-Path $d.base "upgrade-$role-$stage.png"
+                $src=Get-Physical $d $dest
+                if (!(Test-Path -LiteralPath $src)) { throw "Missing upgrade screenshot for $role stage $stage." }
+                if ($src -ne $dest) { Copy-Item -LiteralPath $src -Destination $dest }
             }
         }
     }

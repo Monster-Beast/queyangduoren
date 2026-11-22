@@ -227,6 +227,7 @@ namespace Queyang.Game
             foreach(var t in tracks.Values) Draw(t,now,false);
             NativeBuildingAnimation.Draw(now);
             NativeDupeFeedback.Expire(now);
+            NativeUpgradeVisuals.Draw(now);
             NativeDigVisuals.Expire(now);
         }
         internal static void Forget(int id,int tick)

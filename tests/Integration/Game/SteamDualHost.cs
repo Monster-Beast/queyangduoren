@@ -35,6 +35,7 @@ namespace Queyang.Integration
         readonly SteamBuildingMotionRange buildingMotion=new SteamBuildingMotionRange();
         readonly SteamResearchMotionRange researchMotion=new SteamResearchMotionRange();
         readonly SteamDupeFeedbackRange dupeFeedback=new SteamDupeFeedbackRange();
+        readonly SteamUpgradeVisualRange upgradeVisual=new SteamUpgradeVisualRange();
         readonly SteamMeterRange batteryRange=new SteamMeterRange(), reservoirRange=new SteamMeterRange(true);
         readonly SteamDualOwnership ownership=new SteamDualOwnership();
         readonly Action<string> log;
@@ -171,6 +172,7 @@ namespace Queyang.Integration
                     if (!researchMotion.Check(lobby,friend,true,round,log)) return false;
                     if (!buildingMotion.Check(lobby,friend,true,round,log)) return false;
                     if (!dupeFeedback.Check(lobby,friend,true,round,log)) return false;
+                    if (!upgradeVisual.Check(lobby,friend,round,true,log)) return false;
                     if (!floorRange.Check(lobby,friend,true,round,log)) return false;
                     if (!constructionRange.Check(lobby,friend,true,round,log)) return false;
                     if (!areaDig.Check(lobby,friend,true,round,candidate,log)) return false;
