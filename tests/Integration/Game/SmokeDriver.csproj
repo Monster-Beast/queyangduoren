@@ -13,5 +13,6 @@
     <Reference Include="Queyang.Core" HintPath="$(FixturePackageDir)/Queyang.Core.dll" Private="false" Condition="'$(FixturePackageDir)' != ''" />
     <GameAssembly Include="Assembly-CSharp;Assembly-CSharp-firstpass;UnityEngine;UnityEngine.CoreModule;UnityEngine.ScreenCaptureModule;UnityEngine.IMGUIModule;UnityEngine.UIModule;UnityEngine.UI;Unity.TextMeshPro;0Harmony;com.rlabrecque.steamworks.net"/>
     <Reference Include="@(GameAssembly->'$(Managed)/%(Identity).dll')" Private="false"/>
+    <Reference Include="$(Managed)/UnityEngine.AnimationModule.dll" Private="false"/>
   </ItemGroup>
 </Project>

@@ -21,7 +21,11 @@ namespace Queyang.Game
             internal byte Kind;
             internal bool Visible;
             internal string Text;
-            internal float Time;
+            internal float Time, GameTime, Phase, Rate;
+            internal float RenderedPhase = -1;
+            internal HierarchyReferences Bubble;
+            internal Animation Playback;
+            internal AnimationState State;
         }
 
         static readonly Dictionary<(int Id, byte Kind), Sample> bubbles = new Dictionary<(int, byte), Sample>();
@@ -81,7 +85,8 @@ namespace Queyang.Game
             string label = text ?? "";
             if (Encoding.UTF8.GetByteCount(label) > 800) label = "";
             bubbles[key] = new Sample {
-                Target = target, Kind = kind, Serial = ++serial, Visible = visible, Text = label, Time = Time.unscaledTime,
+                Target = target, Kind = kind, Serial = ++serial, Visible = visible, Text = label,
+                Time = Time.unscaledTime, GameTime = Time.time,
                 Backdrop = SpriteHash(backdrop), Icon = SpriteHash(icon), Mode = SpriteHash(mode)
             };
         }
@@ -124,7 +129,8 @@ namespace Queyang.Game
                 if (sample.Kind != FloatingEffect)
                 {
                     writer.Write(sample.Visible); writer.Write(sample.Backdrop);
-                    writer.Write(sample.Mode); writer.Write(sample.Text);
+                    writer.Write(sample.Mode); writer.Write(Mathf.Clamp(Time.time - sample.GameTime, 0f, 10f));
+                    writer.Write(Mathf.Clamp(Time.timeScale, 0f, 10f)); writer.Write(sample.Text);
                 }
                 return stream.ToArray();
             }
@@ -143,7 +149,10 @@ namespace Queyang.Game
                 if (kind != FloatingEffect)
                 {
                     sample.Visible = reader.ReadBoolean(); sample.Backdrop = reader.ReadInt32();
-                    sample.Mode = reader.ReadInt32(); sample.Text = reader.ReadString();
+                    sample.Mode = reader.ReadInt32(); sample.Phase = reader.ReadSingle();
+                    sample.Rate = reader.ReadSingle(); sample.Text = reader.ReadString();
+                    if (!(sample.Phase >= 0 && sample.Phase <= 10 && sample.Rate >= 0 && sample.Rate <= 10))
+                        throw new InvalidDataException("Invalid duplicant feedback animation phase");
                     if (Encoding.UTF8.GetByteCount(sample.Text) > 800) throw new InvalidDataException("Oversized duplicant feedback");
                 }
                 if (reader.BaseStream.Position != packet.Length) throw new InvalidDataException("Trailing duplicant feedback data");
@@ -165,6 +174,9 @@ namespace Queyang.Game
                     if (sequence < previous.Serial) return;
                     if (sequence == previous.Serial && previous.Target == sample.Target)
                     {
+                        if (sample.Phase < previous.Phase) return;
+                        previous.Phase = sample.Phase;
+                        previous.Rate = sample.Rate;
                         previous.Time = sample.Time;
                         return;
                     }
@@ -199,7 +211,39 @@ namespace Queyang.Game
                 screen.SetThoughtBubbleConvoDisplay(sample.Target, visible, sample.Text, backdrop, icon, mode);
             }
             else screen.SetThoughtBubbleDisplay(sample.Target, visible, sample.Text, backdrop, icon);
+            if (visible)
+            {
+                sample.Bubble = sample.Kind == ConversationBubble ? entry.thoughtBubbleConvo : entry.thoughtBubble;
+                Animate(sample, sample.Time);
+            }
             return true;
+        }
+
+        static void StartAnimation(Sample sample)
+        {
+            if (sample.Bubble == null || !sample.Bubble.gameObject.activeInHierarchy) return;
+            var animation = sample.Bubble.GetComponent<Animation>();
+            var clip = animation?.clip;
+            if (clip == null || !animation.Play(clip.name)) return;
+            // The original legacy UI clips start at zero scale. Drive them
+            // from host time because the frozen replica can stay at timeScale 0.
+            sample.Playback = animation;
+            sample.State = animation[clip.name];
+            sample.State.speed = 0f;
+            sample.State.wrapMode = WrapMode.ClampForever;
+        }
+
+        static void Animate(Sample sample, float now)
+        {
+            if (!sample.Visible) return;
+            if (sample.Playback == null) StartAnimation(sample);
+            if (sample.State == null) return;
+            float seconds = sample.Phase + sample.Rate * Mathf.Clamp(now - sample.Time, 0f, .12f);
+            seconds = Mathf.Clamp(seconds, Mathf.Max(0f, sample.RenderedPhase), sample.State.length);
+            if (Mathf.Abs(sample.RenderedPhase - seconds) < .001f) return;
+            sample.RenderedPhase = seconds;
+            sample.State.time = seconds;
+            sample.Playback.Sample();
         }
 
         static HierarchyReferences CreateBubble(GameObject prefab, GameObject parent, string name)
@@ -216,6 +260,7 @@ namespace Queyang.Game
             foreach (var row in displayed)
             {
                 if (now - row.Value.Time > BubbleExpiry || row.Value.Target == null) expiredBubbles.Add(row.Key);
+                else Animate(row.Value, now);
             }
             foreach (var key in expiredBubbles)
             {

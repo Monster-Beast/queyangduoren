@@ -104,6 +104,9 @@ namespace Queyang.Integration
                     }
                     if (visibleSince == 0) visibleSince = now;
                     if (now - visibleSince < .35f) return false;
+                    var animation = active.GetComponent<Animation>();
+                    float? seconds = animation?.clip == null ? (float?)null : animation[animation.clip.name].time;
+                    log(FormattableString.Invariant($"DUPE_FEEDBACK_ART role={Role(host)} timeScale={Time.timeScale:R} imageActive={icon.isActiveAndEnabled} cull={icon.canvasRenderer.cull} scale={icon.rectTransform.lossyScale} size={icon.rectTransform.rect.size} clip={animation?.clip?.name} seconds={seconds:R}"));
                     string folder = Path.GetDirectoryName(Environment.GetEnvironmentVariable("QY_SMOKE_REPORT"));
                     photo = new FixtureFrame(Path.Combine(folder, $"dupe-feedback-{Role(host)}.png"));
                     photo.Capture();
@@ -138,7 +141,8 @@ namespace Queyang.Integration
 
         static string Role(bool host) => host ? "host" : "guest";
         static bool Visible(Image image, Sprite expected) => image != null && image.isActiveAndEnabled &&
-            image.sprite == expected && image.canvasRenderer.GetInheritedAlpha() > .1f;
+            image.sprite == expected && image.canvasRenderer.GetInheritedAlpha() > .1f &&
+            image.rectTransform.lossyScale.x > .001f && image.rectTransform.lossyScale.y > .001f;
         static string Read(CSteamID room, string field) => SteamMatchmaking.GetLobbyData(room, Prefix + field);
         static void Publish(CSteamID room, string field, string value)
         {

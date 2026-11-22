@@ -14,6 +14,7 @@
     <ProjectReference Include="../Core/Core.csproj"/>
     <GameAssembly Include="Assembly-CSharp;Assembly-CSharp-firstpass;0Harmony;com.rlabrecque.steamworks.net;UnityEngine;UnityEngine.CoreModule;UnityEngine.IMGUIModule;Unity.TextMeshPro;UnityEngine.TextRenderingModule;UnityEngine.InputLegacyModule;UnityEngine.UIModule;UnityEngine.UI;UnityEngine.Physics2DModule;UnityEngine.PhysicsModule"/>
     <Reference Include="@(GameAssembly->'$(Managed)/%(Identity).dll')" Private="false"/>
+    <Reference Include="$(Managed)/UnityEngine.AnimationModule.dll" Private="false"/>
   </ItemGroup>
   <Target Name="CheckGame" BeforeTargets="ResolveAssemblyReferences">
     <Error Condition="!Exists('$(Managed)/Assembly-CSharp.dll')" Text="Set ONI_GAME_DIR to the installed OxygenNotIncluded directory."/>
