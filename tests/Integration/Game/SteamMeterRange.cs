@@ -82,12 +82,12 @@ namespace Queyang.Integration
                 if(meter==null || meter.GetCurrentNumFrames()==0) return false;
                 string amount=ChangeReading();
                 meter.UpdateAnim(0);
-                string data=FormattableString.Invariant($"{cell}|{id}|{amount}|{meter.GetCurrentFrameIndex()-meter.GetFirstFrameIndex()}");
+                string data=FormattableString.Invariant($"{cell}|{id}|{amount}|{meter.GetCurrentFrameIndex()-meter.GetFirstFrameIndex()}|{meter.GetPositionPercent():R}");
                 if(!SteamMatchmaking.SetLobbyData(room,Key("state"),data)) throw new IOException("Meter range state unavailable");
                 prepared=stage;
             }
             var state=SteamMatchmaking.GetLobbyData(room,Key("state")).Split('|');
-            if(state.Length!=4) return false;
+            if(state.Length!=5) return false;
             cell=int.Parse(state[0],culture);id=int.Parse(state[1],culture);
             int expected=int.Parse(state[3],culture);
             var target=host?building.GetComponent<KSelectable>():NativeWorldMirror.GetBuildingSelectable(cell,id);
@@ -109,7 +109,7 @@ namespace Queyang.Integration
             {
                 if(Time.realtimeSinceStartup>=nextLog)
                 {
-                    log($"{logName}_WAIT stage={stage} id={id} readout={showReadout} frame={localFrame}/{expected}");
+                    log($"{logName}_WAIT stage={stage} id={id} readout={showReadout} frame={localFrame}/{expected} position={actual?.GetPositionPercent()}/{state[4]} frames={actual?.GetCurrentNumFrames()} stopped={actual?.IsStopped()} clip={actual?.currentAnim}");
                     nextLog=Time.realtimeSinceStartup+5;
                 }
                 return false;
