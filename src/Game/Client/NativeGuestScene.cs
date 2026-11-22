@@ -24,6 +24,23 @@ namespace Queyang.Game
         internal static bool Ready => phase == Phase.Live;
         internal static bool ApplicationQuitting { get; private set; }
 
+        // The guest renders the host's sampled grid while its simulation is suspended.
+        // Use ONI's grid textures directly for gas instead of its simulation-timed blends.
+        [HarmonyPatch(typeof(PropertyTextures), "LateUpdate", new Type[0])]
+        private static class RenderGuestGas
+        {
+            private static readonly int Pressure = Shader.PropertyToID("_GasPressureTex");
+            private static readonly int Colour = Shader.PropertyToID("_GasColourTex");
+
+            private static void Postfix(PropertyTextures __instance)
+            {
+                if (!Ready || !CoopSession.IsNativeClient || global::Game.Instance == null ||
+                    global::Game.Instance.IsLoading() || !Grid.IsInitialized()) return;
+                Shader.SetGlobalTexture(Pressure, __instance.GetTexture(PropertyTextures.Property.GasPressure));
+                Shader.SetGlobalTexture(Colour, __instance.GetTexture(PropertyTextures.Property.GasColour));
+            }
+        }
+
         internal static void QuitApplication()
         {
             ApplicationQuitting = true;

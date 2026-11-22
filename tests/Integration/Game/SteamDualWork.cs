@@ -13,6 +13,8 @@ namespace Queyang.Integration
         const string TestName="Co-op night shift";
         int stage,doneRound,prior,initialCount;
         bool clicked,opened;
+        int reportedStage=-1;
+        float lastReport;
         string jobId,groupId;
         FixtureFrame frame;
         static string Data(CSteamID lobby,string key)=>SteamMatchmaking.GetLobbyData(lobby,"qy_work_"+key);
@@ -57,6 +59,11 @@ namespace Queyang.Integration
             var list=ScheduleManager.Instance.GetSchedules();
             var s=list.FirstOrDefault(item=>item.name==TestName);
             var scheduleScreen=manager.scheduleScreen;
+            if (reportedStage!=stage || Time.unscaledTime-lastReport>=8f)
+            {
+                log($"DUAL_WORK_PROGRESS round={round} stage={stage} schedules={list.Count} renamed={s!=null} clicked={clicked}");
+                reportedStage=stage;lastReport=Time.unscaledTime;
+            }
             if (stage<5 && !opened)
             {
                 manager.OnButtonClick(Field<ManagementMenu.ManagementMenuToggleInfo>(manager,"scheduleInfo"));

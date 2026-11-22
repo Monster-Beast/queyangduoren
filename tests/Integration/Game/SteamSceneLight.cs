@@ -67,6 +67,12 @@ namespace Queyang.Integration
                     var texture=Shader.GetGlobalTexture(shader); if (texture==null) continue;
                     var c=Pixel(texture,x,y);
                     line.Append(" ").Append(name).Append("=").Append(ColorUtility.ToHtmlStringRGBA(c));
+                    if (name=="GasPressure" || name=="GasColour")
+                    {
+                        var property=(PropertyTextures.Property)AccessTools.Field(t,"simProperty").GetValue(prop);
+                        var raw=pt.GetTexture(property);
+                        if (raw!=null) line.Append(" raw").Append(name).Append("=").Append(ColorUtility.ToHtmlStringRGBA(Pixel(raw,x,y)));
+                    }
                 }
                 line.Append(" rawFlow=").Append(Raw("externalFlowTex",cell,8)).Append(" rawMatter=").Append(Raw("externalMaterialDataTex",cell,4));
                 log(line.ToString());
