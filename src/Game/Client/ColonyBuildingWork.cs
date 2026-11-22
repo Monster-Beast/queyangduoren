@@ -10,7 +10,7 @@ namespace Queyang.Game
         public int Owner,Token;
         public float Fill,X,Y,Z;
         public uint Color;
-        public bool AutoHide;
+        public bool AutoHide,Dig;
         public long Key=>((long)Cell<<32)|(uint)Token;
     }
 
@@ -44,7 +44,8 @@ namespace Queyang.Game
             foreach(var b in WorkBars)
             {
                 if(b.Owner<=0 || b.Token==0 || !tokens.Add(b.Token) || b.Key<=last || b.Key<WorkBarFrom || b.Key>WorkBarThrough || b.Cell>=Cells.Length ||
-                    (Cells[b.Cell].Flags&1)==0 || !(b.Fill>=0 && b.Fill<=1) || !(Math.Abs(b.X)<=100000 && Math.Abs(b.Y)<=100000 && Math.Abs(b.Z)<=10000))
+                    (Cells[b.Cell].Flags&1)==0 || b.Dig && (Cells[b.Cell].Flags&8)==0 ||
+                    !(b.Fill>=0 && b.Fill<=1) || !(Math.Abs(b.X)<=100000 && Math.Abs(b.Y)<=100000 && Math.Abs(b.Z)<=10000))
                     throw new InvalidDataException("Invalid building work bar");
                 last=b.Key;
             }
@@ -55,7 +56,7 @@ namespace Queyang.Game
             foreach(var b in WorkBars)
             {
                 w.Write(b.Cell);w.Write(b.Owner);w.Write(b.Token);w.Write(b.Fill);
-                w.Write(b.X);w.Write(b.Y);w.Write(b.Z);w.Write(b.Color);w.Write(b.AutoHide);
+                w.Write(b.X);w.Write(b.Y);w.Write(b.Z);w.Write(b.Color);w.Write((byte)((b.AutoHide?1:0)|(b.Dig?2:0)));
             }
         }
         void ReadWorkBars(BinaryReader r)
@@ -68,8 +69,8 @@ namespace Queyang.Game
                 WorkBars[i]=new ColonyWorkBar { Cell=r.ReadUInt16(),Owner=r.ReadInt32(),Token=r.ReadInt32(),
                     Fill=r.ReadSingle(),X=r.ReadSingle(),Y=r.ReadSingle(),Z=r.ReadSingle(),Color=r.ReadUInt32() };
                 byte flag=r.ReadByte();
-                if(flag>1) throw new InvalidDataException("Invalid work bar visibility flag");
-                WorkBars[i].AutoHide=flag==1;
+                if(flag>3) throw new InvalidDataException("Invalid work bar flag");
+                WorkBars[i].AutoHide=(flag&1)!=0;WorkBars[i].Dig=(flag&2)!=0;
             }
             ValidateWorkBars();
         }

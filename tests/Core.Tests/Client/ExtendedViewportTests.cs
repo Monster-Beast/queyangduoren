@@ -24,6 +24,21 @@ namespace Queyang.Core.Tests
         }
 
         [Fact]
+        public void DigWorkBarIsBoundToAnAuthoritativeDigOrder()
+        {
+            var view=View();
+            view.LightMask=new byte[ColonyView.Width*ColonyView.Height/8];
+            view.HasDupeAppearance=true;
+            view.Cells[5].Flags=11;
+            view.WorkBars=new[]{new ColonyWorkBar{Cell=5,Owner=42,Token=-7,Dig=true,AutoHide=true,Fill=.45f}};
+            var row=Assert.Single(ColonyView.Decode(view.Encode()).WorkBars);
+            Assert.True(row.Dig && row.AutoHide);
+            Assert.Equal(.45f,row.Fill);
+            view.Cells[5].Flags=3;
+            Assert.Throws<InvalidDataException>(()=>view.Encode());
+        }
+
+        [Fact]
         public void BuildingWarningPagesCoverAbsentAndPresentIconsWithoutGaps()
         {
             var view=View();

@@ -27,6 +27,7 @@ namespace Queyang.Integration
         readonly SteamDualLighting lighting=new SteamDualLighting();
         readonly SteamDualHealth health=new SteamDualHealth();
         readonly SteamConstructionRange constructionRange=new SteamConstructionRange();
+        readonly SteamAreaDigRange areaDig=new SteamAreaDigRange();
         readonly SteamResearchRange researchRange=new SteamResearchRange();
         readonly SteamPowerRange powerRange=new SteamPowerRange();
         readonly SteamMeterRange batteryRange=new SteamMeterRange(), reservoirRange=new SteamMeterRange(true);
@@ -276,6 +277,7 @@ namespace Queyang.Integration
                     if (SteamMatchmaking.GetLobbyMemberData(lobby,self,"qy_legacy_checked")!="1")
                         SteamMatchmaking.SetLobbyMemberData(lobby,"qy_legacy_checked","1");
                     if (!constructionRange.Check(lobby,self,false,round,log)) break;
+                    if (!areaDig.Check(lobby,self,false,round,Grid.InvalidCell,log)) break;
                     if (!health.Check(lobby,self,false,round,log)) break;
                     if (!lighting.Check(lobby,self,false,round,log)) break;
                     if (!buriedItems.Check(lobby,self,false,round,log)) break;

@@ -25,6 +25,7 @@ namespace Queyang.Integration
         readonly SteamDualLighting lighting=new SteamDualLighting();
         readonly SteamDualHealth health=new SteamDualHealth();
         readonly SteamConstructionRange constructionRange=new SteamConstructionRange();
+        readonly SteamAreaDigRange areaDig=new SteamAreaDigRange();
         readonly SteamResearchRange researchRange=new SteamResearchRange();
         readonly SteamPowerRange powerRange=new SteamPowerRange();
         readonly SteamMeterRange batteryRange=new SteamMeterRange(), reservoirRange=new SteamMeterRange(true);
@@ -159,6 +160,7 @@ namespace Queyang.Integration
                     // Other fixture stages let the colony run, and a worker may finish this old order.
                     if (!ownership.Legacy(lobby,true,log) || SteamMatchmaking.GetLobbyMemberData(lobby,friend,"qy_legacy_checked")!="1") return false;
                     if (!constructionRange.Check(lobby,friend,true,round,log)) return false;
+                    if (!areaDig.Check(lobby,friend,true,round,candidate,log)) return false;
                     if (!health.Check(lobby,friend,true,round,log)) return false;
                     if (!lighting.Check(lobby,friend,true,round,log)) return false;
                     if (!buriedItems.Check(lobby,friend,true,round,log)) return false;
@@ -415,7 +417,7 @@ namespace Queyang.Integration
             static void Postfix(string action,int x,int y,string __result)
             {
                 var test=observing;
-                if(test==null || test.round!=1 || test.digSeen || action!="dig" || __result!="OK Dig designated") return;
+                if(test==null || test.round!=1 || test.areaDig.Busy || test.digSeen || action!="dig" || __result!="OK Dig designated") return;
                 int cell=Grid.XYToCell(x,y);
                 // Observe the order while on the main thread. The actual command and placement ran in HostWorld.
                 if(cell!=test.candidate || !Grid.IsValidCell(cell) || !Grid.Solid[cell] || Diggable.GetDiggable(cell)==null)
