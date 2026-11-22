@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using HarmonyLib;
 using Queyang.Game;
 using Steamworks;
 using UnityEngine;
@@ -10,10 +11,11 @@ namespace Queyang.Integration
     internal sealed class SteamAreaDigRange
     {
         const int Width=3,Height=2;
-        int start=-1,stage,tracked=-1,changes;
+        int start=-1,stage,tracked=-1,changes,spans;
+        static SteamAreaDigRange awaiting;
         int[] cells;
         float limit,last,min=1,max,nextLog;
-        bool issued;
+        bool issued,heldWork;
         FixtureFrame frame;
         Vector3 oldCamera;
         float oldZoom;
@@ -22,6 +24,15 @@ namespace Queyang.Integration
 
         static int[] Rectangle(int origin)=>Enumerable.Range(0,Width*Height)
             .Select(i=>origin+i%Width+i/Width*Grid.WidthInCells).ToArray();
+        [HarmonyPatch(typeof(HostWorld),nameof(HostWorld.Execute))]
+        static class BatchWitness
+        {
+            static void Postfix(string action,int x,int y,string __result)
+            {
+                if(awaiting==null || action!="digspan/3" || __result!="OK Area excavation designated 3/3") return;
+                if(awaiting.cells.Contains(Grid.XYToCell(x,y))) awaiting.spans++;
+            }
+        }
         static int Find(int reserved)
         {
             int world=ClusterManager.Instance.activeWorldId;
@@ -68,6 +79,7 @@ namespace Queyang.Integration
                 else if(!int.TryParse(SteamMatchmaking.GetLobbyData(room,"qy_area_start"),out start))
                 {start=-1;return false;}
                 cells=Rectangle(start);
+                if(host) awaiting=this;
             }
             var point=Grid.CellToPosCCC(start,Grid.SceneLayer.Move);
             var focus=new Vector3(point.x+1,point.y+.5f,camera.transform.position.z);
@@ -86,23 +98,32 @@ namespace Queyang.Integration
                 if(!cells.All(c=>(host ? Diggable.GetDiggable(c)!=null : NativeWorldMirror.IsDigVisible(c)) &&
                     OrderOwnership.At(c).Count(mark=>mark.Kind==OrderKind.Dig && mark.Author==2)==1 &&
                     OrderOwnership.At(c).Count(mark=>mark.Kind==OrderKind.Dig)==1)) return false;
+                if(host && spans!=Height) throw new InvalidDataException("The single area drag did not arrive as two complete rows");
                 if(!Picture(host,"orders")) return false;
                 if(host && SteamMatchmaking.GetLobbyMemberData(room,peer,"qy_area_ready")!="1") return false;
                 if(!host) SteamMatchmaking.SetLobbyMemberData(room,"qy_area_ready","1");
-                else foreach(int c in cells)
-                    Diggable.GetDiggable(c).GetComponent<Prioritizable>().SetMasterPriority(new PrioritySetting(PriorityScreen.PriorityClass.topPriority,9));
-                log($"AREA_DIG_ORDERS role={(host?"host":"guest")} count={cells.Length} author=2 cells={string.Join(",",cells)}");
+                else
+                {
+                    SpeedControlScreen.Instance.SetSpeed(0);
+                    foreach(int c in cells)
+                        Diggable.GetDiggable(c).GetComponent<Prioritizable>().SetMasterPriority(new PrioritySetting(PriorityScreen.PriorityClass.topPriority,9));
+                }
+                log($"AREA_DIG_ORDERS role={(host?"host":"guest")} count={cells.Length} author=2 rowBatches={spans} cells={string.Join(",",cells)}");
+                if(host) awaiting=null;
                 stage++;frame=null;
             }
             if(stage==1)
             {
-                if(host && changes<2 && SpeedControlScreen.Instance.IsPaused) SpeedControlScreen.Instance.Unpause(false);
+                bool peerReady=host && SteamMatchmaking.GetLobbyMemberData(room,peer,"qy_area_bar_ready")=="1";
+                if(host && (tracked<0 || peerReady && changes<2) && SpeedControlScreen.Instance.IsPaused)
+                    SpeedControlScreen.Instance.Unpause(false);
                 if(tracked<0)
                 {
                     if(host)
                     {
                         tracked=Array.Find(cells,c=>Reading(c,true) is ProgressBar bar && bar.PercentFull>.015f && bar.PercentFull<.75f);
                         if(tracked==0) {tracked=-1;return false;}
+                        SpeedControlScreen.Instance.Pause(false);
                         SteamMatchmaking.SetLobbyData(room,"qy_area_work",tracked.ToString());
                     }
                     else if(!int.TryParse(SteamMatchmaking.GetLobbyData(room,"qy_area_work"),out tracked))
@@ -115,15 +136,20 @@ namespace Queyang.Integration
                     if(amount>0 && amount<1 && (changes==0 || amount-last>.015f))
                     { changes++;last=amount;min=Math.Min(min,amount);max=Math.Max(max,amount); }
                 }
+                if(!host && changes>0) SteamMatchmaking.SetLobbyMemberData(room,"qy_area_bar_ready","1");
+                if(host && changes>=2 && !heldWork) {SpeedControlScreen.Instance.Pause(false);heldWork=true;}
                 if(Time.realtimeSinceStartup>=nextLog && changes<2)
                 {
                     nextLog=Time.realtimeSinceStartup+4;
                     log($"AREA_DIG_WORK_WAIT cell={tracked} changes={changes} bar={working?.PercentFull}");
                 }
                 if(changes<2 || !Picture(host,"work")) return false;
+                if(host && SteamMatchmaking.GetLobbyMemberData(room,peer,"qy_area_bar_work")!="1") return false;
+                if(!host) SteamMatchmaking.SetLobbyMemberData(room,"qy_area_bar_work","1");
                 log(FormattableString.Invariant($"AREA_DIG_BAR cell={tracked} changes={changes} min={min:R} max={max:R}"));
                 stage++;frame=null;
             }
+            if(host && SpeedControlScreen.Instance.IsPaused) SpeedControlScreen.Instance.Unpause(false);
             if(Grid.Solid[tracked] || Reading(tracked,host)!=null) return false;
             if(host && SteamMatchmaking.GetLobbyMemberData(room,peer,"qy_area_finished")!="1") return false;
             if(!host) SteamMatchmaking.SetLobbyMemberData(room,"qy_area_finished","1");

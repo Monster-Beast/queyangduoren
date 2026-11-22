@@ -276,6 +276,8 @@ namespace Queyang.Game
             if (world != null && action != null && action.Length <= 96 && action.StartsWith("buildOptions/", StringComparison.Ordinal))
                 return Options(action, world);
             if (action == "overview" && world != null) return Overview(world);
+            if(world!=null && action!=null && action.StartsWith("digspan/",StringComparison.Ordinal))
+                return DigSpan(action,x,y,world);
             if (world == null || !VisibleCell(world, x, y, out cell) || !Grid.IsValidBuildingCell(cell))
                 return "ERROR Cell unavailable";
             if (action != null && action.Length <= 512 && action.StartsWith("plan/",StringComparison.Ordinal))
@@ -315,10 +317,7 @@ namespace Queyang.Game
             {
                 case "inspect": return Inspect(cell);
                 case "dig":
-                    if (DigTool.Instance == null || !Grid.Solid[cell] || !Diggable.IsDiggable(cell) ||
-                        Diggable.Undiggable(Grid.Element[cell]) || Diggable.GetDiggable(cell) != null)
-                        return "ERROR Cell cannot be designated for digging";
-                    return DigTool.PlaceDig(cell, 0) == null ? "ERROR Dig tool declined" : "OK Dig designated";
+                    return DigCell(cell);
                 case "ladder": return Place(LadderConfig.ID, cell, world);
                 case "tile": return Place(TileConfig.ID, cell, world);
                 case "door": return Place(DoorConfig.ID, cell, world);
@@ -347,6 +346,24 @@ namespace Queyang.Game
                     return EditChecked(requested,order);
             }
             return "ERROR The selected order or building has changed";
+        }
+
+        static string DigCell(int cell) =>
+            DigTool.Instance==null || !Grid.Solid[cell] || !Diggable.IsDiggable(cell) ||
+            Diggable.Undiggable(Grid.Element[cell]) || Diggable.GetDiggable(cell)!=null
+                ? "ERROR Cell cannot be designated for digging"
+                : DigTool.PlaceDig(cell,0)==null?"ERROR Dig tool declined":"OK Dig designated";
+
+        static string DigSpan(string action,int x,int y,WorldContainer world)
+        {
+            if(action.Length>10 || !int.TryParse(action.Substring(8),NumberStyles.None,CultureInfo.InvariantCulture,out int length) ||
+                length<2 || length>64 || x<0 || x>Grid.WidthInCells-length)
+                return "ERROR Invalid excavation row";
+            int accepted=0;
+            for(int offset=0;offset<length;offset++)
+                if(VisibleCell(world,x+offset,y,out int cell) && Grid.IsValidBuildingCell(cell) &&
+                   DigCell(cell)=="OK Dig designated") accepted++;
+            return FormattableString.Invariant($"{(accepted>0?"OK":"ERROR")} Area excavation designated {accepted}/{length}");
         }
 
         private static string EditChecked(string edit, GameObject target)

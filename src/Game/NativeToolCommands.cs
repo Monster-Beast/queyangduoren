@@ -14,12 +14,14 @@ namespace Queyang.Game
         static readonly Queue<Order> pending = new Queue<Order>();
         static readonly List<ColonyView> lastTiles = new List<ColonyView>();
         static float nextDispatch;
+        static bool collectingDig;
+        static readonly List<int> digCells = new List<int>();
         static readonly Dictionary<Type,string> tools = new Dictionary<Type,string> {
             { typeof(DigTool), "dig" }, { typeof(MopTool), "mop" }, { typeof(ClearTool), "sweep" },
             { typeof(HarvestTool), "harvest" }, { typeof(CancelTool), "cancel" },
             { typeof(DeconstructTool), "deconstruct" }, { typeof(PrioritizeTool), "priority" }
         };
-        internal static void Reset() { pending.Clear(); lastTiles.Clear(); nextDispatch = 0; }
+        internal static void Reset() { pending.Clear();lastTiles.Clear();digCells.Clear();collectingDig=false;nextDispatch=0; }
         internal static void Observe(ColonyView view)
         {
             lastTiles.RemoveAll(tile => tile.X == view.X && tile.Y == view.Y);
@@ -28,10 +30,43 @@ namespace Queyang.Game
         }
         internal static void Tick()
         {
-            if (pending.Count == 0 || Time.unscaledTime < nextDispatch) return;
+            if(pending.Count==0 || Time.unscaledTime<nextDispatch || !CoopSession.NativeCommandsReady) return;
             var cmd = pending.Dequeue();
             CoopSession.Command(cmd.Action, cmd.X, cmd.Y);
             nextDispatch = Time.unscaledTime + 0.055f;
+        }
+
+        [HarmonyPatch(typeof(DragTool),nameof(DragTool.OnLeftClickUp))]
+        static class DigSelection
+        {
+            static void Prefix(DragTool __instance,out bool __state)
+            {
+                __state=__instance is DigTool && NativeGuestScene.Ready && CoopSession.IsNativeClient;
+                if(!__state) return;
+                digCells.Clear();collectingDig=true;
+            }
+            static void Postfix(bool __state)
+            {
+                if(!__state) return;
+                collectingDig=false;
+                int start=0;
+                while(start<digCells.Count)
+                {
+                    int cell=digCells[start];
+                    Grid.CellToXY(cell,out int x,out int y);
+                    int length=1;
+                    while(length<64 && x+length<Grid.WidthInCells && start+length<digCells.Count &&
+                          digCells[start+length]==cell+length) length++;
+                    pending.Enqueue(new Order {Action=length==1?"dig":"digspan/"+length,X=x,Y=y});
+                    start+=length;
+                }
+                digCells.Clear();
+            }
+            static Exception Finalizer(Exception __exception,bool __state)
+            {
+                if(__state) {collectingDig=false;digCells.Clear();}
+                return __exception;
+            }
         }
         internal static void EnqueueSelected(string action, GameObject selected)
         {
@@ -101,6 +136,11 @@ namespace Queyang.Game
             {
                 if (!NativeGuestScene.Active) return true;
                 if (!NativeGuestScene.Ready || !tools.TryGetValue(__instance.GetType(), out var action)) return false;
+                if(action=="dig" && collectingDig)
+                {
+                    if(Grid.IsValidCell(__0)) digCells.Add(__0);
+                    return false;
+                }
                 if (action == "priority")
                 {
                     var selected = ToolMenu.Instance.PriorityScreen.GetLastSelectedPriority();

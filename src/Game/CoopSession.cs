@@ -190,6 +190,7 @@ namespace Queyang.Game
             notice = reason;
         }
         public static void Subscribe(int x, int y) => WithClient(c => c.Subscribe(x, y));
+        internal static bool NativeCommandsReady => client?.Live==true;
         internal static bool RequestPeripheral(int x,int y) => client?.RequestPeripheral(x,y) == true;
         static void ApplyNativeTile(ColonyView tile, bool center)
         {
