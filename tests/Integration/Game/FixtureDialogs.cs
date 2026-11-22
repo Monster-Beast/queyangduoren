@@ -63,18 +63,37 @@ namespace Queyang.Integration
                         lines.All(s => s == installedDetail || (s.StartsWith(installed, StringComparison.Ordinal) && s.Length > installed.Length));
                     string difference = "\n" + STRINGS.UI.FRONTEND.MOD_EVENTS.EXPECTED_DISABLED + ": " + fixture + "\n" +
                         STRINGS.UI.FRONTEND.MOD_EVENTS.TOOLTIPS.EXPECTED_DISABLED.text + "\n";
+                    string fixtureNotice = string.Format(STRINGS.UI.FRONTEND.MOD_DIALOGS.SAVE_GAME_MODS_DIFFER.MESSAGE.text, difference).Trim();
                     bool enabledFixture = loadedVanillaHost && title == STRINGS.UI.FRONTEND.MOD_DIALOGS.SAVE_GAME_MODS_DIFFER.TITLE.text &&
-                        normalized == string.Format(STRINGS.UI.FRONTEND.MOD_DIALOGS.SAVE_GAME_MODS_DIFFER.MESSAGE.text, difference).Trim();
-                    if ((!installs && !enabledFixture) || buttons.Length != 1 || buttons[0] != buttonObject.GetComponent<KButton>())
+                        normalized == fixtureNotice;
+                    bool surveyNotice = loadedVanillaHost && title == STRINGS.UI.FRONTEND.MOD_DIALOGS.SAVE_GAME_MODS_DIFFER.TITLE.text &&
+                        MatchSurveyNotice(normalized, fixtureNotice);
+                    if ((!installs && !enabledFixture && !surveyNotice) || buttons.Length != 1 || buttons[0] != buttonObject.GetComponent<KButton>())
                         throw new Exception("Unexpected confirmation dialog: " + title + " / " + message);
                     buttons[0].SignalClick(KKeyCode.Mouse0);
-                    log(enabledFixture ? "NATIVE_VANILLA_SAVE_MOD_DIFFERENCE_CONFIRMED" : "NATIVE_INSTALL_NOTIFICATION_CONFIRMED count=" + lines.Length);
+                    if (surveyNotice) log("COLONY_SURVEY_SOURCE_MODS_ABSENT " + Environment.GetEnvironmentVariable("QY_SURVEY_MISSING_MODS"));
+                    else log(enabledFixture ? "NATIVE_VANILLA_SAVE_MOD_DIFFERENCE_CONFIRMED" : "NATIVE_INSTALL_NOTIFICATION_CONFIRMED count=" + lines.Length);
                     return true;
                 }
                 if (screen is CustomizableDialogScreen || screen is InfoDialogScreen)
                     throw new Exception("Unexpected game dialog: " + screen.GetType().Name + " / " + screen.name);
             }
             return false;
+        }
+
+        static bool MatchSurveyNotice(string message, string fixture)
+        {
+            string allowed = Environment.GetEnvironmentVariable("QY_SURVEY_MISSING_MODS");
+            if (Environment.GetEnvironmentVariable("QY_SURVEY_COLONY") != "1" || string.IsNullOrEmpty(allowed) ||
+                !message.StartsWith(fixture + "\n", StringComparison.Ordinal)) return false;
+            var names = allowed.Split('|').OrderBy(name => name, StringComparer.Ordinal).ToArray();
+            var differences = message.Substring(fixture.Length + 1).Split('\n');
+            if (differences.Length != names.Length * 2) return false;
+            string missing = STRINGS.UI.FRONTEND.MOD_EVENTS.NOT_FOUND + ": ";
+            return differences.Where((_, index) => index % 2 == 1)
+                .All(line => line == STRINGS.UI.FRONTEND.MOD_EVENTS.TOOLTIPS.NOT_FOUND.text) &&
+                differences.Where((_, index) => index % 2 == 0).OrderBy(line => line, StringComparer.Ordinal)
+                    .SequenceEqual(names.Select(name => missing + name));
         }
 
     }

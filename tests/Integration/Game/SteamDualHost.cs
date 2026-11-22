@@ -40,6 +40,7 @@ namespace Queyang.Integration
         readonly SteamPrintingRange printing=new SteamPrintingRange();
         readonly SteamMeterRange batteryRange=new SteamMeterRange(), reservoirRange=new SteamMeterRange(true);
         readonly SteamDualOwnership ownership=new SteamDualOwnership();
+        readonly bool colonyJoin=Environment.GetEnvironmentVariable("QY_CHECK_COLONY_JOIN")=="1";
         readonly Action<string> log;
         readonly FixtureFrame screenshot, hostOrderFrame;
         readonly CSteamID owner, friend;
@@ -106,6 +107,11 @@ namespace Queyang.Integration
         }
         internal bool BeforeHosting()
         {
+            if (colonyJoin)
+            {
+                SpeedControlScreen.Instance.Pause(false);
+                return true;
+            }
             if(Time.realtimeSinceStartup<nextCandidate) return false;
             nextCandidate=Time.realtimeSinceStartup+1;
             if(!ChooseReachableExcavation()) { SpeedControlScreen.Instance.Unpause(false); return false; }
@@ -130,6 +136,13 @@ namespace Queyang.Integration
                         SteamMatchmaking.GetLobbyData(lobby,"queyang_coop")!="1")
                         throw new InvalidOperationException("Initial Steam lobby metadata does not match a private test session");
                     SpeedControlScreen.Instance.Pause(false);
+                    if (colonyJoin)
+                    {
+                        SetData("qy_colony_buildings", ColonyRangeSurvey.BuildingSignature());
+                        log("DUAL_HOST_LOBBY "+lobby);
+                        phase=Phase.Invite;
+                        break;
+                    }
                     Grid.CellToXY(candidate,out int digX,out int digY);
                     // Fail early on an invalid default viewport before asking a second player to accept.
                     ColonyView.Decode(HostWorld.Capture(-1,-1));
@@ -159,6 +172,14 @@ namespace Queyang.Integration
                 case Phase.Joined:
                     if(!joined || ConnectedGuests()!=1) return false;
                     if (!arrival.Capture(lobby,friend,round,false,log)) return false;
+                    if (colonyJoin)
+                    {
+                        if (SteamMatchmaking.GetLobbyMemberData(lobby,friend,"qy_colony_verified")!=RoundText()) return false;
+                        SetData("qy_colony_ack", RoundText());
+                        log("COLONY_JOIN role=host round="+round+" buildings="+ColonyRangeSurvey.BuildingSignature());
+                        phase=Phase.Leave;
+                        break;
+                    }
                     log("DUAL_HOST_MEMBER round="+round+" expectedFriend=True members=2 connectedPeers=1");
                     phase=round==1?Phase.Dig:Phase.Revisit;
                     break;
@@ -303,10 +324,11 @@ namespace Queyang.Integration
                     }
                     else
                     {
-                        ownership.SaveEvidence(hostCell,cell,log);
+                        if (!colonyJoin) ownership.SaveEvidence(hostCell,cell,log);
                         phase=Phase.Finished; observing=null;
                         SpeedControlScreen.Instance.Unpause(false);
-                        log("PASS DUAL_HOST two distinct Steam members, production dig, native excavation, reconnect and leave verified");
+                        log(colonyJoin ? "PASS DUAL_HOST colony baseline verified twice" :
+                            "PASS DUAL_HOST two distinct Steam members, production dig, native excavation, reconnect and leave verified");
                         return true;
                     }
                     break;

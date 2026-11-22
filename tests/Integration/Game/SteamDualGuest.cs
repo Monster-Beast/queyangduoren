@@ -14,7 +14,7 @@ namespace Queyang.Integration
     // through their real Steam lobby. Each keeps its own report, saves and framebuffer.
     internal sealed class SteamDualGuest
     {
-        enum Phase { Menu, Invite, Loading, Dig, Excavation, Revisit, HostTarget, HostOrder, Screenshot, Ack, Leaving, Done }
+        enum Phase { Menu, Invite, Loading, Colony, Dig, Excavation, Revisit, HostTarget, HostOrder, Screenshot, Ack, Leaving, Done }
         static SteamDualGuest run;
         readonly SteamMatchedView matched=new SteamMatchedView();
         readonly SteamArrivalFrame arrival = new SteamArrivalFrame();
@@ -48,6 +48,7 @@ namespace Queyang.Integration
         readonly CSteamID self, host;
         readonly int inviteWait;
         readonly bool acceptDelivered;
+        readonly bool colonyJoin=Env("QY_CHECK_COLONY_JOIN")=="1";
         Callback<LobbyInvite_t> delivered;
         Callback<GameLobbyJoinRequested_t> requested;
         CSteamID lobby;
@@ -179,7 +180,7 @@ namespace Queyang.Integration
             static void Prefix()
             {
                 var g=run;
-                if (g==null || g.round!=2 || g.checkedBaseline || g.loaded!=1 || !NativeGuestScene.Ready) return;
+                if (g==null || g.colonyJoin || g.round!=2 || g.checkedBaseline || g.loaded!=1 || !NativeGuestScene.Ready) return;
                 g.checkedBaseline=true;
                 g.skills.Baseline(g.lobby,g.log);
                 g.person.Baseline(g.lobby,g.log);
@@ -198,9 +199,19 @@ namespace Queyang.Integration
             string hash;
             using(var file=File.OpenRead(baselinePath))
             using(var sha=SHA256.Create()) hash=BitConverter.ToString(sha.ComputeHash(file)).Replace("-","");
-            if (round==2 && hash==firstHash) throw new InvalidDataException("Steam rejoin reused the initial pre-excavation baseline.");
+            if (!colonyJoin && round==2 && hash==firstHash) throw new InvalidDataException("Steam rejoin reused the initial pre-excavation baseline.");
             if (round==1) firstHash=hash;
             log("DUAL_GUEST_BASELINE round="+round+" bytes="+new FileInfo(baselinePath).Length+" sha256="+hash+" owner="+host+" self="+self);
+            if (colonyJoin)
+            {
+                string signature=ColonyRangeSurvey.BuildingSignature();
+                if (signature!=SteamMatchmaking.GetLobbyData(lobby,"qy_colony_buildings"))
+                    throw new InvalidDataException("Guest colony building IDs differ from the host baseline: "+signature);
+                SteamMatchmaking.SetLobbyMemberData(lobby,"qy_colony_verified",round.ToString());
+                log("COLONY_JOIN role=guest round="+round+" buildings="+signature);
+                Set(Phase.Colony,55);
+                return;
+            }
             frame=new FixtureFrame(Path.Combine(folder,"dual-guest-"+round+".png"));
             // This phase includes two-person management edits and paired captures
             // at eight independent hat transitions before either player can dig.
@@ -278,6 +289,9 @@ namespace Queyang.Integration
                 case Phase.Menu: if (AtMenu || CoopSession.IsNativeClient) Advertise(); break;
                 case Phase.Invite: Join(); break;
                 case Phase.Loading: WorldReady(); break;
+                case Phase.Colony:
+                    if (SteamMatchmaking.GetLobbyData(lobby,"qy_colony_ack")!=round.ToString()) break;
+                    CoopSession.Disconnect(); Set(Phase.Leaving,90); break;
                 case Phase.Dig:
                     if (!facilityRange.Check(lobby,self,false,log)) break;
                     if (!alertRange.Check(lobby,self,false,round,Grid.InvalidCell,log)) break;
@@ -391,7 +405,8 @@ namespace Queyang.Integration
                     if (!AtMenu || NativeGuestScene.Active || CoopSession.IsClient || Directory.Exists(Path.GetDirectoryName(baselinePath))) break;
                     previousPath=baselinePath;
                     if (round==1) { round=2; SteamDupePoseChecks.StartGuest(); Set(Phase.Menu,90); }
-                    else { phase=Phase.Done; Clean(); log("PASS DUAL_GUEST two Steam joins, native dig and fresh baseline readback"); }
+                    else { phase=Phase.Done; Clean(); log(colonyJoin ? "PASS DUAL_GUEST colony baseline verified twice" :
+                        "PASS DUAL_GUEST two Steam joins, native dig and fresh baseline readback"); }
                     break;
             }
         }

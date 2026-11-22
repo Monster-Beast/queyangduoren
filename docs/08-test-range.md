@@ -2,6 +2,33 @@
 
 靶场用 Windows Steam 基础版《缺氧》764025 运行。房主载入基础存档的副本。客机运行同一版本和同一份 Mod，按正常联机流程接收存档。每次测试从同一份起点重新开始，便于比较修复前后的画面。
 
+## 成熟殖民地候选
+
+完整场景靶场从已发展的殖民地挑选底图。先按 764025 基础版建造菜单逐项统计已有建筑，再检查具体场景所需的供电、供料、复制人或动物及可触发的任务。建筑存在、设备在短时采样中运行、客机能加入房间以及客机能完成场景操作，是四项不同的验收结果。下文的第 3 周期建筑侧栏靶场用于三个工位的单项回归。
+
+两个候选均来自 2025-10-31 公开的解析器测试档，原版日志显示殖民地分别生成于 2024-03-04 和 2024-03-01。下载后的 Git blob 与公开仓库一致。两个原档都在隔离环境用 764025 加载，重新保存后仅使用当前联机 Mod。它们的本机副本存放在 `artifacts/qa/mature-range`。[公开来源及发布说明](https://github.com/mithro/python-oni-save-parser/tree/6efabe598df558f65fb5c2cdd9b0b16f85432497/test_saves)
+
+| 候选 | 实际地图 | 加载和运行 | 来源 |
+|---|---|---|---|
+| Impenetrable Spacerock，第 1160 周期 | 31 名复制人、24,851 个已建成实例，覆盖验收目录的 181/295 种、15/15 个类别。短时采样观察到 359 个建筑实例工作。 | 原档曾使用 11 个旧 Mod。隔离加载后原版模拟推进约 8.5 秒。重新载入整理后的副本出现小动物旧任务恢复异常。双 Steam 客机完成存档接收并加载世界，首个联机视区到达前断开。 | [公开存档](https://raw.githubusercontent.com/mithro/python-oni-save-parser/5c7733746a1813e8f5dc6ae526b3d3ad34f7aee0/test_saves/03-late-game-cycle-1160.sav) · [游戏截图](evidence/qa/mature-range-overview.jpg) |
+| The Doomed Laboratory，第 148 周期 | 22 名复制人、4,580 个已建成实例，覆盖 87/295 种。采样观察到 141 个建筑实例工作。 | 隔离环境中 25 秒内实际推进约 23.2 个模拟秒。双 Steam 两次进房，4,580 个实例的身份和格号摘要完全一致。 | [公开存档](https://raw.githubusercontent.com/mithro/python-oni-save-parser/5c7733746a1813e8f5dc6ae526b3d3ad34f7aee0/test_saves/02-mid-game-cycle-148.sav) · [游戏截图](evidence/qa/mature-range-148-overview.jpg) · [双端入房对照](evidence/qa/mature-range-148-steam.jpg) |
+
+1160 周期档中有制氧、蒸汽轮机、气液管网、养殖、运载管、物流轨道、自动化和火箭设施。可从冷藏箱 (129, 193)、已供水洗手台 (140, 188)、医疗床 (124, 199)、蒸汽轮机 (99, 166) 和氢气引擎 (32, 320) 定位。原版配给箱和简易洗手池在这份档中缺失，现成研究台在采样期间没有处于工作状态。全部已建与缺失项、例子坐标及实测启动数分别见本机的 `colony-buildings.tsv` 和 `missing-building-types.tsv`。
+
+148 周期档的同机实测运行编号为 `3692550212b64992af6ffac28f0a18ba`，存档 SHA-256 为 `0BD29D75AEE2F58CA107DC4B64401C2955C1513E4EE20A9FE531665CBB6A6312`。它可用于中期设施联机回归。成熟殖民地候选尚未达到近全建筑和可触发场景的覆盖要求，1160 周期档保留为离线场景参考和大档联机断开复现输入。
+
+`-SurveyColony` 从原版运行中的建筑实例生成清单和分区截图，并输出可复查的存档副本。`-CheckColonyJoin` 在两次入房中核对两端实际建筑的数量、格号、存档 ID 与种类，并分别截图。填写两份独立 Steam 登录后运行。加载带旧 Mod 提示的公开底图时，可用 `-SurveyMissingMods` 列出经过核对的具体旧 Mod 名称；脚本只处理这份清单中的提示。
+
+~~~powershell
+$test = @{
+    HostSteamId = $hostSteamId
+    GuestSteamId = $guestSteamId
+    PackagePath = '.\dist\QueyangCoop-0.3.2-printing-preview.zip'
+}
+$range = '.\artifacts\qa\mature-range'
+.\tests\Integration\Game\steam-dual.ps1 @test -SavePath "$range\The-Doomed-Laboratory-148.sav" -CheckColonyJoin
+~~~
+
 ## 从哪个存档开始
 
 | 来源 | 适合拿来测什么 |

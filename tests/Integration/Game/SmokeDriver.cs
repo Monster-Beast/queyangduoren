@@ -46,6 +46,7 @@ namespace Queyang.Integration
         private NativeOrderChecks orderChecks;
         private NativeFacilityChecks facilityChecks;
         private FacilityRangeSeed facilityRange;
+        private ColonyRangeSurvey colonySurvey;
         private NativePrintedDeath printedDeath;
         private bool facilitiesDone;
         private bool readonlyFixture, steamLobby;
@@ -170,6 +171,13 @@ namespace Queyang.Integration
             if (global::Game.Instance == null || ClusterManager.Instance?.activeWorld == null ||
                 SpeedControlScreen.Instance == null || GameClock.Instance == null || Components.LiveMinionIdentities.Items.Count == 0) return;
             if (dualHost!=null && hostDialogs.Check(loadedVanillaHost:true)) return;
+            if (Environment.GetEnvironmentVariable("QY_SURVEY_COLONY") == "1")
+            {
+                if (!global::Game.Instance.GameStarted()) return;
+                colonySurvey = colonySurvey ?? new ColonyRangeSurvey(report, Log);
+                finished = colonySurvey.Tick();
+                return;
+            }
             if (Environment.GetEnvironmentVariable("QY_PREPARE_FACILITY_RANGE") == "1")
             {
                 if (!global::Game.Instance.GameStarted()) return;

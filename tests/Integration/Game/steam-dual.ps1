@@ -16,6 +16,9 @@ param(
     [switch]$SkipWork,
     [switch]$CheckBuildings,
     [switch]$PrepareFacilityRange,
+    [switch]$SurveyColony,
+    [switch]$CheckColonyJoin,
+    [string[]]$SurveyMissingMods,
     [string]$FacilityRangeManifest,
     [switch]$CheckConstruction,
     [switch]$CheckFloor,
@@ -62,9 +65,15 @@ $SandboxStart=(Resolve-Path -LiteralPath $SandboxStart).Path
 $GameDir=(Resolve-Path -LiteralPath $GameDir).Path
 $SavePath=(Resolve-Path -LiteralPath $SavePath).Path
 $PackagePath=(Resolve-Path -LiteralPath $PackagePath).Path
+$hostOnly=$PrepareFacilityRange -or $SurveyColony
+if ($PrepareFacilityRange -and $SurveyColony) { throw 'Run preparation and colony survey separately.' }
+if ($CheckColonyJoin -and ($hostOnly -or $FacilityRangeManifest)) { throw 'A colony join check uses two players and a colony save.' }
+if ($SurveyMissingMods -and (!$SurveyColony -or @($SurveyMissingMods -match '[\r\n|]').Count)) {
+    throw 'Missing source mod names are only allowed for a survey and must be supplied individually.'
+}
 $facilityStations=''
 if ($FacilityRangeManifest) {
-    if ($PrepareFacilityRange) { throw 'Prepare the range before requesting its readback.' }
+    if ($hostOnly) { throw 'A facility manifest is only used by the two-player test.' }
     $manifest=Get-Content -Raw -LiteralPath (Resolve-Path -LiteralPath $FacilityRangeManifest).Path | ConvertFrom-Json
     if (($manifest.stations.prefab -join ',') -cne 'RationBox,WashBasin,MedicalCot') { throw 'Unexpected facility range layout.' }
     $facilityStations=($manifest.stations | ForEach-Object { '{0}:{1}' -f [int]$_.cell,[int]$_.id }) -join ','
@@ -152,7 +161,7 @@ try {
 [IO.File]::Replace("$firstpass.isolated",$firstpass,[System.Management.Automation.Language.NullString]::Value)
 
 $roles=@('host')
-if (!$PrepareFacilityRange) {
+if (!$hostOnly) {
     Copy-PrivateGame $copy (Join-Path $run 'guest-game')
     $roles+=@('guest')
 }
@@ -187,6 +196,9 @@ foreach ($role in $roles) {
     }
     $values.QY_CHECK_BUILDINGS=([int]$CheckBuildings.IsPresent).ToString()
     $values.QY_PREPARE_FACILITY_RANGE=([int]$PrepareFacilityRange.IsPresent).ToString()
+    $values.QY_SURVEY_COLONY=([int]$SurveyColony.IsPresent).ToString()
+    $values.QY_CHECK_COLONY_JOIN=([int]$CheckColonyJoin.IsPresent).ToString()
+    $values.QY_SURVEY_MISSING_MODS=$SurveyMissingMods -join '|'
     $values.QY_FACILITY_RANGE_STATIONS=$facilityStations
     $values.QY_CONSTRUCTION_RANGE=([int]$CheckConstruction.IsPresent).ToString()
     $values.QY_FLOOR_RANGE=([int]$CheckFloor.IsPresent).ToString()
@@ -337,7 +349,17 @@ try {
                 Write-Output "PASS facility range prepared in $($driver.base)"
                 return
             }
-            if (!$PrepareFacilityRange -and $role -eq 'host' -and !$drivers.guest.started) {
+            if ($SurveyColony -and $role -eq 'host' -and $lines -match '^PASS COLONY_SURVEY\b') {
+                foreach ($leaf in 'SurveyedColony.sav','colony-buildings.tsv','colony-overview.png') {
+                    $out=Join-Path $driver.base $leaf
+                    if (!(Test-Path -LiteralPath $out) -or (Get-Item -LiteralPath $out).Length -lt 45) {
+                        throw "Missing colony survey artifact $leaf."
+                    }
+                }
+                Write-Output "PASS colony surveyed in $($driver.base)"
+                return
+            }
+            if (!$hostOnly -and $role -eq 'host' -and !$drivers.guest.started) {
                 $mark=@($lines -match '^DUAL_HOST_LOBBY [0-9]+$')
                 if ($mark.Count) {
                     $drivers.guest.env.QY_DUAL_LOBBY=$mark[-1].Split(' ')[1]
@@ -351,6 +373,26 @@ try {
         Start-Sleep -Milliseconds 400
     }
     if (!$drivers.host.done -or !$drivers.guest.done) { throw 'Two-account Steam fixture timed out. See private reports.' }
+    if ($CheckColonyJoin) {
+        $signatures=@(foreach ($round in 1,2) {
+            foreach ($endpoint in $roles) {
+                $d=$drivers[$endpoint]
+                $report=Get-Physical $d $d.env.QY_SMOKE_REPORT
+                $line=Select-String -LiteralPath $report -Pattern "^COLONY_JOIN role=$endpoint round=$round buildings=(.+)$" | Select-Object -Last 1
+                $dest=Join-Path $d.base "entry-$endpoint-$round.png"
+                $photo=Get-Physical $d $dest
+                if (!$line -or !(Test-Path -LiteralPath $photo) -or (Get-Item -LiteralPath $photo).Length -lt 45) { throw "Missing $endpoint colony entry evidence for round $round." }
+                if ($photo -ne $dest) { Copy-Item -LiteralPath $photo -Destination $dest }
+                $line.Matches[0].Groups[1].Value
+            }
+        })
+        if (@($signatures | Select-Object -Unique).Count -ne 1) { throw 'Colony signatures differ after Steam join.' }
+        if (($before -join '/') -ne (@(Get-InputHashes) -join '/')) { throw 'A protected input changed during the colony join check.' }
+        [ordered]@{packageSha256=$before[0];saveSha256=$before[1];joins=2;buildings=$signatures[0];protectedInputsUnchanged=$true} |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'colony-join-result.json') -Encoding UTF8
+        Write-Output "PASS both Steam game clients loaded the same mature colony twice; evidence in $run"
+        return
+    }
     foreach ($endpoint in $roles) { Confirm-DualRecording $drivers[$endpoint] $recorders[$endpoint] }
     foreach ($capture in $animationCaptures) {
         if (!$animationRecorders.ContainsKey($capture.name)) { throw "Missing $($capture.name) recording start." }
