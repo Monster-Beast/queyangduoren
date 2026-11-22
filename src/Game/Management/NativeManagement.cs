@@ -83,8 +83,8 @@ namespace Queyang.Game
             if ((researchScreen != null && researchScreen.isActiveAndEnabled && researchScreen.IsScreenActive()) ||
                 PlanScreen.Instance?.ActiveCategoryToggleInfo != null)
                 Send("research");
-            bool schedules = menu?.scheduleScreen != null && menu.scheduleScreen.isActiveAndEnabled && menu.scheduleScreen.gameObject.activeInHierarchy;
-            bool priorities = menu?.jobsScreen != null && menu.jobsScreen.isActiveAndEnabled && menu.jobsScreen.gameObject.activeInHierarchy;
+            bool schedules = WorkerTableOpen(menu?.scheduleScreen);
+            bool priorities = WorkerTableOpen(menu?.jobsScreen);
             bool foods = menu?.consumablesScreen != null && menu.consumablesScreen.isActiveAndEnabled && menu.consumablesScreen.gameObject.activeInHierarchy;
             if (schedules || priorities) Send("schedules/" + nextSchedulePage);
             if (schedules || priorities) Send("workers/"+workerPage);
@@ -121,6 +121,7 @@ namespace Queyang.Game
             ResetWorkers();
             populationWorld=-1;
             hasHud=false; hudInventory=null; sampledWorld=null;
+            hudScreen=null; stressMeter=null; rationMeter=null;
             ResetVitals();
             ResetProfile();
         }

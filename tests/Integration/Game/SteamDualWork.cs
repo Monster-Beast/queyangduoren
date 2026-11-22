@@ -16,6 +16,7 @@ namespace Queyang.Integration
         int reportedStage=-1;
         float lastReport;
         string jobId,groupId;
+        string baselineLiveIds;
         FixtureFrame frame;
         static string Data(CSteamID lobby,string key)=>SteamMatchmaking.GetLobbyData(lobby,"qy_work_"+key);
         static void Set(CSteamID lobby,string key,string value)
@@ -43,6 +44,14 @@ namespace Queyang.Integration
             if (manager==null) return false;
             bool newcomer=Environment.GetEnvironmentVariable("QY_SKIP_PERSON")!="1";
             if (!int.TryParse(SteamMatchmaking.GetLobbyData(lobby,newcomer?"qy_person_id":"qy_skill_id"),out int id)) return false;
+            if (!host && newcomer && round==1 && baselineLiveIds==null)
+            {
+                var roster=SteamMatchmaking.GetLobbyData(lobby,"qy_census_printed");
+                if (string.IsNullOrEmpty(roster)) return false;
+                baselineLiveIds=string.Join(",",roster.Split(',').Where(value=>int.Parse(value)!=id));
+                VerifyLiveIds(baselineLiveIds);
+                log("DUAL_WORK_LIVE_BEFORE round=1 closedTables=True liveIds="+baselineLiveIds);
+            }
             if (stage<5 && !opened)
             {
                 manager.OnButtonClick(Field<ManagementMenu.ManagementMenuToggleInfo>(manager,"scheduleInfo"));
@@ -170,9 +179,23 @@ namespace Queyang.Integration
                 if (consumer.GetPersonalPriority(group)!=target) return false;
                 if (!Picture("priorities",round,host)) return false;
                 log($"DUAL_{(host?"HOST":"GUEST")}_PRIORITY round={round} id={id} group={jobId} old={prior} confirmed={target} nativeTable=True afterBaselinePerson={newcomer}");
+                if (!host && newcomer && round==1)
+                {
+                    VerifyLiveIds(baselineLiveIds);
+                    if (stored==null || !stored.isSpawned || stored.GetComponent<Brain>()!=null)
+                        throw new InvalidDataException("Newcomer priorities did not use a spawned display-only card");
+                    log("DUAL_WORK_LIVE_AFTER round=1 liveIds="+baselineLiveIds+" cardHostId="+id+" nativeBrain=False");
+                }
                 manager.CloseAll();doneRound=round;stage=0;clicked=opened=false;return true;
             }
             return false;
+        }
+        static void VerifyLiveIds(string expected)
+        {
+            var actual=string.Join(",",Components.LiveMinionIdentities.Items.Where(m=>m!=null &&
+                ClusterUtil.GetMyWorldId(m)==ClusterManager.Instance.activeWorldId)
+                .Select(m=>m.GetComponent<KPrefabID>().InstanceID).OrderBy(i=>i));
+            if(actual!=expected) throw new InvalidDataException("Management table changed the guest simulation roster: expected="+expected+" observed="+actual);
         }
         static bool ReadyKey(Schedule s)=>AccessTools.DeclaredMethod(typeof(Queyang.Game.NativeManagement),"LocalScheduleKey")
             .Invoke(null,new object[]{s})!=null;

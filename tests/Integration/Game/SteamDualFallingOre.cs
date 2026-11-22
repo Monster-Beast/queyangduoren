@@ -146,6 +146,8 @@ namespace Queyang.Integration
                 nextDiagnostic=Time.unscaledTime+3;
                 log($"DUAL_ORE_NATIVE_STATE stage={stage} id={id} present={hostOre!=null} y={hostOre?.transform.position.y} paused={SpeedControlScreen.Instance.IsPaused} timeScale={Time.timeScale} sourceSolid={Grid.Solid[source]} supportSolid={Grid.Solid[source-Grid.WidthInCells]} faller={hostOre!=null && GameComps.Fallers.Has(hostOre.gameObject)} gravity={hostOre!=null && GameComps.Gravities.Has(hostOre.gameObject)}");
             }
+            if(host && stage==3 && SpeedControlScreen.Instance.IsPaused)
+                SpeedControlScreen.Instance.Unpause(false);
             var selected=host ? hostOre?.GetComponent<KSelectable>() : NativeResources.GetSelectable(id);
             if(selected==null) return false;
             var anim=selected.GetComponent<KBatchedAnimController>();

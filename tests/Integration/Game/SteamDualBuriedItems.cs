@@ -25,6 +25,8 @@ namespace Queyang.Integration
         Pickupable original;
         KBatchedAnimController initialMarker;
         FixtureFrame photo;
+        float centeredSince=-1;
+        int centeredFrames,lastCenteredFrame=-1;
 
         static void Set(CSteamID room,string field,int value)
         {
@@ -91,10 +93,22 @@ namespace Queyang.Integration
             }
         }
 
-        bool Photograph(bool host,string step)
+        bool Photograph(bool host,string step,KBatchedAnimController subject,Action<string> log)
         {
+            var camera=CameraController.Instance.baseCamera;
+            var cellCenter=camera.WorldToViewportPoint(Grid.CellToPosCCC(source,Grid.SceneLayer.Move));
+            var subjectPoint=camera.WorldToViewportPoint(subject.transform.position);
+            if(cellCenter.z<=0 || subjectPoint.z<=0 || Mathf.Abs(cellCenter.x-.5f)>.025f || Mathf.Abs(cellCenter.y-.5f)>.025f ||
+                Mathf.Abs(subjectPoint.x-.5f)>.28f || Mathf.Abs(subjectPoint.y-.5f)>.28f)
+            {
+                centeredSince=-1;centeredFrames=0;return false;
+            }
+            if(centeredSince<0) centeredSince=Time.unscaledTime;
+            if(lastCenteredFrame!=Time.frameCount) { centeredFrames++;lastCenteredFrame=Time.frameCount; }
+            if(centeredFrames<6 || Time.unscaledTime-centeredSince<.3f) return false;
             if(photo==null)
             {
+                log(FormattableString.Invariant($"DUAL_BURIED_CAMERA step={step} cell={source} center={cellCenter.x:0.000},{cellCenter.y:0.000} subject={subjectPoint.x:0.000},{subjectPoint.y:0.000} stableFrames={centeredFrames}"));
                 string dir=Path.GetDirectoryName(Environment.GetEnvironmentVariable("QY_SMOKE_REPORT"));
                 photo=new FixtureFrame(Path.Combine(dir,"buried-"+(host?"host":"guest")+"-"+step+".png"));
                 photo.Capture();return false;
@@ -125,11 +139,16 @@ namespace Queyang.Integration
                     source=c;
                 }
             }
-            CameraController.Instance.SetTargetPos(Grid.CellToPosCCC(source,Grid.SceneLayer.Move),6,false);
+            var cam=CameraController.Instance;
+            var center=Grid.CellToPosCCC(source,Grid.SceneLayer.Move);
+            center.z=cam.transform.position.z;
+            cam.SetTargetPos(center,5,false);
+            cam.SetPosition(center);
+            cam.OrthographicSize=5;
             if(stage==0)
             {
                 initialMarker=Marker(visual,source);
-                if(!Grid.Solid[source] || !Visible(initialMarker) || !Photograph(host,"before")) return false;
+                if(!Grid.Solid[source] || !Visible(initialMarker) || !Photograph(host,"before",initialMarker,log)) return false;
                 if(host && SteamMatchmaking.GetLobbyMemberData(room,guest,"qy_buried_seen")!="1") return false;
                 log($"DUAL_BURIED_MARKER cell={source} tag={tag} markerVisible=True");
                 if(host)
@@ -138,7 +157,7 @@ namespace Queyang.Integration
                     SpeedControlScreen.Instance.Unpause(false);
                 }
                 else SteamMatchmaking.SetLobbyMemberData(room,"qy_buried_seen","1");
-                stage=1;photo=null;
+                stage=1;photo=null;centeredFrames=0;centeredSince=-1;
             }
             if(Grid.Solid[source] || visual.IsEntombedItem(source) || Marker(visual,source)!=null ||
                 (Visible(initialMarker) && Grid.PosToCell(initialMarker.transform.position)==source)) return false;
@@ -156,7 +175,7 @@ namespace Queyang.Integration
                 shown=NativeResources.GetSelectable(id)??NativeEntityDisplay.GetSelectable(id);
             }
             if(shown==null || shown.PrefabID().GetHash()!=tag || !Visible(shown.GetComponent<KBatchedAnimController>()) ||
-                !Photograph(host,"after")) return false;
+                !Photograph(host,"after",shown.GetComponent<KBatchedAnimController>(),log)) return false;
             if(host && SteamMatchmaking.GetLobbyMemberData(room,guest,"qy_buried_done")!="1") return false;
             if(!host) SteamMatchmaking.SetLobbyMemberData(room,"qy_buried_done","1");
             if(host && paused) SpeedControlScreen.Instance.Pause(false);

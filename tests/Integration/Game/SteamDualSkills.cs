@@ -24,6 +24,24 @@ namespace Queyang.Integration
             AccessTools.FieldRefAccess<SkillsScreen,DropDown>("hatDropDown");
         static readonly AccessTools.FieldRef<DropDown,Dictionary<IListableOption,GameObject>> rows=
             AccessTools.FieldRefAccess<DropDown,Dictionary<IListableOption,GameObject>>("rowLookup");
+        static void RecordPortrait(SkillsScreen screen,Action<string> log)
+        {
+            var widget=screen.GetComponentInChildren<FullBodyUIMinionWidget>();
+            var anim=widget?.animController;
+            var batch=anim?.GetBatch();
+            if (batch==null) { log("DUAL_SKILL_PORTRAIT batch=missing"); return; }
+            var canvas=anim.GetComponent<KBatchedAnimCanvasRenderer>();
+            var mat=canvas?.GetComponent<CanvasRenderer>()?.GetMaterial();
+            var controller=anim.GetComponent<SymbolOverrideController>();
+            var symbols=controller.GetSymbolOverrides.Where(e=>e.sourceSymbol!=null)
+                .GroupBy(e=>e.targetSymbol).Select(g=>g.OrderByDescending(e=>e.priority).First())
+                .OrderBy(e=>e.targetSymbol.HashValue)
+                .Select(e=>e.targetSymbol+"="+e.sourceSymbol.hash+"@"+e.sourceSymbol.build.fileHash+":"+e.priority);
+            var textures=mat==null ? "-" : string.Join(",",mat.GetTexturePropertyNames().Select(n=>
+                n+"="+(mat.GetTexture(n)?.name??"-")+"/"+(batch.matProperties.GetTexture(n)?.name??"-")));
+            log("DUAL_SKILL_PORTRAIT frame="+anim.GetCurrentFrameIndex()+" batch="+batch.id+" group="+batch.batchGroup+
+                " material="+mat?.name+" shader="+mat?.shader?.name+" symbols="+string.Join(",",symbols)+" textures="+textures);
+        }
         static string Data(CSteamID lobby,string key) => SteamMatchmaking.GetLobbyData(lobby,"qy_skill_"+key);
         static void Set(CSteamID lobby,string key,string value)
         {
@@ -124,7 +142,7 @@ namespace Queyang.Integration
             if (round==1)
             {
                 if (frame==null) frame=new FixtureFrame(Path.Combine(Path.GetDirectoryName(Environment.GetEnvironmentVariable("QY_SMOKE_REPORT")),host?"dual-host-skills.png":"dual-guest-skills.png"));
-                if (!frame.Requested) { frame.Capture(); return false; }
+                if (!frame.Requested) { RecordPortrait(screen,log); frame.Capture(); return false; }
                 if (!frame.Complete) return false;
             }
             log((host?"DUAL_HOST_SKILL":"DUAL_GUEST_SKILL")+" round="+round+" skill="+skill+" mastered=True targetHat="+hat+" points="+resume.AvailableSkillpoints+" nativeScreen=True");

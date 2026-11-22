@@ -25,6 +25,7 @@ namespace Queyang.Game
         static readonly System.Reflection.MethodInfo dirtyTable=AccessTools.Method(typeof(TableScreen),"MarkRowsDirty",Type.EmptyTypes);
         static int workerPage;
         static string workerVersion;
+        static bool WorkerTableOpen(KScreen screen) => screen!=null && screen.isActiveAndEnabled && screen.IsScreenActive();
 
         static string WorkerPage(int page)
         {
@@ -77,6 +78,8 @@ namespace Queyang.Game
 
         static void ApplyWorkerPage(string[] parts)
         {
+            var menu=ManagementMenu.Instance;
+            if (!WorkerTableOpen(menu?.scheduleScreen) && !WorkerTableOpen(menu?.jobsScreen)) return;
             int page=Number(parts[3]),count=Number(parts[4]);
             if (page<0 || count<0 || count>65535 || page>=Math.Max(1,count) || parts[5].Length>4000) return;
             if (page==0) { seenWorkers.Clear(); workerVersion=parts[2]; workerPage=0; }
@@ -87,7 +90,7 @@ namespace Queyang.Game
                 {
                     int id=r.ReadInt32();
                     if (id<=0 || !seenWorkers.Add(id)) { workerPage=0;return; }
-                    if (FindDupe(id)==null) ReadWorker(r,id);
+                    ReadWorker(r,id);
                 }
             }
             if (++workerPage<count) return;
@@ -119,6 +122,7 @@ namespace Queyang.Game
                 if(a!=null) assets.Add(new ResourceRef<Accessory>(a));
             }
             Packet.End(r);
+            if (FindDupe(id)!=null) return;
             bool created=!workerCards.TryGetValue(id,out var card) || card==null;
             if (created)
             {
@@ -150,8 +154,19 @@ namespace Queyang.Game
             bool dirty=false;
             for(int i=0;i<jobs.Count;i++)
                 if(stored.GetPersonalPriority(jobs[i])!=priorities[i]-'0')
-                { stored.SetPersonalPriority(jobs[i],priorities[i]-'0'); dirty=true; }
+                {
+                    // The vanilla stored identity only reads this table; its setter is empty.
+                    stored.choreGroupPriorities[jobs[i].IdHash]=new ChoreConsumer.PriorityInfo{priority=priorities[i]-'0'};
+                    dirty=true;
+                }
             if (dirty) MarkJobs();
+        }
+
+        [HarmonyPatch(typeof(StoredMinionIdentity),"CleanupLimboMinions",new Type[0])]
+        static class KeepWorkerCard
+        {
+            // Vanilla recovers a missing storage container by materializing a live duplicant.
+            static bool Prefix(StoredMinionIdentity __instance)=>__instance.GetComponent<GuestWorkerCard>()==null;
         }
 
         [HarmonyPatch(typeof(TableScreen),"ObsoleteRows",new Type[0])]
