@@ -23,6 +23,7 @@ namespace Queyang.Integration
         readonly SteamDualWork work=new SteamDualWork();
         readonly SteamDualBuildings buildings=new SteamDualBuildings();
         readonly SteamDualFallingOre fallingOre=new SteamDualFallingOre();
+        readonly SteamDualBuriedItems buriedItems=new SteamDualBuriedItems();
         readonly SteamDualOwnership ownership=new SteamDualOwnership();
         readonly Action<string> log;
         readonly FixtureDialogs dialogs;
@@ -184,7 +185,9 @@ namespace Queyang.Integration
             if (round==1) firstHash=hash;
             log("DUAL_GUEST_BASELINE round="+round+" bytes="+new FileInfo(baselinePath).Length+" sha256="+hash+" owner="+host+" self="+self);
             frame=new FixtureFrame(Path.Combine(folder,"dual-guest-"+round+".png"));
-            if (round==1) Set(Phase.Dig,150);
+            // This phase includes two-person management edits and paired captures
+            // at eight independent hat transitions before either player can dig.
+            if (round==1) Set(Phase.Dig,Environment.GetEnvironmentVariable("QY_BASELINE_ONLY")=="1"?180:420);
             else { Focus(x,y); Set(Phase.Revisit,120); }
         }
         static void Focus(int tileX,int tileY)
@@ -259,6 +262,7 @@ namespace Queyang.Integration
                 case Phase.Invite: Join(); break;
                 case Phase.Loading: WorldReady(); break;
                 case Phase.Dig:
+                    if (!buriedItems.Check(lobby,self,false,round,log)) break;
                     if (!fallingOre.Check(lobby,self,false,round,log)) break;
                     if (!buildings.Check(lobby,self,false,round,log)) break;
                     if (!skills.Verify(lobby,round,false,log)) break;

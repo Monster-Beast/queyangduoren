@@ -158,7 +158,7 @@ namespace Queyang.Game
             AddName(string.Empty, ids, names);
             foreach (var c in Cells)
             {
-                Validate(c);
+                Validate(c,HasEntombed);
                 AddName(c.Element, ids, names, nameBytes);
                 AddName(c.Building, ids, names, nameBytes);
             }
@@ -352,7 +352,7 @@ namespace Queyang.Game
                             }
                         }
                     }
-                    Validate(cell);
+                    Validate(cell,v.HasEntombed);
                     v.Cells[i] = cell;
                 }
                 int n = r.ReadByte();
@@ -472,9 +472,9 @@ namespace Queyang.Game
             return names[i];
         }
 
-        private static void Validate(ColonyCell c)
+        private static void Validate(ColonyCell c,bool hasEntombed)
         {
-            if (((c.Flags & EntombedFlag)!=0 && (c.Flags&3)!=3) || (c.Utilities & ~31) != 0 || c.TargetId < 0 || c.Progress > 100 ||
+            if (((c.Flags & EntombedFlag)!=0 && (!hasEntombed || (c.Flags&3)!=3)) || (c.Utilities & ~31) != 0 || c.TargetId < 0 || c.Progress > 100 ||
                 float.IsNaN(c.Mass) || float.IsInfinity(c.Mass) ||
                 float.IsNaN(c.Temperature) || float.IsInfinity(c.Temperature))
                 throw new InvalidDataException("Invalid viewport cell.");

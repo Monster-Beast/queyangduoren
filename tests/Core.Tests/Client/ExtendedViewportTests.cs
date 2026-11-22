@@ -11,6 +11,20 @@ namespace Queyang.Core.Tests
         static ColonyView View() => new ColonyView { Native = true, Detailed = true, HasResources = true };
 
         [Fact]
+        public void BuriedMarkerDistinguishesHiddenSolidReleasedAndOlderViewport()
+        {
+            var view=View();
+            Assert.False(ColonyView.Decode(view.Encode()).HasEntombed);
+            view.HasEntombed=true;view.Cells[17].Flags=3|ColonyView.EntombedFlag;
+            var buried=ColonyView.Decode(view.Encode());
+            Assert.True(buried.HasEntombed);Assert.Equal(view.Cells[17].Flags,buried.Cells[17].Flags);
+            view.Cells[17].Flags=1;
+            Assert.Equal(1,ColonyView.Decode(view.Encode()).Cells[17].Flags);
+            view.Cells[17].Flags=ColonyView.EntombedFlag;
+            Assert.Throws<InvalidDataException>(()=>view.Encode());
+        }
+
+        [Fact]
         public void EnvironmentAndOpaqueEntityPageRoundTripIndependently()
         {
             var v = View();

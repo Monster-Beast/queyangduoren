@@ -14,6 +14,8 @@ namespace Queyang.Integration
         FixtureFrame frame;
         Vector3 before; float zoom;
         bool moved;
+        string stableSignature;
+        float stableAt,nextProgress;
         static string Value(CSteamID lobby,string key)=>SteamMatchmaking.GetLobbyData(lobby,key);
         static void Set(CSteamID lobby,string key,string value)
         { if (!SteamMatchmaking.SetLobbyData(lobby,key,value)) throw new IOException("Could not publish hat evidence"); }
@@ -40,6 +42,12 @@ namespace Queyang.Integration
             string first=Value(lobby,"qy_person_hat");
             int change=stage%4;
             var camera=CameraController.Instance;
+            if (Time.unscaledTime>=nextProgress)
+            {
+                nextProgress=Time.unscaledTime+5;
+                log("DUAL_HAT_PROGRESS role="+role+" stage="+stage+" opened="+opened+" applied="+applied+
+                    " expected="+Value(lobby,key)+" actual="+Signature(a)+" captured="+(frame!=null));
+            }
             if (!moved) { before=camera.transform.position; zoom=camera.OrthographicSize; moved=true; }
             if (host && applied!=stage)
             {
@@ -65,10 +73,18 @@ namespace Queyang.Integration
                     throw new InvalidDataException("Host equipped accessory differs from selected physical hat");
                 if (change==3) resume.RemoveAdditionalHat("QA",alternate.hat);
                 ManagementMenu.Instance.CloseAll();
-                Set(lobby,key,Signature(a)); applied=stage;
+                applied=stage;stableSignature=null;
             }
             string expected=Value(lobby,key);
-            if (string.IsNullOrEmpty(expected) || expected!=Signature(a)) return false;
+            string current=Signature(a);
+            if (host)
+            {
+                // Accessorizer installs the new accessory's batch overrides on a later Unity frame.
+                if (stableSignature!=current) { stableSignature=current;stableAt=Time.unscaledTime;return false; }
+                if (Time.unscaledTime-stableAt<.4f) return false;
+                if (expected!=current) { Set(lobby,key,current);return false; }
+            }
+            if (string.IsNullOrEmpty(expected) || expected!=current) return false;
             var pos=a.transform.position;
             camera.SetPosition(new Vector3(pos.x,pos.y+.8f,camera.transform.position.z));
             camera.OrthographicSize=4f;
