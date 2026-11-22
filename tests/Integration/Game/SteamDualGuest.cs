@@ -32,6 +32,8 @@ namespace Queyang.Integration
         readonly SteamSweepSymbolRange sweepRange=new SteamSweepSymbolRange();
         readonly SteamResearchRange researchRange=new SteamResearchRange();
         readonly SteamPowerRange powerRange=new SteamPowerRange();
+        readonly SteamBuildingMotionRange buildingMotion=new SteamBuildingMotionRange();
+        readonly SteamResearchMotionRange researchMotion=new SteamResearchMotionRange();
         readonly SteamMeterRange batteryRange=new SteamMeterRange(), reservoirRange=new SteamMeterRange(true);
         readonly SteamDualOwnership ownership=new SteamDualOwnership();
         readonly Action<string> log;
@@ -277,6 +279,8 @@ namespace Queyang.Integration
                     if (!researchRange.Check(lobby,self,false,round,log)) break;
                     if (!batteryRange.Check(lobby,self,false,round,log)) break;
                     if (!reservoirRange.Check(lobby,self,false,round,log)) break;
+                    if (!researchMotion.Check(lobby,self,false,round,log)) break;
+                    if (!buildingMotion.Check(lobby,self,false,round,log)) break;
                     if (!ownership.Legacy(lobby,false,log)) break;
                     if (SteamMatchmaking.GetLobbyMemberData(lobby,self,"qy_legacy_checked")!="1")
                         SteamMatchmaking.SetLobbyMemberData(lobby,"qy_legacy_checked","1");

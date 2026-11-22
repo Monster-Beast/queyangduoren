@@ -18,6 +18,7 @@ namespace Queyang.Game
             foreach (var packet in NativeFallingOre.Capture(world,left,bottom)) yield return packet;
             foreach (var packet in Actors(world,left,bottom,paused,false)) yield return packet;
             foreach (var packet in Actors(world,left,bottom,paused,true)) yield return packet;
+            foreach (var packet in NativeBuildingAnimation.Capture(world,left,bottom,paused)) yield return packet;
         }
         static IEnumerable<Component> ActorsInColony(bool critters)
         {
@@ -70,6 +71,8 @@ namespace Queyang.Game
         internal static void Apply(byte[] packet)
         {
             if (NativeFallingOre.IsPacket(packet)) { NativeFallingOre.Apply(packet); return; }
+            if(packet.Length>=4 && BitConverter.ToInt32(packet,0)==NativeBuildingAnimation.Header)
+            {NativeBuildingAnimation.Apply(packet);return;}
             if(packet.Length<9+MinRowBytes || packet.Length>1100)
                 throw new InvalidDataException("Invalid character motion payload");
             using(var r=new BinaryReader(new MemoryStream(packet,false)))

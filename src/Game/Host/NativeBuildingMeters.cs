@@ -22,6 +22,24 @@ namespace Queyang.Game
         static readonly AccessTools.FieldRef<KBatchedAnimController,bool> rebuild=AccessTools.FieldRefAccess<KBatchedAnimController,bool>("_forceRebuild");
         static bool creatingReplica;
 
+        internal static IEnumerable<KeyValuePair<ushort,KBatchedAnimController>> MovingParts(GameObject building)
+        {
+            var group=building.GetComponent<NativeBuildingMeters>();
+            if(group==null) yield break;
+            for(int i=0;i<group.slots.Count && i<256;i++)
+            {
+                var anim=group.slots[i]?.Meter?.meterController;
+                if(anim!=null) yield return new KeyValuePair<ushort,KBatchedAnimController>((ushort)(i+1),anim);
+            }
+        }
+
+        internal static KBatchedAnimController GetPart(KSelectable building,ushort part)
+        {
+            var group=building.GetComponent<NativeBuildingMeters>();
+            int index=part-1;
+            return group!=null && index>=0 && index<group.slots.Count?group.slots[index]?.Meter?.meterController:null;
+        }
+
         [HarmonyPatch(typeof(MeterController),"Initialize")]
         static class Observe
         {
@@ -93,13 +111,13 @@ namespace Queyang.Game
                 int cursor=start;
                 for(int j=Math.Max(0,v.MeterFirst-i*256);j<=Math.Min(255,v.MeterLast-i*256);j++)
                 {
-                    if(cursor<next && v.Meters[cursor].Key%256==j)group.Show(j,v.Meters[cursor++]);
+                    if(cursor<next && v.Meters[cursor].Key%256==j)group.Show(j,v.Meters[cursor++],v.DupePoseTick);
                     else if(j<group.slots.Count) group.slots[j]?.Meter?.meterController?.SetVisiblity(false);
                     else if(cursor==next) break;
                 }
             }
         }
-        void Show(int slot,ColonyMeter s)
+        void Show(int slot,ColonyMeter s,int tick)
         {
             while(slots.Count<=slot)slots.Add(null);
             var e=slots[slot];
@@ -120,11 +138,12 @@ namespace Queyang.Game
             }
             var anim=e.Meter.meterController;
             anim.SetVisiblity(s.Visible);
-            if(s.Animation!=0 && anim.currentAnim.HashValue!=s.Animation && anim.HasAnimation(new HashedString(s.Animation)))
+            bool owns=NativeBuildingAnimation.Owns(anim,tick);
+            if(!owns && s.Animation!=0 && anim.currentAnim.HashValue!=s.Animation && anim.HasAnimation(new HashedString(s.Animation)))
                 anim.Play(new HashedString(s.Animation),KAnim.PlayMode.Paused);
             anim.Rotation=s.Rotation;
             var clip=anim.GetCurrentAnim();
-            if(clip!=null)
+            if(!owns && clip!=null)
             {
                 anim.SetPositionPercent(s.Position);
                 int absolute=clip.firstFrameIdx+clip.GetFrameIdx(anim.PlayMode,anim.GetElapsedTime());

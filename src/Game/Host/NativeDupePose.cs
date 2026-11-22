@@ -63,7 +63,7 @@ namespace Queyang.Game
         // StartQueuedAnim briefly stores a *global* batch index in currentFrame,
         // whereas UpdateFrame normally stores a relative index in that property.
         // The texture consistently takes GetCurrentFrameIndex() in batch space.
-        static int RenderFrame(KBatchedAnimController anim)
+        internal static int RenderFrame(KBatchedAnimController anim)
         {
             if(anim==null) return -1;
             int relative=anim.GetCurrentFrameIndex()-anim.GetFirstFrameIndex();
@@ -187,7 +187,7 @@ namespace Queyang.Game
         // Minions can have several overrides defining the same action (including
         // idle/working). Temporarily direct ONI's native Play lookup to the actual
         // host clip; preserve the minion's locally installed override ordering.
-        static void PlayAsset(KBatchedAnimController anim,HashedString name,int fileHash)
+        internal static void PlayAsset(KBatchedAnimController anim,HashedString name,int fileHash)
         {
             if(fileHash==0 || !Assets.TryGetAnim(new HashedString(fileHash),out var file))
             { anim.Play(name);return; }
@@ -225,6 +225,7 @@ namespace Queyang.Game
             if(!NativeGuestScene.Ready) return;
             float now=Time.unscaledTime;
             foreach(var t in tracks.Values) Draw(t,now,false);
+            NativeBuildingAnimation.Draw(now);
             NativeDigVisuals.Expire(now);
         }
         internal static void Forget(int id,int tick)

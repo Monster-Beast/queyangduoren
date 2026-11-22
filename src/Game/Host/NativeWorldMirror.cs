@@ -64,7 +64,7 @@ namespace Queyang.Game
                 ApplyDig(cell, (sample.Flags & 8) != 0);
                 if (sample.DigMaterial!=0) NativeOrderColors.ApplyDig(GetDigRenderer(cell),sample);
                 if (view.HasEnvironment) ApplyMop(cell, sample.MopOrdered);
-                ApplyBuilding(cell, sample);
+                ApplyBuilding(cell,sample,view.DupePoseTick);
                 if (view.CoversEnvironment(i) && sample.BuildingSaveId > 0)
                     NativeMaterialReadings.Apply(GetBuildingSelectable(cell, sample.BuildingSaveId)?.GetComponent<PrimaryElement>(), sample.Structure);
                 if (view.Detailed)
@@ -185,7 +185,7 @@ namespace Queyang.Game
                 proxy.GetComponent<MeshRenderer>()?.enabled==true;
         }
 
-        static void ApplyBuilding(int cell, ColonyCell sample)
+        static void ApplyBuilding(int cell,ColonyCell sample,int tick)
         {
             var local = HostWorld.FindBuilding(cell);
             var item = local == null ? null : local.GetComponent<Building>();
@@ -203,7 +203,7 @@ namespace Queyang.Game
                 if (match && sample.AnchorDX == 0 && sample.AnchorDY == 0)
                 {
                     if (anim!=null && sample.HasBlueprintTint) anim.TintColour=NativeOrderColors.Unpack(sample.BlueprintTint);
-                    Pose(anim, sample.BuildingAnimation, sample.BuildingFrame);
+                    NativeBuildingAnimation.Snapshot(anim,sample.BuildingAnimation,sample.BuildingFrame,tick);
                     ApplyPrimary(item.GetComponent<PrimaryElement>(), sample.Structure);
                     if (sample.TargetId > 0 && item.GetComponent<Door>() != null && item.GetComponent<BuildingComplete>() != null)
                     {
@@ -230,7 +230,7 @@ namespace Queyang.Game
             {
                 current.Anim.TintColour = NativeOrderColors.BuildingTint(sample);
                 current.Style = sample.BuildingStyle;
-                Pose(current.Anim, sample.BuildingAnimation, sample.BuildingFrame);
+                NativeBuildingAnimation.Snapshot(current.Anim,sample.BuildingAnimation,sample.BuildingFrame,tick);
                 ApplyPrimary(current.Primary, sample.Structure);
                 return;
             }
@@ -273,6 +273,7 @@ namespace Queyang.Game
                 ApplyPrimary(primary, sample.Structure);
             }
             marker.SetActive(true);
+            NativeBuildingAnimation.Snapshot(controller,sample.BuildingAnimation,sample.BuildingFrame,tick);
             buildingMarkers[cell] = new Marker { Hash = sample.BuildingHash, Target = sample.TargetId, SaveId = sample.BuildingSaveId, Style = sample.BuildingStyle,
                 Flags = flags, Object = marker, Anim = controller, Primary = primary };
         }
@@ -523,6 +524,7 @@ namespace Queyang.Game
             NativeBuildingWork.Reset();
             NativeBuildingWarnings.Reset();
             NativeAlerts.Reset();
+            NativeBuildingAnimation.Reset();
             NativeEnvironment.Reset();
             NativeMaterialReadings.Reset();
         }
