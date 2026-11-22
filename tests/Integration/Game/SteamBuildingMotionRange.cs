@@ -27,11 +27,12 @@ namespace Queyang.Integration
         readonly HashSet<int> fallFrames = new HashSet<int>();
         GameObject generator;
         Battery battery;
+        BuildingEnabledButton generatorSwitch;
         int generatorId, generatorCell, batteryId, batteryCell;
         int step, previousLoop = -1, previousMeter = -1, wraps;
         int expectedLoopFrames;
         float deadline, nextStep, finishAt, nextLog, oldZoom;
-        bool begun, submitted, finished, wasPaused;
+        bool begun, submitted, finished, wasPaused, generatorControlSet, generatorWasEnabled, reusedGenerator, reusedBattery;
         Vector3 oldCamera;
         FixtureFrame screenshot;
 
@@ -70,12 +71,24 @@ namespace Queyang.Integration
                 {
                     if (SteamMatchmaking.GetLobbyMemberData(room, peer, Prefix + "ready") != "1") return false;
                     if (!motor.HasAnimation(Loop)) throw new InvalidDataException("Manual generator has no native working loop");
-                    wasPaused = SpeedControlScreen.Instance.IsPaused;
-                    while (SpeedControlScreen.Instance.IsPaused) SpeedControlScreen.Instance.Unpause(false);
+                    if (!generatorControlSet)
+                    {
+                        wasPaused = SpeedControlScreen.Instance.IsPaused;
+                        while (SpeedControlScreen.Instance.IsPaused) SpeedControlScreen.Instance.Unpause(false);
+                        generatorSwitch = generator.GetComponent<BuildingEnabledButton>();
+                        generatorWasEnabled = generatorSwitch?.IsEnabled == true;
+                        if (generatorWasEnabled)
+                        {
+                            generatorSwitch.IsEnabled = false;
+                            generator.Trigger((int)GameHashes.WorkChoreDisabled, "BuildingDisabled");
+                        }
+                        generatorControlSet = true;
+                    }
+                    if (generator.GetComponent<ManualGenerator>().GetWorker() != null) return false;
                     motor.Play(Loop, KAnim.PlayMode.Loop);
                     Publish(room, "start", "1");
                     nextStep = now;
-                    log($"BUILDING_MOTION_INPUT generator={generatorId} animation=working_loop drive=stock-controller battery={batteryId} intervalMs=200 steps={ChargeSteps * 2 + 1}");
+                    log($"BUILDING_MOTION_INPUT generator={generatorId} animation=working_loop drive=stock-controller generatorExisting={reusedGenerator} generatorWorkerStopped=True battery={batteryId} batteryExisting={reusedBattery} intervalMs=200 steps={ChargeSteps * 2 + 1}");
                 }
                 else
                 {
@@ -115,6 +128,7 @@ namespace Queyang.Integration
             {
                 if (SteamMatchmaking.GetLobbyMemberData(room, peer, Prefix + "done") != "1") return false;
                 motor.Play("off");
+                if (generatorWasEnabled) generatorSwitch.IsEnabled = true;
                 if (wasPaused) SpeedControlScreen.Instance.Pause(false);
                 Publish(room, "release", "1");
             }
@@ -131,10 +145,24 @@ namespace Queyang.Integration
             if (!CoopSession.IsHosting || Util.GetKleiRootPath() != Environment.GetEnvironmentVariable("QY_SMOKE_ROOT"))
                 throw new InvalidOperationException("Building motion requires an isolated host");
             int world = ClusterManager.Instance.activeWorldId;
-            generator = NativeFacilityChecks.Build(ManualGeneratorConfig.ID, world);
-            battery = NativeFacilityChecks.Build(BatteryConfig.ID, world).GetComponent<Battery>();
-            generatorId = generator.GetComponent<KPrefabID>().InstanceID;
+            var visible = Components.BuildingCompletes.Items.Where(b => b != null && ClusterUtil.GetMyWorldId(b) == world &&
+                Grid.IsValidCell(b.GetCell()) && Grid.Visible[b.GetCell()] != 0).ToArray();
+            generator = visible.FirstOrDefault(b => b.GetComponent<ManualGenerator>() != null)?.gameObject;
+            reusedGenerator = generator != null;
+            generator = generator ?? NativeFacilityChecks.Build(ManualGeneratorConfig.ID, world);
             generatorCell = generator.GetComponent<Building>().GetCell();
+            try
+            {
+                battery = NativeFacilityChecks.Build(BatteryConfig.ID, world).GetComponent<Battery>();
+            }
+            catch (InvalidOperationException error) when (error.Message == "No space to stage native facility " + BatteryConfig.ID)
+            {
+                battery = visible.OrderBy(b => Grid.GetCellDistance(generatorCell, b.GetCell())).Select(b => b.GetComponent<Battery>())
+                    .FirstOrDefault(b => b != null && Meter(b)?.meterController != null);
+                if (battery == null) throw;
+                reusedBattery = true;
+            }
+            generatorId = generator.GetComponent<KPrefabID>().InstanceID;
             batteryId = battery.GetComponent<KPrefabID>().InstanceID;
             batteryCell = battery.GetComponent<Building>().GetCell();
             Publish(room, "devices", FormattableString.Invariant($"{generatorId}|{generatorCell}|{batteryId}|{batteryCell}"));

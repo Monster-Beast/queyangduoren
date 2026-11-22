@@ -58,6 +58,8 @@ namespace Queyang.Integration
         private FixtureFrame hostFrame;
         private float hostHudSince;
         private bool hostPublished;
+        private int windowWidth, windowHeight;
+        private float windowDeadline, nextWindowRequest;
         private void Awake()
         {
             report = Environment.GetEnvironmentVariable("QY_SMOKE_REPORT");
@@ -68,6 +70,9 @@ namespace Queyang.Integration
                 start=Time.realtimeSinceStartup;
                 try
                 {
+                    if (int.TryParse(Environment.GetEnvironmentVariable("QY_WINDOW_WIDTH"), out windowWidth) &&
+                        int.TryParse(Environment.GetEnvironmentVariable("QY_WINDOW_HEIGHT"), out windowHeight))
+                        Screen.SetResolution(windowWidth, windowHeight, FullScreenMode.Windowed);
                     if (dualRole=="host")
                     {
                         isHost=true; steamLobby=true; hostDialogs=new FixtureDialogs(Log);
@@ -112,6 +117,7 @@ namespace Queyang.Integration
             if (finished || Time.realtimeSinceStartup - start < 2) return;
             try
             {
+                if ((dualHost != null || dualGuest != null) && !WindowReady()) return;
                 if (dualGuest!=null) dualGuest.Tick();
                 else if (nativeLifecycle != null) finished = nativeLifecycle.Update();
                 else if (native != null) finished = native.Update();
@@ -125,6 +131,27 @@ namespace Queyang.Integration
                 Log("FAIL " + ex);
                 if (dualHost!=null) dualHost.Abort();
             }
+        }
+        private bool WindowReady()
+        {
+            if (windowWidth <= 0 || windowHeight <= 0) return true;
+            if (Screen.fullScreenMode == FullScreenMode.Windowed && Screen.width == windowWidth && Screen.height == windowHeight)
+            {
+                if (windowDeadline >= 0)
+                    Log($"DUAL_WINDOW role={(isHost ? "host" : "guest")} mode={Screen.fullScreenMode} width={Screen.width} height={Screen.height}");
+                windowDeadline = -1;
+                return true;
+            }
+            float now = Time.realtimeSinceStartup;
+            if (windowDeadline <= 0) windowDeadline = now + 8f;
+            if (now >= windowDeadline)
+                throw new InvalidOperationException($"Window request {windowWidth}x{windowHeight} did not take effect: {Screen.width}x{Screen.height} {Screen.fullScreenMode}");
+            if (now >= nextWindowRequest)
+            {
+                Screen.SetResolution(windowWidth, windowHeight, FullScreenMode.Windowed);
+                nextWindowRequest = now + .5f;
+            }
+            return false;
         }
         private void HostStep()
         {

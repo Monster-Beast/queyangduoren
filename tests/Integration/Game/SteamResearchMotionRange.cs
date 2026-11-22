@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using HarmonyLib;
 using Queyang.Game;
 using Steamworks;
 using UnityEngine;
@@ -13,8 +14,10 @@ namespace Queyang.Integration
     {
         const string Prefix = "qy_research_motion_";
         static readonly HashedString WorkLoop = new HashedString("working_loop");
+        static readonly AccessTools.FieldRef<ImageToggleState, ImageToggleState.State> ToggleState =
+            AccessTools.FieldRefAccess<ImageToggleState, ImageToggleState.State>("currentState");
         readonly HashSet<int> frames = new HashSet<int>();
-        readonly List<string> samples = new List<string> { "time,building,worker,clip,frame,frame_count,research_fraction" };
+        readonly List<string> samples = new List<string> { "qpc,time,building,worker,clip,frame,frame_count,research_fraction" };
         ResearchCenter station;
         Battery power;
         List<global::Wire> wires;
@@ -90,12 +93,16 @@ namespace Queyang.Integration
 
                 int count = body.GetCurrentNumFrames();
                 int frame = body.GetCurrentFrameIndex() - body.GetFirstFrameIndex();
+                var controls = SpeedControlScreen.Instance;
+                bool speedMatches = SpeedArt(controls.speedButtonWidget_slow, true) && SpeedArt(controls.speedButtonWidget_medium, false) &&
+                    SpeedArt(controls.speedButtonWidget_fast, false) && SpeedArt(controls.pauseButtonWidget, false);
                 if (worker != 0 && (!host || station.worker != null) && body.currentAnim == WorkLoop && frame >= 0 && frame < count)
                 {
                     frames.Add(frame);
                     if (previousFrame - frame > count / 2) wraps++;
                     previousFrame = frame;
-                    samples.Add(FormattableString.Invariant($"{now:R},{id},{worker},{body.currentAnim.HashValue},{frame},{count},{(host ? (float?)points : null)}"));
+                    long stamp = System.Diagnostics.Stopwatch.GetTimestamp();
+                    samples.Add(FormattableString.Invariant($"{stamp},{now:R},{id},{worker},{body.currentAnim.HashValue},{frame},{count},{(host ? (float?)points : null)}"));
                     if (photo == null && frames.Count >= 4)
                     {
                         photo = new FixtureFrame(Path.Combine(Folder, $"research-motion-{Role(host)}.png"));
@@ -104,7 +111,7 @@ namespace Queyang.Integration
                 }
                 if (now >= nextLog)
                 {
-                    log($"RESEARCH_MOTION_WAIT role={Role(host)} id={id} operational={station?.GetComponent<Operational>().IsOperational} worker={worker} clip={body.currentAnim.HashValue} frame={frame}/{count} sampled={frames.Count} wraps={wraps} points={points}");
+                    log($"RESEARCH_MOTION_WAIT role={Role(host)} id={id} operational={station?.GetComponent<Operational>().IsOperational} worker={worker} clip={body.currentAnim.HashValue} frame={frame}/{count} sampled={frames.Count} wraps={wraps} points={points} speedMatches={speedMatches}");
                     if (host && worker == 0)
                     {
                         var candidates = Components.LiveMinionIdentities.Items.Where(d => d != null)
@@ -115,7 +122,7 @@ namespace Queyang.Integration
                     nextLog = now + 5f;
                 }
                 int minimum = Math.Max(3, Math.Min(12, count - 1));
-                if (frames.Count < minimum || wraps < 2 || photo?.Complete != true) return false;
+                if (frames.Count < minimum || wraps < 2 || photo?.Complete != true || !speedMatches) return false;
                 if (host)
                 {
                     var energy = station.GetComponent<EnergyConsumer>();
@@ -131,6 +138,7 @@ namespace Queyang.Integration
                         throw new InvalidDataException("Guest did not render the native research station's working frames");
                 }
                 File.WriteAllLines(Path.Combine(Folder, $"research-motion-{Role(host)}.csv"), samples);
+                log($"RESEARCH_MOTION_SPEED role={Role(host)} slow=True medium=False fast=False paused=False qpcHz={System.Diagnostics.Stopwatch.Frequency}");
                 log(FormattableString.Invariant($"RESEARCH_MOTION_RANGE role={Role(host)} id={id} worker={worker} clip=working_loop frames={frames.Count}/{count} wraps={wraps} researchFraction={(host ? (float?)points : null)}"));
                 if (!host) SteamMatchmaking.SetLobbyMemberData(room, Prefix + "done", "1");
                 submitted = true;
@@ -213,6 +221,13 @@ namespace Queyang.Integration
         }
 
         static string Folder => Path.GetDirectoryName(Environment.GetEnvironmentVariable("QY_SMOKE_REPORT"));
+        static bool SpeedArt(GameObject widget, bool active)
+        {
+            var toggle = widget.GetComponent<KToggle>();
+            return toggle != null && toggle.isOn == active && widget.GetComponents<ImageToggleState>()
+                .All(image => (ToggleState(image) == ImageToggleState.State.Active ||
+                    ToggleState(image) == ImageToggleState.State.DisabledActive) == active);
+        }
         static string Role(bool host) => host ? "host" : "guest";
         static string Read(CSteamID room, string field) => SteamMatchmaking.GetLobbyData(room, Prefix + field);
         static void Publish(CSteamID room, string field, string value)
