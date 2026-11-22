@@ -21,6 +21,7 @@ namespace Queyang.Integration
         readonly SteamDualPerson person=new SteamDualPerson();
         readonly SteamDualSkills skills=new SteamDualSkills();
         readonly SteamDualWork work=new SteamDualWork();
+        readonly SteamRoomControls roomControls=new SteamRoomControls();
         readonly SteamDualBuildings buildings=new SteamDualBuildings();
         readonly SteamDualFallingOre fallingOre=new SteamDualFallingOre();
         readonly SteamDualBuriedItems buriedItems=new SteamDualBuriedItems();
@@ -298,6 +299,7 @@ namespace Queyang.Integration
                     if (!skills.Verify(lobby,round,false,log)) break;
                     if (!person.Guest(lobby,round,log)) break;
                     if (!work.Verify(lobby,round,false,log)) break;
+                    if (!roomControls.Check(lobby,self,round,false,log)) break;
                     Dig(); break;
                 case Phase.Excavation:
                     if(sawMarker && !motionCompleted)
@@ -330,6 +332,7 @@ namespace Queyang.Integration
                     if (!ownership.IssueGuest(lobby,Cell)) break;
                     log("DUAL_GUEST_EXCAVATED x="+x+" y="+y); Snapshot(); break;
                 case Phase.Revisit:
+                    if (!roomControls.Check(lobby,self,round,false,log)) break;
                     if (!buildings.Check(lobby,self,false,round,log)) break;
                     if (!skills.Verify(lobby,round,false,log)) break;
                     if (!person.Guest(lobby,round,log)) break;

@@ -19,6 +19,7 @@ namespace Queyang.Integration
         readonly SteamDualPerson person=new SteamDualPerson();
         readonly SteamDualSkills skills=new SteamDualSkills();
         readonly SteamDualWork work=new SteamDualWork();
+        readonly SteamRoomControls roomControls=new SteamRoomControls();
         readonly SteamDualBuildings buildings=new SteamDualBuildings();
         readonly SteamDualFallingOre fallingOre=new SteamDualFallingOre();
         readonly SteamDualBuriedItems buriedItems=new SteamDualBuriedItems();
@@ -181,6 +182,7 @@ namespace Queyang.Integration
                     if (!skills.Verify(lobby,round,true,log)) return false;
                     if (!person.Host(lobby,round,log)) return false;
                     if (!work.Verify(lobby,round,true,log)) return false;
+                    if (!roomControls.Check(lobby,friend,round,true,log)) return false;
                     if(!joined) throw new InvalidOperationException("Guest left before issuing a dig order");
                     if(!digSeen) return false;
                     phase=Phase.Hold;
@@ -248,6 +250,7 @@ namespace Queyang.Integration
                     phase=Phase.Leave;
                     break;
                 case Phase.Revisit:
+                    if (!roomControls.Check(lobby,friend,round,true,log)) return false;
                     if (!buildings.Check(lobby,friend,true,round,log)) return false;
                     if (!skills.Verify(lobby,round,true,log)) return false;
                     if (!person.Host(lobby,round,log)) return false;

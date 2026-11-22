@@ -135,6 +135,8 @@ namespace Queyang.Game
             var p = action.Split('/');
             switch (p[1])
             {
+                case "clock": result = ApplyClock(p); break;
+                case "name": result = ApplyDupeName(p); break;
                 case "population":
                     if (p.Length==3) result=Population(Number(p[2]));
                     break;

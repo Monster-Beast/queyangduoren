@@ -70,7 +70,12 @@ namespace Queyang.Game
         [HarmonyPatch(typeof(DetailsScreen), "OnNameChanged")]
         static class Rename
         {
-            static bool Prefix() => Refuse("对象重命名");
+            static bool Prefix(DetailsScreen __instance, string __0)
+            {
+                if (!NativeGuestScene.Ready) return true;
+                if (NativeManagement.RequestDupeName(__instance.target, __0)) return false;
+                return Refuse("对象重命名");
+            }
         }
 
         // ESC still opens the vanilla pause menu. UI-driven modal pauses and the
@@ -81,10 +86,12 @@ namespace Queyang.Game
             static bool Prefix(KButtonEvent __0)
             {
                 if (!NativeGuestScene.Ready) return true;
-                if (__0.TryConsume(global::Action.TogglePause)) return Refuse("暂停或继续");
-                if (__0.TryConsume(global::Action.SpeedUp) || __0.TryConsume(global::Action.SlowDown) ||
-                    __0.TryConsume(global::Action.CycleSpeed)) return Refuse("调整倍速");
-                return true;
+                if (__0.TryConsume(global::Action.TogglePause)) NativeManagement.RequestClock(true);
+                else if (__0.TryConsume(global::Action.SpeedUp)) NativeManagement.RequestClock(false,1,true);
+                else if (__0.TryConsume(global::Action.SlowDown)) NativeManagement.RequestClock(false,-1,true);
+                else if (__0.TryConsume(global::Action.CycleSpeed)) NativeManagement.RequestClock(false,cycle:true);
+                else return true;
+                return false;
             }
         }
 
@@ -93,13 +100,32 @@ namespace Queyang.Game
         {
             static IEnumerable<MethodBase> TargetMethods()
             {
-                // The native button callbacks are direct calls to these two methods.
-                yield return AccessTools.Method(typeof(SpeedControlScreen), "TogglePause");
-                yield return AccessTools.Method(typeof(SpeedControlScreen), "SetSpeed");
                 yield return AccessTools.Method(typeof(SpeedControlScreen), "ToggleRidiculousSpeed");
                 yield return AccessTools.Method(typeof(SpeedControlScreen), "DebugStepFrame");
             }
             static bool Prefix() => Refuse("暂停和倍速");
+        }
+
+        [HarmonyPatch(typeof(SpeedControlScreen), nameof(SpeedControlScreen.TogglePause))]
+        static class ToggleRoomPause
+        {
+            static bool Prefix()
+            {
+                if (!NativeGuestScene.Ready) return true;
+                NativeManagement.RequestClock(true);
+                return false;
+            }
+        }
+
+        [HarmonyPatch(typeof(SpeedControlScreen), nameof(SpeedControlScreen.SetSpeed))]
+        static class SetRoomSpeed
+        {
+            static bool Prefix(int __0)
+            {
+                if (!NativeGuestScene.Ready) return true;
+                NativeManagement.RequestClock(false,__0);
+                return false;
+            }
         }
 
         [HarmonyPatch]
