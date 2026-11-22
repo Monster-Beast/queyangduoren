@@ -110,6 +110,14 @@ $package = '.\dist\QueyangCoop-0.3.2-construction-preview.zip'
 
 后续在 `1119455d8beb48eeb7c9bcdc15d3e928` 补验同一普通砖格 49787 的原版施工网格。蓝图 ID 2359 变成成品 2370 后又拆除，两端白色线框计数都是 1 → 0 → 0，成品网格计数都是 0 → 1 → 0。新版包含客机操作预览包的功能，双 Steam 重连和带 Mod、无 Mod 回读通过，受保护输入的哈希一致。此轮覆盖普通砖块，独立的背景墙层仍需专项核对。[施工框预览包](../dist/QueyangCoop-0.3.2-floor-outline-preview.zip) · [施工前对照](evidence/qa/dual-cc6a-floor-stage-0.jpg) · [完工后对照](evidence/qa/dual-cc6a-floor-stage-1.jpg)
 
+## 复制人升级光圈
+
+`-CheckUpgradeVisual` 在隔离主机分别触发原版运动属性升级和通过经验获得技能点，并用原版移动命令让同一名复制人行走。两种事件都创建原版 `upgrade_fx_kanim`。客机按房主的实际动画帧播放该特效，并附着到对应复制人身上。测试核对两端渲染的动画帧、特效附着期间的移动距离以及结束后的清除。
+
+运行 `9c534b7e7b5b4ebba128d8e1e1122211` 的运动属性升级将原版移速修正从 0 提高到 0.1，技能点场景则通过经验从 0 点升到 1 点。两种场景下，两端都能看到脚下光圈、跟随复制人移动并在结束后清除。对照图上排是运动属性升级，下排是获得技能点，左侧为主机，右侧为客机。[升级光圈对照](evidence/qa/dual-3acc-upgrade-effects.jpg)
+
+预览包 SHA-256 为 `3ACC7641A580EB3940461CE1E5883B6EFB187DEC42C9E9F849D619B7DF4FAE1A`。本轮通过两次 Steam 入房及带 Mod、无 Mod 回读，受保护输入哈希一致。验收对象为绑定复制人的世界动画。[升级光圈预览包](../dist/QueyangCoop-0.3.2-upgrade-fx-preview.zip)
+
 ## 后续逐项覆盖
 
 | 工位 | 原版状态切换 | 对照项目 |
