@@ -49,6 +49,7 @@ namespace Queyang.Integration
         readonly int inviteWait;
         readonly bool acceptDelivered;
         readonly bool colonyJoin=Env("QY_CHECK_COLONY_JOIN")=="1";
+        readonly SteamMapBaseline mapBaseline=new SteamMapBaseline();
         Callback<LobbyInvite_t> delivered;
         Callback<GameLobbyJoinRequested_t> requested;
         CSteamID lobby;
@@ -209,7 +210,7 @@ namespace Queyang.Integration
                     throw new InvalidDataException("Guest colony building IDs differ from the host baseline: "+signature);
                 SteamMatchmaking.SetLobbyMemberData(lobby,"qy_colony_verified",round.ToString());
                 log("COLONY_JOIN role=guest round="+round+" buildings="+signature);
-                Set(Phase.Colony,55);
+                Set(Phase.Colony,SteamMapBaseline.Enabled || Env("QY_CHECK_CRITTER_HEALTH")=="1" ? 120 : 55);
                 return;
             }
             frame=new FixtureFrame(Path.Combine(folder,"dual-guest-"+round+".png"));
@@ -290,6 +291,8 @@ namespace Queyang.Integration
                 case Phase.Invite: Join(); break;
                 case Phase.Loading: WorldReady(); break;
                 case Phase.Colony:
+                    if (!health.Check(lobby,self,false,round,log)) break;
+                    if (!mapBaseline.Check(lobby,self,false,log)) break;
                     if (SteamMatchmaking.GetLobbyData(lobby,"qy_colony_ack")!=round.ToString()) break;
                     CoopSession.Disconnect(); Set(Phase.Leaving,90); break;
                 case Phase.Dig:
@@ -404,8 +407,9 @@ namespace Queyang.Integration
                 case Phase.Leaving:
                     if (!AtMenu || NativeGuestScene.Active || CoopSession.IsClient || Directory.Exists(Path.GetDirectoryName(baselinePath))) break;
                     previousPath=baselinePath;
-                    if (round==1) { round=2; SteamDupePoseChecks.StartGuest(); Set(Phase.Menu,90); }
-                    else { phase=Phase.Done; Clean(); log(colonyJoin ? "PASS DUAL_GUEST colony baseline verified twice" :
+                    if (round==1 && !SteamMapBaseline.Enabled) { round=2; SteamDupePoseChecks.StartGuest(); Set(Phase.Menu,90); }
+                    else { phase=Phase.Done; Clean(); log(SteamMapBaseline.Enabled ? "PASS DUAL_GUEST colony baseline and runtime samples collected" :
+                        colonyJoin ? "PASS DUAL_GUEST colony baseline verified twice" :
                         "PASS DUAL_GUEST two Steam joins, native dig and fresh baseline readback"); }
                     break;
             }

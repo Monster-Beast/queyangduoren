@@ -12,17 +12,18 @@ namespace Queyang.Integration.Performance
     [HarmonyPatch(typeof(MainMenu), "OnSpawn")]
     internal static class Bootstrap
     {
-        private static SoloSample driver;
+        private static MonoBehaviour driver;
         private static void Postfix()
         {
             if (driver != null) return;
             string root = Environment.GetEnvironmentVariable("QY_SMOKE_ROOT");
+            string role = Environment.GetEnvironmentVariable("QY_SMOKE_ROLE");
             if (string.IsNullOrEmpty(root) || Util.GetKleiRootPath() != root ||
-                Environment.GetEnvironmentVariable("QY_SMOKE_ROLE") != "solo-performance")
+                (role != "solo-performance" && role != "map-baseline"))
                 throw new InvalidOperationException("Solo performance check requires an isolated profile");
             var obj = new GameObject("Solo sample");
             UnityEngine.Object.DontDestroyOnLoad(obj);
-            driver = obj.AddComponent<SoloSample>();
+            driver = role == "map-baseline" ? (MonoBehaviour)obj.AddComponent<MapBaseline>() : obj.AddComponent<SoloSample>();
         }
     }
 

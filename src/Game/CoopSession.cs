@@ -2,6 +2,8 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using HarmonyLib;
 using Queyang.Core;
 
 namespace Queyang.Game
@@ -93,13 +95,46 @@ namespace Queyang.Game
             try
             {
                 CapturingJoinSave = true;
-                var written = SaveLoader.Instance.Save(path, false, false);
+                var written = JoinSaveSerialization.Save(path);
                 if (string.IsNullOrEmpty(written) || !string.Equals(Path.GetFullPath(written), path, StringComparison.OrdinalIgnoreCase))
                     throw new IOException("Host could not create the multiplayer save copy");
                 return new SnapshotFile(path, dir);
             }
             catch { RemoveSessionDirectory(dir); throw; }
             finally { KCrashReporter.MOST_RECENT_SAVEFILE = crashPath; CapturingJoinSave = false; }
+        }
+
+        private static class JoinSaveSerialization
+        {
+            // Vanilla Save clears KSerialization.Manager, including templates from the
+            // loaded save that delayed state-machine restoration can still need.
+            static readonly FieldInfo[] ReadCaches =
+            {
+                AccessTools.DeclaredField(typeof(KSerialization.Manager), "deserializationTemplatesByTypeName"),
+                AccessTools.DeclaredField(typeof(KSerialization.Manager), "deserializationTemplatesByType"),
+                AccessTools.DeclaredField(typeof(KSerialization.Manager), "deserializationMappings")
+            };
+
+            internal static string Save(string path)
+            {
+                var previous = new object[ReadCaches.Length];
+                int replaced = 0;
+                try
+                {
+                    for (int i = 0; i < ReadCaches.Length; i++)
+                    {
+                        var field = ReadCaches[i] ?? throw new InvalidOperationException("The game's save reader layout is unsupported");
+                        previous[i] = field.GetValue(null);
+                        field.SetValue(null, Activator.CreateInstance(field.FieldType));
+                        replaced++;
+                    }
+                    return SaveLoader.Instance.Save(path, false, false);
+                }
+                finally
+                {
+                    for (int i = replaced - 1; i >= 0; i--) ReadCaches[i].SetValue(null, previous[i]);
+                }
+            }
         }
 
         sealed class SnapshotFile : FileStream

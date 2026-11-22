@@ -183,6 +183,7 @@ namespace Queyang.Game
                     e.Value = age == null ? -1 : Amount(age.value, -1); e.Limit = age == null ? -1 : Amount(age.GetMax(), -1);
                     var hp = obj.GetComponent<Health>();
                     if (hp != null && hp.maxHitPoints > 0) e.Extra = Mathf.Clamp01(Amount(hp.hitPoints / hp.maxHitPoints));
+                    if (NativeDupeHealth.IsShown(hp)) e.Flags |= ColonyEntity.CritterHealthBar;
                     if (obj.GetComponent<KPrefabID>().HasTag(GameTags.Creatures.Wild)) e.Flags |= 32;
                     break;
                 default: ReadStorage(obj, e); break;

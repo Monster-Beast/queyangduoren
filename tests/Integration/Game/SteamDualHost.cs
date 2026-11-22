@@ -41,6 +41,9 @@ namespace Queyang.Integration
         readonly SteamMeterRange batteryRange=new SteamMeterRange(), reservoirRange=new SteamMeterRange(true);
         readonly SteamDualOwnership ownership=new SteamDualOwnership();
         readonly bool colonyJoin=Environment.GetEnvironmentVariable("QY_CHECK_COLONY_JOIN")=="1";
+        readonly SteamMapBaseline mapBaseline=new SteamMapBaseline();
+        int arrivalRound;
+        int colonyVerifiedRound;
         readonly Action<string> log;
         readonly FixtureFrame screenshot, hostOrderFrame;
         readonly CSteamID owner, friend;
@@ -109,7 +112,7 @@ namespace Queyang.Integration
         {
             if (colonyJoin)
             {
-                SpeedControlScreen.Instance.Pause(false);
+                if (!SteamMapBaseline.Enabled || !SpeedControlScreen.Instance.IsPaused) SpeedControlScreen.Instance.Pause(false);
                 return true;
             }
             if(Time.realtimeSinceStartup<nextCandidate) return false;
@@ -135,7 +138,7 @@ namespace Queyang.Integration
                     if(!lobby.IsLobby() || HasGuest() || SteamMatchmaking.GetLobbyMemberLimit(lobby)!=4 ||
                         SteamMatchmaking.GetLobbyData(lobby,"queyang_coop")!="1")
                         throw new InvalidOperationException("Initial Steam lobby metadata does not match a private test session");
-                    SpeedControlScreen.Instance.Pause(false);
+                    if (!SteamMapBaseline.Enabled || !SpeedControlScreen.Instance.IsPaused) SpeedControlScreen.Instance.Pause(false);
                     if (colonyJoin)
                     {
                         SetData("qy_colony_buildings", ColonyRangeSurvey.BuildingSignature());
@@ -171,12 +174,22 @@ namespace Queyang.Integration
                     break;
                 case Phase.Joined:
                     if(!joined || ConnectedGuests()!=1) return false;
-                    if (!arrival.Capture(lobby,friend,round,false,log)) return false;
+                    if (arrivalRound != round)
+                    {
+                        if (!arrival.Capture(lobby,friend,round,false,log)) return false;
+                        arrivalRound = round;
+                    }
                     if (colonyJoin)
                     {
                         if (SteamMatchmaking.GetLobbyMemberData(lobby,friend,"qy_colony_verified")!=RoundText()) return false;
+                        if (colonyVerifiedRound != round)
+                        {
+                            log("COLONY_JOIN role=host round="+round+" buildings="+ColonyRangeSurvey.BuildingSignature());
+                            colonyVerifiedRound = round;
+                        }
+                        if (!health.Check(lobby,friend,true,round,log)) return false;
+                        if (!mapBaseline.Check(lobby,friend,true,log)) return false;
                         SetData("qy_colony_ack", RoundText());
-                        log("COLONY_JOIN role=host round="+round+" buildings="+ColonyRangeSurvey.BuildingSignature());
                         phase=Phase.Leave;
                         break;
                     }
@@ -315,7 +328,7 @@ namespace Queyang.Integration
                 case Phase.Leave:
                     if(joined || ConnectedGuests()!=0) return false;
                     log("DUAL_HOST_LEFT round="+round+" members=1 connectedPeers=0");
-                    if(round==1)
+                    if(round==1 && !SteamMapBaseline.Enabled)
                     {
                         round=2;
                         SteamDupePoseChecks.StartHost();
@@ -327,7 +340,8 @@ namespace Queyang.Integration
                         if (!colonyJoin) ownership.SaveEvidence(hostCell,cell,log);
                         phase=Phase.Finished; observing=null;
                         SpeedControlScreen.Instance.Unpause(false);
-                        log(colonyJoin ? "PASS DUAL_HOST colony baseline verified twice" :
+                        log(SteamMapBaseline.Enabled ? "PASS DUAL_HOST colony baseline and runtime samples collected" :
+                            colonyJoin ? "PASS DUAL_HOST colony baseline verified twice" :
                             "PASS DUAL_HOST two distinct Steam members, production dig, native excavation, reconnect and leave verified");
                         return true;
                     }

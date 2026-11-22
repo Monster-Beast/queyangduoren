@@ -18,6 +18,11 @@ param(
     [switch]$PrepareFacilityRange,
     [switch]$SurveyColony,
     [switch]$CheckColonyJoin,
+    [switch]$CheckColonyRun,
+    [switch]$Map01VSyncOff,
+    [switch]$Map01Video,
+    [switch]$Map01PumpControl,
+    [switch]$Map01DoomedLab,
     [string[]]$SurveyMissingMods,
     [string]$FacilityRangeManifest,
     [switch]$CheckConstruction,
@@ -39,6 +44,7 @@ param(
     [switch]$CheckBuried,
     [switch]$CheckLighting,
     [switch]$CheckHealth,
+    [switch]$CheckCritterHealth,
     [switch]$CheckCritters,
     [switch]$AcceptDeliveredInvite,
     [ValidateRange(0,600)][int]$InviteWaitSeconds=105,
@@ -53,6 +59,7 @@ $animationRecorders=@{}
 $animationCaptures=@()
 if($CheckResearchMotion) { $animationCaptures+=@{name='research-motion';marker='RESEARCH_MOTION_RECORD';seconds=8} }
 if($CheckBuildingMotion) { $animationCaptures+=@{name='building-motion';marker='BUILDING_MOTION_INPUT';seconds=12} }
+if($Map01Video) { $animationCaptures+=@{name='map01-runtime';marker='MAP01_DUAL_START';seconds=24} }
 if (!$GameDir) {
     $steamRoot=(Get-ItemProperty -LiteralPath 'HKCU:\Software\Valve\Steam').SteamPath
     $GameDir=Join-Path $steamRoot 'steamapps/common/OxygenNotIncluded'
@@ -68,6 +75,16 @@ $PackagePath=(Resolve-Path -LiteralPath $PackagePath).Path
 $hostOnly=$PrepareFacilityRange -or $SurveyColony
 if ($PrepareFacilityRange -and $SurveyColony) { throw 'Run preparation and colony survey separately.' }
 if ($CheckColonyJoin -and ($hostOnly -or $FacilityRangeManifest)) { throw 'A colony join check uses two players and a colony save.' }
+if ($CheckColonyRun -and !$CheckColonyJoin) { throw 'Run CheckColonyRun with CheckColonyJoin.' }
+if ($CheckCritterHealth -and (!$CheckColonyJoin -or $CheckColonyRun -or $CheckHealth)) {
+    throw 'Run CheckCritterHealth with only the paused colony join check.'
+}
+if ($Map01VSyncOff -and !$CheckColonyRun) { throw 'Run Map01VSyncOff with CheckColonyRun.' }
+if ($Map01Video -and !$CheckColonyRun) { throw 'Run Map01Video with CheckColonyRun.' }
+if ($Map01PumpControl -and (!$CheckColonyRun -or $Map01Video -or $Map01VSyncOff)) {
+    throw 'Run Map01PumpControl with CheckColonyRun and default display settings, without video.'
+}
+if ($Map01DoomedLab -and !$CheckColonyRun) { throw 'Run Map01DoomedLab with CheckColonyRun.' }
 if ($SurveyMissingMods -and (!$SurveyColony -or @($SurveyMissingMods -match '[\r\n|]').Count)) {
     throw 'Missing source mod names are only allowed for a survey and must be supplied individually.'
 }
@@ -198,6 +215,10 @@ foreach ($role in $roles) {
     $values.QY_PREPARE_FACILITY_RANGE=([int]$PrepareFacilityRange.IsPresent).ToString()
     $values.QY_SURVEY_COLONY=([int]$SurveyColony.IsPresent).ToString()
     $values.QY_CHECK_COLONY_JOIN=([int]$CheckColonyJoin.IsPresent).ToString()
+    $values.QY_CHECK_COLONY_RUN=([int]$CheckColonyRun.IsPresent).ToString()
+    $values.QY_MAP01_VSYNC_OFF=([int]$Map01VSyncOff.IsPresent).ToString()
+    $values.QY_MAP01_PUMP_CONTROL=([int]$Map01PumpControl.IsPresent).ToString()
+    $values.QY_MAP01_DOOMED_LAB=([int]$Map01DoomedLab.IsPresent).ToString()
     $values.QY_SURVEY_MISSING_MODS=$SurveyMissingMods -join '|'
     $values.QY_FACILITY_RANGE_STATIONS=$facilityStations
     $values.QY_CONSTRUCTION_RANGE=([int]$CheckConstruction.IsPresent).ToString()
@@ -219,6 +240,7 @@ foreach ($role in $roles) {
     $values.QY_CHECK_BURIED=([int]$CheckBuried.IsPresent).ToString()
     $values.QY_CHECK_LIGHTING=([int]$CheckLighting.IsPresent).ToString()
     $values.QY_CHECK_HEALTH=([int]$CheckHealth.IsPresent).ToString()
+    $values.QY_CHECK_CRITTER_HEALTH=([int]$CheckCritterHealth.IsPresent).ToString()
     $values.QY_CHECK_CRITTERS=([int]$CheckCritters.IsPresent).ToString()
     $drivers[$role]=[pscustomobject]@{role=$role;exe=$exe;env=$values;mods=$mods;base=$base;restarts=0;started=$false;done=$false;wrapper=$null}
     [ordered]@{ role=$role;package=$before[0];sourceSave=$before[1];fixture=(Get-FileHash $fixture).Hash
@@ -300,6 +322,7 @@ try {
     Start-Player $drivers.host
     $notified=@{}
     $timer=[Diagnostics.Stopwatch]::StartNew()
+    $nextMapMemory=0
     while ($timer.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
         foreach ($role in $roles) {
             $driver=$drivers[$role]
@@ -370,11 +393,29 @@ try {
             if ($driver.wrapper.HasExited) { throw "$role launcher exited early ($($driver.wrapper.ExitCode))." }
         }
         if ($drivers.host.done -and $drivers.guest.done) { break }
+        if ($CheckColonyRun -and $drivers.guest.started -and $timer.Elapsed.TotalSeconds -ge $nextMapMemory) {
+            $nextMapMemory=$timer.Elapsed.TotalSeconds+4
+            $memory=Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory -ErrorAction SilentlyContinue
+            if ($memory) {
+                [pscustomobject]@{utc=[DateTime]::UtcNow.ToString('o');availableMiB=$memory.AvailableMBytes
+                    pagesInPerSecond=$memory.PagesInputPersec;pageReadsPerSecond=$memory.PageReadsPersec
+                    committedBytes=$memory.CommittedBytes;commitLimit=$memory.CommitLimit} |
+                    Export-Csv -LiteralPath (Join-Path $run 'map01-system-memory.csv') -NoTypeInformation -Append -Encoding UTF8
+            }
+            foreach ($endpoint in $roles) {
+                $game=Get-Player $drivers[$endpoint]
+                if (!$game) { continue }
+                [pscustomobject]@{utc=[DateTime]::UtcNow.ToString('o');role=$endpoint
+                    workingMiB=[math]::Round($game.WorkingSet64/1MB);privateMiB=[math]::Round($game.PrivateMemorySize64/1MB)} |
+                    Export-Csv -LiteralPath (Join-Path $run 'map01-process-memory.csv') -NoTypeInformation -Append -Encoding UTF8
+            }
+        }
         Start-Sleep -Milliseconds 400
     }
     if (!$drivers.host.done -or !$drivers.guest.done) { throw 'Two-account Steam fixture timed out. See private reports.' }
     if ($CheckColonyJoin) {
-        $signatures=@(foreach ($round in 1,2) {
+        $colonyRounds=@(if ($CheckColonyRun) { 1 } else { 1,2 })
+        $signatures=@(foreach ($round in $colonyRounds) {
             foreach ($endpoint in $roles) {
                 $d=$drivers[$endpoint]
                 $report=Get-Physical $d $d.env.QY_SMOKE_REPORT
@@ -387,10 +428,41 @@ try {
             }
         })
         if (@($signatures | Select-Object -Unique).Count -ne 1) { throw 'Colony signatures differ after Steam join.' }
+        if ($CheckColonyRun) {
+            foreach ($endpoint in $roles) {
+                $d=$drivers[$endpoint]
+                $report=Get-Physical $d $d.env.QY_SMOKE_REPORT
+                foreach ($stage in 0..2) {
+                    $dest=Join-Path $d.base "map01-$endpoint-$stage.png"
+                    $photo=Get-Physical $d $dest
+                    if (!(Select-String -LiteralPath $report -Pattern "^MAP01_DUAL_STAGE role=$endpoint index=$stage " -Quiet) -or
+                        !(Test-Path -LiteralPath $photo) -or (Get-Item -LiteralPath $photo).Length -lt 45) { throw "Missing $endpoint running evidence at stage $stage." }
+                    if ($photo -ne $dest) { Copy-Item -LiteralPath $photo -Destination $dest }
+                }
+            }
+        }
+        if ($Map01Video) {
+            foreach ($endpoint in $roles) {
+                Confirm-DualRecording $drivers[$endpoint] $animationRecorders['map01-runtime'][$endpoint] 'map01-runtime' 24
+            }
+        }
+        if ($CheckCritterHealth) {
+            foreach ($endpoint in $roles) {
+                $d=$drivers[$endpoint]
+                $report=Get-Physical $d $d.env.QY_SMOKE_REPORT
+                foreach ($step in 0..2) {
+                    $dest=Join-Path $d.base "health-$endpoint-$step.png"
+                    $photo=Get-Physical $d $dest
+                    if (!(Select-String -LiteralPath $report -Pattern "^DUAL_HEALTH_BAR step=$step .* prefab=LightBugOrange" -Quiet) -or
+                        !(Test-Path -LiteralPath $photo) -or (Get-Item -LiteralPath $photo).Length -lt 45) { throw "Missing $endpoint critter health evidence at step $step." }
+                    if ($photo -ne $dest) { Copy-Item -LiteralPath $photo -Destination $dest }
+                }
+            }
+        }
         if (($before -join '/') -ne (@(Get-InputHashes) -join '/')) { throw 'A protected input changed during the colony join check.' }
-        [ordered]@{packageSha256=$before[0];saveSha256=$before[1];joins=2;buildings=$signatures[0];protectedInputsUnchanged=$true} |
+        [ordered]@{packageSha256=$before[0];saveSha256=$before[1];joins=$colonyRounds.Count;runtimeSamplesCaptured=$CheckColonyRun.IsPresent;critterHealthChecked=$CheckCritterHealth.IsPresent;buildings=$signatures[0];protectedInputsUnchanged=$true} |
             ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'colony-join-result.json') -Encoding UTF8
-        Write-Output "PASS both Steam game clients loaded the same mature colony twice; evidence in $run"
+        Write-Output "PASS both Steam game clients loaded the same mature colony; evidence in $run"
         return
     }
     foreach ($endpoint in $roles) { Confirm-DualRecording $drivers[$endpoint] $recorders[$endpoint] }

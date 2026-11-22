@@ -18,6 +18,7 @@ namespace Queyang.Game
         public const byte Worn = 32; // Item-kind flag for an occupied ONI equipment slot.
         public const byte ConstructionBar = 32; // Construction-kind flag for ONI's visible work bar.
         public const byte StorageSweepOnly = 32; // Storage-kind flag for ONI's sweep-only symbol.
+        public const byte CritterHealthBar = 2; // Critter-kind flag for ONI's visible health bar.
         public int Id, Prefab, Element, Animation;
         public ushort Cell;
         public byte SubX, SubY, Frame, Flags;
@@ -133,7 +134,8 @@ namespace Queyang.Game
                 e.Place > ColonyItemPlace.Stored || (e.Place == ColonyItemPlace.Ground ? e.OwnerId != -1 : e.OwnerId < 0 || e.OwnerId == e.Id) ||
                 !Number(e.Available) || !Number(e.Reserved) || (e.Flags & ~63) != 0 ||
                 !Number(e.Mass) || !Number(e.Temperature) || !Number(e.Value, -1) || !Number(e.Limit, -1) || !Number(e.Extra, -1) ||
-                e.Contents == null || e.Contents.Length > MaxIngredients || e.Contents.Length > e.IngredientTypes)
+                e.Contents == null || e.Contents.Length > MaxIngredients || e.Contents.Length > e.IngredientTypes ||
+                (e.Kind == ColonyEntityKind.Critter && (e.Flags & ColonyEntity.CritterHealthBar) != 0 && (e.Extra < 0 || e.Extra > 1)))
                 throw new InvalidDataException("Invalid entity state.");
             foreach (var row in e.Contents)
                 if (!Number(row.Stored) || !Number(row.Required) || !Number(row.Freshness, -1) || row.Freshness > 1)

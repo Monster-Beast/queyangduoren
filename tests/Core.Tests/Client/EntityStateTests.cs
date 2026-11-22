@@ -9,6 +9,23 @@ namespace Queyang.Core.Tests
     public class EntityStateTests
     {
         [Fact]
+        public void CritterHealthVisibilityIsIndependentOfHealthFraction()
+        {
+            var critter = new ColonyEntity { Id = 1, Kind = ColonyEntityKind.Critter, Extra = .55f, Flags = ColonyEntity.CritterHealthBar };
+            var page = new ColonyEntityPage { Entities = new[] { critter } };
+            var wounded = Assert.Single(EntityStateCodec.Decode(EntityStateCodec.Encode(page)).Entities);
+            Assert.Equal((ColonyEntity.CritterHealthBar, .55f), (wounded.Flags, wounded.Extra));
+
+            critter.Flags = 0;
+            var hidden = Assert.Single(EntityStateCodec.Decode(EntityStateCodec.Encode(page)).Entities);
+            Assert.Equal(((byte)0, .55f), (hidden.Flags, hidden.Extra));
+
+            critter.Flags = ColonyEntity.CritterHealthBar;
+            critter.Extra = -1;
+            Assert.Throws<InvalidDataException>(() => EntityStateCodec.Encode(page));
+        }
+
+        [Fact]
         public void DenseStoragePageCarriesNativeMeterAndReadsLegacyStorage()
         {
             var page=new ColonyEntityPage { Entities=Enumerable.Range(1,EntityStateCodec.MaxCount)

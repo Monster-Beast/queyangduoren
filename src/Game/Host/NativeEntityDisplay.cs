@@ -103,6 +103,12 @@ namespace Queyang.Game
                     continue;
                 }
                 SetVisible(target, true);
+                var anim = target.GetComponent<KBatchedAnimController>();
+                if (e.Kind == ColonyEntityKind.Critter && anim != null)
+                {
+                    short fill = (e.Flags & ColonyEntity.CritterHealthBar) != 0 ? NativeDupeHealth.ToFill(e.Extra) : (short)-1;
+                    NativeDupeHealth.Apply(anim,fill,selectable:false);
+                }
                 NativeWorldMirror.ApplyPrimary(target.GetComponent<PrimaryElement>(),
                     new MaterialSample { Element = e.Element, Mass = e.Mass, Temperature = e.Temperature });
                 if(tracked)
@@ -114,7 +120,6 @@ namespace Queyang.Game
                 var t = target.transform;
                 var pos = t.position;
                 if (pos.x != px || pos.y != py) t.position = new Vector3(px, py, pos.z);
-                var anim = target.GetComponent<KBatchedAnimController>();
                 var name = new HashedString(e.Animation);
                 if (anim != null)
                 {
@@ -312,6 +317,7 @@ namespace Queyang.Game
             if (select == null || !(visible ? hidden.Remove(select) : hidden.Add(select))) return;
             if (!visible && select.IsSelected) NativeWorldMirror.ClearSelection(select.gameObject);
             select.IsSelectable = visible; select.GetComponent<KBatchedAnimController>()?.SetVisiblity(visible);
+            if (!visible) select.GetComponent<NativeDupeHealth>()?.Hide();
         }
         static void Forget(int id)
         {
@@ -320,6 +326,7 @@ namespace Queyang.Game
             NativeConstructionProgress.Clear(ref old.WorkBar);
             if(old.State.Kind==ColonyEntityKind.Critter) NativeDupePose.Forget(id,0);
             if (old.Target == null) return;
+            if (old.State.Kind==ColonyEntityKind.Critter) old.Target.GetComponent<NativeDupeHealth>()?.Hide();
             old.Target.RemoveStatusItem(old.Status);
             if (old.Proxy) NativeWorldMirror.DestroySelectableProxy(old.Target.gameObject);
         }

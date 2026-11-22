@@ -1,6 +1,7 @@
 using System;
 using HarmonyLib;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace Queyang.Game
 {
@@ -15,13 +16,18 @@ namespace Queyang.Game
 
         internal static short Capture(KBatchedAnimController body)
         {
-            var h=body==null?null:body.GetComponent<Health>();
-            if(h==null || h.healthBar==null || !h.healthBar.gameObject.activeSelf || h.IsIncapacitated() ||
-                h.hitPoints<=0 || h.hitPoints>=h.maxHitPoints || body.HasTag("HideHealthBar")) return -1;
-            return (short)Mathf.RoundToInt(1000*Mathf.Clamp01(h.percent()));
+            var health=body==null?null:body.GetComponent<Health>();
+            return IsShown(health) ? ToFill(health.percent()) : (short)-1;
         }
 
-        internal static void Apply(KBatchedAnimController body,short fill)
+        internal static bool IsShown(Health health) =>
+            health!=null && health.healthBar!=null && health.healthBar.gameObject.activeSelf &&
+            !health.IsIncapacitated() && health.hitPoints>0 && health.hitPoints<health.maxHitPoints &&
+            !health.HasTag("HideHealthBar");
+
+        internal static short ToFill(float fraction) => (short)Mathf.RoundToInt(1000*Mathf.Clamp01(fraction));
+
+        internal static void Apply(KBatchedAnimController body,short fill,bool selectable=true)
         {
             var display=NameDisplayScreen.Instance;
             if(display==null) return;
@@ -41,6 +47,7 @@ namespace Queyang.Game
                     if(overlay!=null) overlay.Register();
                     else display.AddNewEntry(body.gameObject);
                     entry=entryFor(display,body.gameObject);
+                    if(entry==null) return;
                 }
                 if(entry.healthBar==null)
                 {
@@ -49,7 +56,8 @@ namespace Queyang.Game
                     entry.healthBar=obj.GetComponent<HealthBar>();
                     entry.healthBar.autoHide=false;
                     obj.GetComponent<KSelectable>().entityName=STRINGS.UI.METERS.HEALTH.TOOLTIP;
-                    obj.GetComponent<KSelectableHealthBar>().IsSelectable=true;
+                    obj.GetComponent<KSelectableHealthBar>().IsSelectable=selectable;
+                    obj.transform.Find("Bar").GetComponent<Image>().color=ProgressBarsConfig.Instance.GetBarColor("HealthBar");
                 }
                 binding.bar=entry.healthBar;
             }
