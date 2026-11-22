@@ -7,7 +7,7 @@
 | 来源 | 适合拿来测什么 |
 |---|---|
 | 本机隔离存档，或新开 Terra 基础版并启用原版沙盒 | 推荐作为固定起点。保持地图、游戏版本、DLC、镜头和速度一致。沙盒只用于准备施工地板和材料，实际计时段由复制人原版工作推进。 |
-| 社区分享的完整存档 | 可以验证长期运行、大量建筑以及作者的实际玩法。公开的玩家存档仓库属于这一类。载入前确认对应 DLC、版本、所需 Mod 和发布者的使用条款。 |
+| 社区分享的完整存档 | 可以验证长期运行、大量建筑以及作者的实际玩法。查到的玩家仓库确实包含可下载的 `.sav`，但最后更新于 2018 年，当前版本能否读取尚未实测。载入前确认对应 DLC、版本、所需 Mod 和发布者的使用条款。 |
 | 社区蓝图 | 用于复建特定电路、管网或工作区。蓝图提供建筑布局，殖民地、人物、供料以及当前机器状态需要在测试档里准备。 |
 
 官方本机安装包含地图生成模板，本机未发现安装包随附的联机测试 `.sav`。公开检索也未找到 Klei 发布、用于联机和建筑进度回归的固定存档。Klei 问题追踪器和支持页面对本次访问返回 403，具体问题帖的附件没有逐个核实。[Klei 问题追踪](https://forums.kleientertainment.com/klei-bug-tracker/oni/) · [游戏沙盒说明](https://oxygennotincluded.wiki.gg/wiki/Sandbox_Mode) · [社区玩家存档示例](https://github.com/forteddyt/ONI-save_files) · [社区蓝图库](https://blueprintnotincluded.org/)
@@ -20,18 +20,20 @@
 2. **实际施工中。** 中间值达到约 28% 后暂停，让双方分别取画面并核对同一 ID 的实际施工比例和材料量。之后恢复，让同一工单继续完工。
 3. **完工。** 对照成品对象的 ID，检查客机不再能选中旧蓝图，并截图保留两侧画面。
 
-阶段断言读取的是原版房主施工对象和客机同步后的对象数据。截图用于判断进度条、建造动画和选中侧栏实际呈现了什么，还需要单独做图像或界面控件验收。
+阶段断言读取原版房主施工对象和客机同步后的对象数据，并单独读取两端实际的进度条控件。施工中检查条是否可见、条长是否跟随同一百分比。完工后检查旧条是否消失。配对截图用于核对画面位置、建造动画和侧栏。
 
 本机有之前双端验收使用过的第 3 周期隔离档副本 `artifacts/qa/range-starter/Fixture.sav`。两端账号仍需持有游戏、互为 Steam 好友。开始前退出游戏副本，保留两个 Steam 客户端。运行时在 `artifacts/qa` 新建独立记录目录，复制输入存档并校对原始哈希。下面的账号变量由本机操作者填写。
 
 ~~~powershell
 $save = '.\artifacts\qa\range-starter\Fixture.sav'
-$package = '.\dist\QueyangCoop-0.3.2-health-preview.zip'
+$package = '.\artifacts\qa\QueyangCoop-0.3.2-99497FCD49BA2ACC37EC1D1B2C6B502BA35F4FAA385B1A5A8CEF147BE6CB14A9.zip'
 .\tests\Integration\Game\steam-dual.ps1 -HostSteamId $hostSteamId -GuestSteamId $guestSteamId `
     -SavePath $save -PackagePath $package -CheckConstruction -SkipManagement
 ~~~
 
 运行成功时，两边报告都出现三个 `CONSTRUCTION_RANGE` 阶段，目录里有 6 张 `range-*.png`。录屏和普通重连验收由既有双端脚本继续执行。若施工阶段超时，先看两端报告中的阶段、格号、已交付质量和施工数值，核对原版复制人有材料、有路可走且正在施工。
+
+首次复现使用 15EB 血条预览包。格 49788 的同一蓝图 ID 2357 在两端均为 0% → 28.2%，客机中间记录为 400 kg 已交付，完工后同为成品 ID 2369。原版施工进度条在房主画面可见，客机画面只有施工效果和侧栏数据。该轮完成重连和带 Mod、无 Mod 两种独立读档。[修复前的两端截图](evidence/qa/dual-construction-range.jpg)
 
 ## 下一批工位
 
