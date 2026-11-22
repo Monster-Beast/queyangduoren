@@ -26,6 +26,7 @@ param(
     [switch]$CheckResearchMotion,
     [switch]$CheckDupeFeedback,
     [switch]$CheckUpgradeVisual,
+    [switch]$CheckPrinting,
     [switch]$CheckRoomControls,
     [switch]$CheckBattery,
     [switch]$CheckReservoir,
@@ -184,6 +185,7 @@ foreach ($role in $roles) {
     $values.QY_RESEARCH_MOTION_RANGE=([int]$CheckResearchMotion.IsPresent).ToString()
     $values.QY_DUPE_FEEDBACK=([int]$CheckDupeFeedback.IsPresent).ToString()
     $values.QY_UPGRADE_VISUAL=([int]$CheckUpgradeVisual.IsPresent).ToString()
+    $values.QY_PRINTING=([int]$CheckPrinting.IsPresent).ToString()
     $values.QY_ROOM_CONTROLS=([int]$CheckRoomControls.IsPresent).ToString()
     $values.QY_BATTERY_RANGE=([int]$CheckBattery.IsPresent).ToString()
     $values.QY_RESERVOIR_RANGE=([int]$CheckReservoir.IsPresent).ToString()
@@ -444,6 +446,21 @@ try {
             }
         }
     }
+    if ($CheckPrinting) {
+        foreach ($role in $roles) {
+            $d=$drivers[$role]
+            $report=Get-Physical $d $d.env.QY_SMOKE_REPORT
+            foreach ($pattern in "^PRINT_RANGE role=$role ", "^PRINT_REJOIN role=$role ") {
+                if (!(Select-String -LiteralPath $report -Pattern $pattern -Quiet)) { throw "Missing $role printing evidence." }
+            }
+            foreach ($stage in 0..3) {
+                $dest=Join-Path $d.base "printing-$role-$stage.png"
+                $src=Get-Physical $d $dest
+                if (!(Test-Path -LiteralPath $src) -or (Get-Item -LiteralPath $src).Length -lt 45) { throw "Missing $role printing screenshot for stage $stage." }
+                if ($src -ne $dest) { Copy-Item -LiteralPath $src -Destination $dest }
+            }
+        }
+    }
     if ($CheckDupeFeedback) {
         foreach ($role in $roles) {
             $d=$drivers[$role]
@@ -616,7 +633,7 @@ $joins=@(foreach ($line in $guestReport) {
 })
 if ($joins.Count -ne 2 -or $joins[0].round -ne 1 -or $joins[1].round -ne 2) { throw 'Missing exact join methods for both rounds.' }
 [ordered]@{packageSha256=$before[0];saveSha256=$before[1];protectedInputsUnchanged=$true;joins=$joins
-    checks=[ordered]@{areaDig=$CheckAreaDig.IsPresent;alert=$CheckAlert.IsPresent;sweepSymbol=$CheckSweepSymbol.IsPresent;power=$CheckPower.IsPresent;research=$CheckResearch.IsPresent;dupeFeedback=$CheckDupeFeedback.IsPresent;buildingMotion=$CheckBuildingMotion.IsPresent;researchMotion=$CheckResearchMotion.IsPresent;battery=$CheckBattery.IsPresent;reservoir=$CheckReservoir.IsPresent;construction=$CheckConstruction.IsPresent;floor=$CheckFloor.IsPresent;health=$CheckHealth.IsPresent;lighting=$CheckLighting.IsPresent;buildings=$CheckBuildings.IsPresent;buried=$CheckBuried.IsPresent;fallingOre=$CheckFallingOre.IsPresent;critters=$CheckCritters.IsPresent;skills=!$SkipManagement;person=!$SkipManagement -and !$SkipPerson;work=!$SkipManagement -and !$SkipWork}} |
+    checks=[ordered]@{printing=$CheckPrinting.IsPresent;areaDig=$CheckAreaDig.IsPresent;alert=$CheckAlert.IsPresent;sweepSymbol=$CheckSweepSymbol.IsPresent;power=$CheckPower.IsPresent;research=$CheckResearch.IsPresent;dupeFeedback=$CheckDupeFeedback.IsPresent;buildingMotion=$CheckBuildingMotion.IsPresent;researchMotion=$CheckResearchMotion.IsPresent;battery=$CheckBattery.IsPresent;reservoir=$CheckReservoir.IsPresent;construction=$CheckConstruction.IsPresent;floor=$CheckFloor.IsPresent;health=$CheckHealth.IsPresent;lighting=$CheckLighting.IsPresent;buildings=$CheckBuildings.IsPresent;buried=$CheckBuried.IsPresent;fallingOre=$CheckFallingOre.IsPresent;critters=$CheckCritters.IsPresent;skills=!$SkipManagement;person=!$SkipManagement -and !$SkipPerson;work=!$SkipManagement -and !$SkipWork}} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $run 'result.json') -Encoding UTF8
 Write-Output "PASS both Steam game clients; evidence in $run"
 } finally {

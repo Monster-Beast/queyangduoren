@@ -207,7 +207,8 @@ namespace Queyang.Game
                     if (anim!=null && sample.HasBlueprintTint) anim.TintColour=NativeOrderColors.Unpack(sample.BlueprintTint);
                     NativeBuildingAnimation.Snapshot(anim,sample.BuildingAnimation,sample.BuildingFrame,tick);
                     ApplyPrimary(item.GetComponent<PrimaryElement>(), sample.Structure);
-                    if (sample.TargetId > 0 && item.GetComponent<Door>() != null && item.GetComponent<BuildingComplete>() != null)
+                    if (sample.TargetId > 0 && (item.GetComponent<Door>() != null || item.GetComponent<Telepad>() != null) &&
+                        item.GetComponent<BuildingComplete>() != null)
                     {
                         var controls = item.GetComponent<NativeProxySettings>() ?? item.gameObject.AddComponent<NativeProxySettings>();
                         controls.Initialize(cell, sample.TargetId);

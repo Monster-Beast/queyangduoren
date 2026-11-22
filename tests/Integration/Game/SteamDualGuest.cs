@@ -38,6 +38,7 @@ namespace Queyang.Integration
         readonly SteamResearchMotionRange researchMotion=new SteamResearchMotionRange();
         readonly SteamDupeFeedbackRange dupeFeedback=new SteamDupeFeedbackRange();
         readonly SteamUpgradeVisualRange upgradeVisual=new SteamUpgradeVisualRange();
+        readonly SteamPrintingRange printing=new SteamPrintingRange();
         readonly SteamMeterRange batteryRange=new SteamMeterRange(), reservoirRange=new SteamMeterRange(true);
         readonly SteamDualOwnership ownership=new SteamDualOwnership();
         readonly Action<string> log;
@@ -290,6 +291,7 @@ namespace Queyang.Integration
                     if (!buildingMotion.Check(lobby,self,false,round,log)) break;
                     if (!dupeFeedback.Check(lobby,self,false,round,log)) break;
                     if (!upgradeVisual.Check(lobby,self,round,false,log)) break;
+                    if (!printing.Check(lobby,self,false,round,log)) break;
                     if (!floorRange.Check(lobby,self,false,round,log)) break;
                     if (!constructionRange.Check(lobby,self,false,round,log)) break;
                     if (!areaDig.Check(lobby,self,false,round,Grid.InvalidCell,log)) break;
@@ -334,6 +336,7 @@ namespace Queyang.Integration
                     if (!ownership.IssueGuest(lobby,Cell)) break;
                     log("DUAL_GUEST_EXCAVATED x="+x+" y="+y); Snapshot(); break;
                 case Phase.Revisit:
+                    if (!printing.Check(lobby,self,false,round,log)) break;
                     if (!roomControls.Check(lobby,self,round,false,log)) break;
                     if (!buildings.Check(lobby,self,false,round,log)) break;
                     if (!skills.Verify(lobby,round,false,log)) break;

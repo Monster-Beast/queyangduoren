@@ -165,7 +165,7 @@ namespace Queyang.Game
             return "OK";
         }
 
-        static bool TryDecodeName(string value, out string name)
+        internal static bool TryDecodeName(string value, out string name)
         {
             name = null;
             try { name = RenameEncoding.GetString(Convert.FromBase64String(value.Replace('_','/'))); }

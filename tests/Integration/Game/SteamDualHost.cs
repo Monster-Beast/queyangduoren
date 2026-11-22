@@ -36,6 +36,7 @@ namespace Queyang.Integration
         readonly SteamResearchMotionRange researchMotion=new SteamResearchMotionRange();
         readonly SteamDupeFeedbackRange dupeFeedback=new SteamDupeFeedbackRange();
         readonly SteamUpgradeVisualRange upgradeVisual=new SteamUpgradeVisualRange();
+        readonly SteamPrintingRange printing=new SteamPrintingRange();
         readonly SteamMeterRange batteryRange=new SteamMeterRange(), reservoirRange=new SteamMeterRange(true);
         readonly SteamDualOwnership ownership=new SteamDualOwnership();
         readonly Action<string> log;
@@ -173,6 +174,7 @@ namespace Queyang.Integration
                     if (!buildingMotion.Check(lobby,friend,true,round,log)) return false;
                     if (!dupeFeedback.Check(lobby,friend,true,round,log)) return false;
                     if (!upgradeVisual.Check(lobby,friend,round,true,log)) return false;
+                    if (!printing.Check(lobby,friend,true,round,log)) return false;
                     if (!floorRange.Check(lobby,friend,true,round,log)) return false;
                     if (!constructionRange.Check(lobby,friend,true,round,log)) return false;
                     if (!areaDig.Check(lobby,friend,true,round,candidate,log)) return false;
@@ -252,6 +254,7 @@ namespace Queyang.Integration
                     phase=Phase.Leave;
                     break;
                 case Phase.Revisit:
+                    if (!printing.Check(lobby,friend,true,round,log)) return false;
                     if (!roomControls.Check(lobby,friend,round,true,log)) return false;
                     if (!buildings.Check(lobby,friend,true,round,log)) return false;
                     if (!skills.Verify(lobby,round,true,log)) return false;

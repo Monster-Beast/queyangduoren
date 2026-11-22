@@ -178,6 +178,7 @@ namespace Queyang.Game
             NativeToolCommands.Reset();
             OrderOwnership.Reset();
             NativeManagement.Reset();
+            NativePrinting.ResetHost();
             if (client != null) GuestDiagnostics.End();
             client?.Dispose();
             host?.Dispose();

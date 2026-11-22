@@ -59,7 +59,7 @@ namespace Queyang.Game
             if (route == "research" || route == "overview" || route.StartsWith("workers/",StringComparison.Ordinal) || route.StartsWith("population/",StringComparison.Ordinal) || route.StartsWith("schedules/", StringComparison.Ordinal) || route.StartsWith("schedule/", StringComparison.Ordinal) ||
                 route.StartsWith("choices/", StringComparison.Ordinal) || route.StartsWith("diet/", StringComparison.Ordinal) ||
                 route.StartsWith("vitals/", StringComparison.Ordinal) || route.StartsWith("profile/", StringComparison.Ordinal) ||
-                route.StartsWith("proxy/", StringComparison.Ordinal) ||
+                route.StartsWith("proxy/", StringComparison.Ordinal) || route.StartsWith("printing/", StringComparison.Ordinal) ||
                 route.StartsWith("dupe/", StringComparison.Ordinal) || route.StartsWith("building/", StringComparison.Ordinal) ||
                 route.StartsWith("settings/", StringComparison.Ordinal) ||
                 route.StartsWith("buildingname/",StringComparison.Ordinal) && route.Count(c => c == '/') == 1)
@@ -70,6 +70,7 @@ namespace Queyang.Game
         internal static void Tick()
         {
             if (!listening) { CoopSession.CommandResult += Receive; listening = true; }
+            NativePrinting.TickGuest();
             if (pendingEdits.Count > 0 && Time.unscaledTime >= nextEdit)
             {
                 var edit = pendingEdits.Dequeue();
@@ -125,6 +126,7 @@ namespace Queyang.Game
             hudScreen=null; stressMeter=null; rationMeter=null;
             ResetVitals();
             ResetProfile();
+            NativePrinting.ResetGuest();
         }
 
         internal static bool TryExecute(string action, int x, int y, out string result)
@@ -132,12 +134,17 @@ namespace Queyang.Game
             result = null;
             if (action == null || !action.StartsWith("nm/", StringComparison.Ordinal)) return false;
             result = Conflict;
-            if (action.Length > (action.StartsWith("nm/rota/",StringComparison.Ordinal) ? 1024 : 256)) return true;
+            int maxLength = action.StartsWith("nm/rota/", StringComparison.Ordinal) ? 1024 :
+                action.StartsWith("nm/printing/", StringComparison.Ordinal) ? 512 : 256;
+            if (action.Length > maxLength) return true;
             var p = action.Split('/');
             switch (p[1])
             {
                 case "clock": result = ApplyClock(p); break;
                 case "name": result = ApplyDupeName(p); break;
+                case "printing":
+                    result = NativePrinting.Execute(p, x, y);
+                    break;
                 case "population":
                     if (p.Length==3) result=Population(Number(p[2]));
                     break;
@@ -241,6 +248,11 @@ namespace Queyang.Game
         static void Receive(string value)
         {
             if (!NativeGuestScene.Ready || !value.StartsWith(Prefix, StringComparison.Ordinal)) return;
+            if (value.StartsWith("NM1/printing/", StringComparison.Ordinal))
+            {
+                NativePrinting.Receive(value);
+                return;
+            }
             if (value.StartsWith("NM1/choices/",StringComparison.Ordinal))
             {
                 SelectedDupe()?.GetComponent<NativePersonMenu>()?.Receive(value);

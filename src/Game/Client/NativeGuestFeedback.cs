@@ -46,19 +46,6 @@ namespace Queyang.Game
             }
         }
 
-        [HarmonyPatch]
-        static class Print
-        {
-            static IEnumerable<MethodBase> TargetMethods()
-            {
-                yield return AccessTools.Method(typeof(ImmigrantScreen), "InitializeImmigrantScreen");
-                yield return AccessTools.Method(typeof(ImmigrantScreen), "OnProceed");
-                yield return AccessTools.Method(typeof(ImmigrantScreen), "OnRejectAll");
-                yield return AccessTools.Method(typeof(ImmigrantScreen), "OnRejectionConfirmed");
-            }
-            static bool Prefix() => Refuse("打印舱选人和补给");
-        }
-
         // The stock UI sends a host request. No achievement, perk or local chore
         // may be produced by an incidental simulation callback on the replica.
         [HarmonyPatch(typeof(MinionResume),"MasterSkill",new[]{typeof(string)})]

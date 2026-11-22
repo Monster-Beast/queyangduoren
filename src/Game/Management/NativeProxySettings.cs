@@ -44,8 +44,11 @@ namespace Queyang.Game
         internal void Poll()
         {
             if (this != NativeManagement.SelectedProxy || target <= 0) return;
+            if (GetComponent<Telepad>() != null) return;
             NativeManagement.ProxyCommand(FormattableString.Invariant($"proxy/{target}/{page}"), cell);
         }
+        internal int HostTarget => target;
+        internal int AnchorCell => cell;
         internal void Receive(string text)
         {
             if (this != NativeManagement.SelectedProxy || !Grid.IsValidCell(cell)) return;
