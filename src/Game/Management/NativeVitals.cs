@@ -59,7 +59,12 @@ namespace Queyang.Game
         {
             var selected = SelectedDupe();
             if (!ReferenceEquals(selected,selectedIdentity)) { ResetVitals(); selectedIdentity = selected; }
-            if (selected != null) Send("vitals/" + SaveId(selected));
+            if (selected != null)
+            {
+                int id=SaveId(selected);
+                selected.AddOrGet<NativePersonMenu>().Poll(id);
+                Send("vitals/" + id);
+            }
         }
         static Amount[] Vitals()
         {

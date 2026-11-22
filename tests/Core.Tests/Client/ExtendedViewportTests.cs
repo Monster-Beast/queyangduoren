@@ -89,6 +89,20 @@ namespace Queyang.Core.Tests
         }
 
         [Fact]
+        public void OverlappingDigAndBlueprintKeepTheirOwnMaterialAndTint()
+        {
+            var v=View(); v.HasEnvironment=true;
+            v.Cells[8]=new ColonyCell { Flags=1|8|32, DigMaterial=3, DigTint=0xc0ff0854,
+                HasBlueprintTint=true, BlueprintTint=0x30ab2900 };
+            var c=ColonyView.Decode(v.Encode()).Cells[8];
+            Assert.Equal(((byte)3,0xc0ff0854u,true,0x30ab2900u),(c.DigMaterial,c.DigTint,c.HasBlueprintTint,c.BlueprintTint));
+            v.Cells[8].DigMaterial=0; v.Cells[8].HasBlueprintTint=false;
+            c=ColonyView.Decode(v.Encode()).Cells[8];
+            Assert.False(c.HasBlueprintTint);
+            Assert.Equal(0,c.DigMaterial);
+        }
+
+        [Fact]
         public void RoomMembershipMustHaveValidDimensionsAndCanBeCleared()
         {
             var v=View(); v.HasEnvironment=true;
@@ -139,10 +153,30 @@ namespace Queyang.Core.Tests
                     OrderPriority=(byte)r.Next(1,10), MopOrdered=r.Next(2)==0,
                     OrderTargetId=r.Next(1,int.MaxValue), SeparateOrderPriority=(byte)r.Next(10),
                     Germs=r.Next(), GermType=(byte)r.Next(256), RailPresent=true, RailItem=r.Next(), RailConnections=15, RailMass=Value() };
-            v.Dupes = Enumerable.Range(1,64).Select(i=>new ColonyDupe { Id=i, SaveId=i, Name=Name(), Activity=Name() }).ToArray();
+            v.DupePoseTick=110;
+            v.Dupes = Enumerable.Range(1,64).Select(i=>new ColonyDupe { Id=i, SaveId=i, Name=Name(), Activity=Name(),
+                Pose=new ColonyDupePose { X=(float)r.NextDouble(),Y=(float)r.NextDouble(),M00=Value(),M01=Value(),M02=Value(),
+                    M10=Value(),M11=Value(),M12=Value(),File=r.Next(),Frame=r.Next(65536) } }).ToArray();
             v.Piles = Enumerable.Range(0,ColonyView.MaxPiles).Select(i=>new ColonyPile { SaveId=i, Cell=(ushort)i, Material=Material(), Animation=r.Next() }).ToArray();
             v.Stocks = Enumerable.Range(0,ColonyView.MaxStocks).Select(i=>new ColonyStock { Tag=i, Total=Value(), Reserved=Value() }).ToArray();
             return v;
+        }
+
+        [Fact]
+        public void NativePosePreservesRenderMatrixAndGridBoundary()
+        {
+            var v=View();
+            v.DupePoseTick=1234;
+            v.Cells[0].Flags=1;
+            var pose=new ColonyDupePose { X=.71f,Y=-.049f,M00=-1,M11=1,M02=.49f,M12=.25f,Frame=5,File=912 };
+            v.Dupes=new[]{new ColonyDupe { Name="Test",Id=7,SaveId=32,Pose=pose }};
+            var copy=ColonyView.Decode(v.Encode());
+            Assert.Equal(v.DupePoseTick,copy.DupePoseTick);
+            Assert.Equal(pose,copy.Dupes[0].Pose);
+            v.Dupes[0].Pose.M02=float.NaN;
+            Assert.Throws<InvalidDataException>(()=>v.Encode());
+            v.DupePoseTick=0;
+            Assert.Equal(0,ColonyView.Decode(v.Encode()).DupePoseTick);
         }
 
         [Fact]

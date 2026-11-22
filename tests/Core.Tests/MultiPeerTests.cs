@@ -92,7 +92,12 @@ public class MultiPeerTests
         using var host=new RoomHost("build",(id,b)=>down[id].Enqueue(b),drops.Add,(x,y)=>
         {
             world.X=Math.Max(0,x);
-            for (int i=0; i<world.Dupes.Length; ++i) world.Dupes[i].X=world.X;
+            for (int i=0; i<world.Dupes.Length; ++i)
+            {
+                ref var dupe=ref world.Dupes[i];
+                dupe.Pose.X+=world.X-dupe.X;
+                dupe.X=world.X;
+            }
             return world.Encode();
         },(a,x,y)=>"OK",()=>time,()=>source=new MemoryStream(baseline,false));
         void Join(int id)
@@ -140,8 +145,17 @@ public class MultiPeerTests
             guests[2].Dispose(); Assert.Empty(Directory.GetFiles(temp));
             Join(2); Pump(false); Assert.Throws<InvalidDataException>(()=>host.Receive(2,oldAck));
             Pump(false); Assert.Equal(baseline,File.ReadAllBytes(published));
+            var motion=new List<byte[]>();
+            host.CaptureMotion=(x,y)=>new[]{new[]{checked((byte)x)}};
+            guests[2].MotionReceived+=motion.Add;
             guests[2].Subscribe(72,0); guests[2].NativeWorldReady(); Pump(false); Pump(false);
             var fresh=ColonyView.Decode(guests[2].View);
+            Assert.Equal(new byte[]{72},Assert.Single(motion));
+            time+=.06; host.Tick(); // In-flight unreliable event from the previous camera.
+            guests[2].Subscribe(48,0); Pump(false);
+            Assert.Single(motion);
+            time+=.06; Pump(false);
+            Assert.Equal(new byte[]{48},motion.Last());
             Assert.Equal(72,fresh.X); Assert.Equal(world.EntityPayload,fresh.EntityPayload);
             Assert.Equal(104,fresh.Cells[288].RoomSize); Assert.Equal(451,fresh.Stocks[0].Total);
         }

@@ -80,10 +80,14 @@ namespace Queyang.Game
                 }
             }
             var dupes = new List<ColonyDupe>();
+            view.DupePoseTick=Math.Max(1,Time.frameCount);
             foreach (var dupe in Components.LiveMinionIdentities.Items)
             {
                 if (dupe == null) continue;
-                int cell = Grid.PosToCell(dupe);
+                // The KMonoBehaviour overload may return a pending navigation cell. Use
+                // the same rendered root for both tile coverage and the sub-cell pose.
+                var pos = dupe.transform.position;
+                int cell = Grid.PosToCell(pos);
                 if (!Grid.IsValidCell(cell) || Grid.WorldIdx[cell] != world.id || Grid.Visible[cell] == 0)
                     continue;
                 int dupeX, dupeY;
@@ -92,7 +96,6 @@ namespace Queyang.Game
                     dupeY >= view.Y + ColonyView.Height) continue;
                 var driver = dupe.GetComponent<ChoreDriver>();
                 var chore = driver == null ? null : driver.GetCurrentChore();
-                var pos = dupe.transform.position;
                 var anim = dupe.GetComponent<KBatchedAnimController>();
                 dupes.Add(new ColonyDupe {
                     SaveId = dupe.GetComponent<KPrefabID>().InstanceID,
@@ -101,6 +104,7 @@ namespace Queyang.Game
                     AnimationPosition = anim == null ? (byte)0 :
                         (byte)Mathf.RoundToInt(255 * Mathf.Clamp01(anim.GetPositionPercent())),
                     FlipX = anim != null && anim.FlipX,
+                    Pose = NativeDupePose.Capture(anim,pos),
                     X = dupeX, Y = dupeY, Name = dupe.GetProperName(),
                     Id = TargetKeys.GetValue(dupe.gameObject, CreateKey).Value,
                     SubX = (byte)Mathf.RoundToInt(255 * Mathf.Clamp01(pos.x - dupeX)),
@@ -110,6 +114,7 @@ namespace Queyang.Game
             }
             view.SetDupePage(dupes,sample>=0 ? sample : Mathf.FloorToInt(Time.unscaledTime));
             NativeResources.Capture(view, world,sample);
+            OrderOwnership.Capture(view,sample);
             return view.Encode();
         }
 
@@ -173,7 +178,11 @@ namespace Queyang.Game
             if (Grid.Solid[cell]) result.Flags |= 2;
             if (element.IsLiquid) result.Flags |= 4;
             if (element.id == SimHashes.Oxygen || element.id == SimHashes.ContaminatedOxygen) result.Flags |= 64;
-            if (dig != null) result.Flags |= 8;
+            if (dig != null)
+            {
+                result.Flags |= 8;
+                NativeOrderColors.CaptureDig(dig.GetComponent<Diggable>(), ref result);
+            }
             result.MopOrdered = Grid.Objects[cell, (int)ObjectLayer.MopPlacer] != null;
             result.OrderPriority = ReadPriority(target);
             if (order != null && order != target)
@@ -197,6 +206,11 @@ namespace Queyang.Game
                     var anim = building.GetComponent<KBatchedAnimController>();
                     if (anim != null)
                     {
+                        if (building.GetComponent<Constructable>() != null)
+                        {
+                            result.HasBlueprintTint=true;
+                            result.BlueprintTint=NativeOrderColors.Pack(anim.TintColour);
+                        }
                         result.BuildingAnimation = anim.currentAnim.HashValue;
                         result.BuildingFrame = (byte)Mathf.RoundToInt(255 * Mathf.Clamp01(anim.GetPositionPercent()));
                     }

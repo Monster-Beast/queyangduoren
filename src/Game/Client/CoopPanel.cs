@@ -237,7 +237,8 @@ namespace Queyang.Game
 
         private void OnGUI()
         {
-            if (!gateInput && !NativeGuestFeedback.Visible) return;
+            bool drawOrders = CoopSession.IsHosting || (CoopSession.IsNativeClient && NativeGuestScene.Ready);
+            if (!gateInput && !NativeGuestFeedback.Visible && !drawOrders) return;
             Matrix4x4 old = GUI.matrix;
             int oldDepth = GUI.depth;
             GUISkin oldSkin = GUI.skin;
@@ -256,6 +257,7 @@ namespace Queyang.Game
                 }
                 GUI.skin = panelSkin;
                 GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
+                if (drawOrders) OrderOwnership.Draw(scale);
                 if (NativeGuestFeedback.Visible)
                 {
                     float width = Mathf.Min(420f, Screen.width / scale - 16f);

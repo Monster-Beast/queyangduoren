@@ -36,6 +36,8 @@ namespace Queyang.Game
             catch { Dispose(); throw; }
         }
 
+        internal string DisplayName(int peer) => backend?.DisplayName(peer);
+        internal string Account(int peer) => backend?.Account(peer);
         public void Poll() => backend?.Poll();
         public void Drop(int peer) => backend?.Drop(peer);
         public void Invite()
@@ -66,6 +68,8 @@ namespace Queyang.Game
     {
         protected readonly CoopTransport Owner;
         protected ConnectionBackend(CoopTransport owner) { Owner = owner; }
+        internal virtual string DisplayName(int peer) => null;
+        internal virtual string Account(int peer) => null;
         internal abstract void Start(bool hosting, string endpoint);
         internal abstract void Poll();
         internal abstract void Send(int peer, byte[] packet);

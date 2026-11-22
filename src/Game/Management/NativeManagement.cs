@@ -57,6 +57,7 @@ namespace Queyang.Game
         {
             if (!NativeGuestScene.Ready || !CoopSession.IsNativeClient || CoopSession.NativeView == null) return;
             if (route == "research" || route == "overview" || route.StartsWith("schedules/", StringComparison.Ordinal) || route.StartsWith("schedule/", StringComparison.Ordinal) ||
+                route.StartsWith("choices/", StringComparison.Ordinal) || route.StartsWith("diet/", StringComparison.Ordinal) ||
                 route.StartsWith("vitals/", StringComparison.Ordinal) || route.StartsWith("profile/", StringComparison.Ordinal) ||
                 route.StartsWith("proxy/", StringComparison.Ordinal) ||
                 route.StartsWith("dupe/", StringComparison.Ordinal) || route.StartsWith("building/", StringComparison.Ordinal) ||
@@ -83,6 +84,7 @@ namespace Queyang.Game
                 Send("research");
             bool schedules = menu?.scheduleScreen != null && menu.scheduleScreen.isActiveAndEnabled && menu.scheduleScreen.gameObject.activeInHierarchy;
             bool priorities = menu?.jobsScreen != null && menu.jobsScreen.isActiveAndEnabled && menu.jobsScreen.gameObject.activeInHierarchy;
+            bool foods = menu?.consumablesScreen != null && menu.consumablesScreen.isActiveAndEnabled && menu.consumablesScreen.gameObject.activeInHierarchy;
             if (schedules || priorities) Send("schedules/" + nextSchedulePage);
             if (OverviewOpen && PauseScreen.Instance != null && PauseScreen.Instance.IsActive()) Send("overview");
             if (schedules)
@@ -94,13 +96,13 @@ namespace Queyang.Game
                     if (key!=null) Send("schedule/"+key);
                 }
             }
-            if (schedules || priorities)
+            if (schedules || priorities || foods)
             {
                 var dupes = Components.LiveMinionIdentities.Items;
                 if (dupes.Count > 0)
                 {
                     var dupe = dupes[(dupeCursor++ & int.MaxValue) % dupes.Count];
-                    if (dupe != null) Send("dupe/" + Id(dupe));
+                    if (dupe != null) Send((foods ? "diet/" : "dupe/") + Id(dupe));
                 }
             }
             PollBuilding();
@@ -123,7 +125,7 @@ namespace Queyang.Game
             result = null;
             if (action == null || !action.StartsWith("nm/", StringComparison.Ordinal)) return false;
             result = Conflict;
-            if (action.Length > 256) return true;
+            if (action.Length > (action.StartsWith("nm/rota/",StringComparison.Ordinal) ? 1024 : 256)) return true;
             var p = action.Split('/');
             switch (p[1])
             {
@@ -139,6 +141,14 @@ namespace Queyang.Game
                 case "profile":
                     if (p.Length == 3) result = ReadHostProfile(Number(p[2]));
                     break;
+                case "learn":
+                case "hat":
+                    result = EditSkill(p);
+                    break;
+                case "choices": result=PersonChoices(p); break;
+                case "diet": if (p.Length==3) result=ReadDiet(Number(p[2])); break;
+                case "permit": result=SetDiet(p); break;
+                case "clinic": result=ClinicEdit(p); break;
                 case "proxy":
                 case "setproxy":
                     result = HostWorld.ProxyOptions(action, x, y);
@@ -164,6 +174,9 @@ namespace Queyang.Game
                     }
                     var blockIds = blocks.Select(b => (byte)(groups.FindIndex(g => g.Id == b.GroupId) + 1)).ToArray();
                     result = Prefix + "s/" + p[2] + "/" + Convert.ToBase64String(blockIds).Replace('/', '_');
+                    break;
+                case "rota":
+                    result=EditScheduleStructure(p);
                     break;
                 case "dupe":
                 case "assign":
@@ -212,6 +225,11 @@ namespace Queyang.Game
         static void Receive(string value)
         {
             if (!NativeGuestScene.Ready || !value.StartsWith(Prefix, StringComparison.Ordinal)) return;
+            if (value.StartsWith("NM1/choices/",StringComparison.Ordinal))
+            {
+                SelectedDupe()?.GetComponent<NativePersonMenu>()?.Receive(value);
+                return;
+            }
             if (value.StartsWith("NM1/p/", StringComparison.Ordinal))
             {
                 SelectedProxy?.Receive(value.Substring(6));
@@ -221,7 +239,9 @@ namespace Queyang.Game
             applying = true;
             try
             {
-                if (p[1] == "g") ReceiveReadings(p);
+                if (p[1] == "diet") ApplyDietPage(p);
+                else if (p[1] == "permit") ApplyDiet(p);
+                else if (p[1] == "g") ReceiveReadings(p);
                 else if (p[1] == "sl" && p.Length == 4) ApplySchedulePage(p[2],p[3]);
                 else if (p[1] == "ov" && p.Length == 3 && OverviewOpen) ApplyOverview(p[2]);
                 else if (p[1] == "r" && p.Length == 3) ApplyResearch(p[2]);
@@ -268,7 +288,7 @@ namespace Queyang.Game
                 if (!Guard) return true;
                 var key = LocalScheduleKey(__instance);
                 var blocks = __instance.GetBlocks();
-                if (__1 != null && observed.Contains("s/" + key) && __0 >= 0 && __0 < blocks.Count)
+                if (__1 != null && key!=null && __0 >= 0 && __0 < blocks.Count)
                     Send("block/" + key + "/" + __0 + "/" + blocks[__0].GroupId + "/" + __1.Id);
                 return false;
             }
@@ -281,7 +301,7 @@ namespace Queyang.Game
                 if (!Guard) return true;
                 var current=__1==null ? null : LocalScheduleKey(__1.GetSchedule());
                 var next=LocalScheduleKey(__0);
-                if (current!=null && next!=null && observed.Contains("d/" + Id(__1)))
+                if (current!=null && next!=null)
                     Send("assign/" + Id(__1) + "/" + current + "/" + next);
                 return false;
             }
@@ -292,26 +312,11 @@ namespace Queyang.Game
             static bool Prefix(ChoreConsumer __instance, ChoreGroup __0, int __1)
             {
                 if (!Guard) return true;
-                if (__0 != null && observed.Contains("d/" + Id(__instance)))
+                if (__0 != null)
                     Send("priority/" + Id(__instance) + "/" + __0.Id + "/" + __instance.GetPersonalPriority(__0) + "/" + __1);
                 return false;
             }
         }
 
-        // Operations outside the replicated schedule model must not create guest-only schedules.
-        [HarmonyPatch]
-        static class ScheduleStructure
-        {
-            static IEnumerable<MethodBase> TargetMethods()
-            {
-                foreach (var name in new[] { "DuplicateSchedule", "DeleteSchedule", "OnNameChanged", "OnAlarmClicked", "OnResetClicked",
-                    "DuplicateTimetableRow", "AddTimetableRow", "RemoveTimetableRow" })
-                    yield return AccessTools.DeclaredMethod(typeof(ScheduleScreenEntry), name);
-                yield return AccessTools.DeclaredMethod(typeof(ScheduleManager), "AddDefaultSchedule");
-                yield return AccessTools.DeclaredMethod(typeof(ScheduleScreen), "OnAddScheduleClick");
-                yield return AccessTools.DeclaredMethod(typeof(Schedule), "RotateBlocks");
-            }
-            static bool Prefix() => !Guard;
-        }
     }
 }

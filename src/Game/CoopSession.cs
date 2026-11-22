@@ -25,6 +25,12 @@ namespace Queyang.Game
         public static bool IsNativeClient => client != null && nativeClient;
         static double joinTime, lastIncoming, nextPing;
         public static bool IsHosting => host != null;
+        internal static void OrderChanged(int cell)
+        {
+            if (host==null || !Grid.IsValidCell(cell)) return;
+            Grid.CellToXY(cell,out int x,out int y);
+            host.WorldCellChanged(x,y,ColonyView.Width,ColonyView.Height);
+        }
         public static bool IsClient => client != null;
         public static byte[] View => client?.View;
         public static string Status => client?.Status ?? (host == null ? notice : notice + " (" + host.Guests + "/3)");
@@ -66,8 +72,12 @@ namespace Queyang.Game
                 link = Open();
                 metrics = new SessionMetrics("host",Time());
                 host = new RoomHost(version, Send, link.Drop, HostWorld.Capture, HostWorld.Execute, Time, CaptureNativeSave,HostWorld.CapturePage);
+                host.CaptureMotion=NativeMotionStream.Capture;
+                host.IsMotionPaused=()=>SpeedControlScreen.Instance.IsPaused;
+                host.ExecuteForPeer = (peer,installation,action,x,y) => OrderOwnership.Execute(link.Account(peer),link.DisplayName(peer),peer,installation,action,x,y);
                 host.NativeCaptureFailed += error => UnityEngine.Debug.LogWarning("[QueyangCoop] Failed to capture colony: " + error.Message);
                 link.Host(steam);
+                OrderOwnership.SetName(1,link.DisplayName(0));
                 notice = "Hosting";
             }
             catch (Exception e) { Close(e.Message); }
@@ -134,12 +144,14 @@ namespace Queyang.Game
                 if (native) replicaDirectory = Path.Combine(Path.GetTempPath(), "QueyangCoop", Guid.NewGuid().ToString("N"));
                 client = new RoomClient(version, data => Send(0, data), replicaDirectory,
                     native ? (Action<string>)NativeGuestScene.Load : null);
+                if (!steam) client.Installation = OrderOwnership.LanInstallation();
                 client.CommandLatencyMs += metrics.RecordCommand;
                 client.ViewReceived += bytes => {
                     if (!NativeGuestScene.Ready || !nativeClient) return;
                     ApplyNativeTile(ColonyView.Decode(bytes),true);
                     GuestDiagnostics.AppliedView();
                 };
+                client.MotionReceived+=bytes=>{ if(NativeGuestScene.Ready) NativeMotionStream.Apply(bytes); };
                 client.PeripheralReceived += bytes => {
                     if (NativeGuestScene.Ready) ApplyNativeTile(ColonyView.Decode(bytes),false);
                 };
@@ -162,6 +174,7 @@ namespace Queyang.Game
             if (nativeClient) NativeGuestScene.End();
             NativeWorldMirror.Reset();
             NativeToolCommands.Reset();
+            OrderOwnership.Reset();
             NativeManagement.Reset();
             if (client != null) GuestDiagnostics.End();
             client?.Dispose();
@@ -183,6 +196,7 @@ namespace Queyang.Game
             if (!tile.Native) throw new InvalidDataException("Expected native world state");
             NativeWorldMirror.Apply(tile);
             NativeToolCommands.Observe(tile);
+            OrderOwnership.Apply(tile);
             if (center) NativeView = tile;
         }
         public static void Command(string action, int x, int y) => WithClient(c => c.Command(action, x, y));

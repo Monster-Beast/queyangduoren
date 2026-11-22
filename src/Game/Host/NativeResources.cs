@@ -13,6 +13,9 @@ namespace Queyang.Game
         static readonly List<ColonyStock> hostStocks = new List<ColonyStock>();
         static readonly Dictionary<int, Tag> knownTags = new Dictionary<int, Tag>();
         static WorldInventory guestInventory;
+        static long stockThrough;
+        static readonly AccessTools.FieldRef<WorldInventory, bool> CountReady =
+            AccessTools.FieldRefAccess<WorldInventory, bool>("hasValidCount");
         static readonly List<Tag> cleared = new List<Tag>();
         static readonly HashSet<int> observed = new HashSet<int>();
         static readonly List<int> removed = new List<int>();
@@ -233,6 +236,7 @@ namespace Queyang.Game
             if (guestInventory != inventory)
             {
                 guestInventory = inventory;
+                stockThrough = (long)int.MinValue - 1;
                 knownTags.Clear();
                 foreach (var prefab in Assets.Prefabs)
                     if (prefab != null) knownTags[prefab.PrefabTag.GetHash()] = prefab.PrefabTag;
@@ -262,12 +266,37 @@ namespace Queyang.Game
                 if (tag.GetHash() >= view.StockFrom && tag.GetHash() <= view.StockThrough && !observed.Contains(tag.GetHash()))
                     cleared.Add(tag);
             foreach (var tag in cleared) needs.Remove(tag);
-            if (Time.unscaledTime < nextHudRefresh) return;
+            // Vanilla marks the count valid after scanning every inventory tag. That scan is
+            // disabled on the replica. Publish readiness after the host covers the full range.
+            if ((long)view.StockFrom <= stockThrough + 1)
+                stockThrough = Math.Max(stockThrough, view.StockThrough);
+            bool firstCount = stockThrough == int.MaxValue && !inventory.HasValidCount;
+            if (firstCount) CountReady(inventory) = true;
+            if (!firstCount && Time.unscaledTime < nextHudRefresh) return;
             nextHudRefresh = Time.unscaledTime + 1f;
+            var pinned = PinnedResourcesPanel.Instance;
+            if (pinned != null && pinned.gameObject.activeInHierarchy && AllResourcesScreen.Instance != null)
+                pinned.Refresh();
             if (ResourceCategoryScreen.Instance != null && ResourceCategoryScreen.Instance.gameObject.activeInHierarchy)
                 foreach (var entry in ResourceCategoryScreen.Instance.GetComponentsInChildren<ResourceEntry>(false)) entry.UpdateValue();
             if (AllResourcesScreen.Instance != null && AllResourcesScreen.Instance.gameObject.activeInHierarchy)
                 AllResourcesScreen.Instance.RefreshRows();
+        }
+
+        // Vanilla's food rows sum each edible's Units * CaloriesPerUnit. The host inventory
+        // already excludes private storage and contains the authoritative units by food tag.
+        [HarmonyPatch(typeof(RationTracker), nameof(RationTracker.CountAmountForItemWithID))]
+        static class GuestFoodCalories
+        {
+            static bool Prefix(string ID, WorldInventory inventory, ref float __result)
+            {
+                if (!CoopSession.IsNativeClient || inventory == null || inventory != guestInventory ||
+                    !inventory.HasValidCount) return true;
+                var food = EdiblesManager.GetFoodInfo(ID);
+                if (food == null) return true;
+                __result = inventory.GetTotalAmount(new Tag(ID), false) * food.CaloriesPerUnit;
+                return false;
+            }
         }
 
         [HarmonyPatch(typeof(WorldInventory), "Update")]

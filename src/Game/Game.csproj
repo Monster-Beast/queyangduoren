@@ -4,7 +4,7 @@
     <AssemblyName>QueyangCoop</AssemblyName>
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <Version>0.3.0</Version>
+    <Version>0.3.2</Version>
     <SteamRoot Condition="'$(OS)' == 'Windows_NT'">$(registry:HKEY_CURRENT_USER\Software\Valve\Steam@SteamPath)</SteamRoot>
     <ONI_GAME_DIR Condition="'$(ONI_GAME_DIR)' == '' and '$(SteamRoot)' != ''">$(SteamRoot)/steamapps/common/OxygenNotIncluded</ONI_GAME_DIR>
     <Managed>$(ONI_GAME_DIR)/OxygenNotIncluded_Data/Managed</Managed>

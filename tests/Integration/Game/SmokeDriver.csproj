@@ -8,8 +8,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="Peer/**/*.cs"/>
-    <ProjectReference Include="../../../src/Game/Game.csproj" />
-    <GameAssembly Include="Assembly-CSharp;Assembly-CSharp-firstpass;UnityEngine;UnityEngine.CoreModule;UnityEngine.ScreenCaptureModule;UnityEngine.UI;0Harmony;com.rlabrecque.steamworks.net"/>
+    <ProjectReference Include="../../../src/Game/Game.csproj" Condition="'$(FixturePackageDir)' == ''" />
+    <Reference Include="QueyangCoop" HintPath="$(FixturePackageDir)/QueyangCoop.dll" Private="false" Condition="'$(FixturePackageDir)' != ''" />
+    <Reference Include="Queyang.Core" HintPath="$(FixturePackageDir)/Queyang.Core.dll" Private="false" Condition="'$(FixturePackageDir)' != ''" />
+    <GameAssembly Include="Assembly-CSharp;Assembly-CSharp-firstpass;UnityEngine;UnityEngine.CoreModule;UnityEngine.ScreenCaptureModule;UnityEngine.IMGUIModule;UnityEngine.UI;Unity.TextMeshPro;0Harmony;com.rlabrecque.steamworks.net"/>
     <Reference Include="@(GameAssembly->'$(Managed)/%(Identity).dll')" Private="false"/>
   </ItemGroup>
 </Project>

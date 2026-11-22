@@ -59,16 +59,12 @@ namespace Queyang.Game
             static bool Prefix() => Refuse("打印舱选人和补给");
         }
 
-        [HarmonyPatch]
-        static class Skills
+        // The stock UI sends a host request. No achievement, perk or local chore
+        // may be produced by an incidental simulation callback on the replica.
+        [HarmonyPatch(typeof(MinionResume),"MasterSkill",new[]{typeof(string)})]
+        static class GuestSkillMutation
         {
-            static IEnumerable<MethodBase> TargetMethods()
-            {
-                yield return AccessTools.Method(typeof(SkillWidget), "OnPointerClick");
-                yield return AccessTools.Method(typeof(MinionResume), "MasterSkill");
-                yield return AccessTools.Method(typeof(SkillsScreen), "OnHatDropEntryClick");
-            }
-            static bool Prefix() => Refuse("技能和职业帽分配");
+            static bool Prefix() => !NativeGuestScene.Ready;
         }
 
         [HarmonyPatch(typeof(DetailsScreen), "OnNameChanged")]
@@ -130,7 +126,8 @@ namespace Queyang.Game
                 if (!NativeGuestScene.Ready || __1?.onClick == null || __0 == null) return;
                 var source = __1.onClick.Method.DeclaringType;
                 if (source == typeof(BuildingEnabledButton) || source == typeof(Navigator) ||
-                    source == typeof(NativeProxySettings) || source?.DeclaringType == typeof(NativeProxySettings)) return;
+                    source == typeof(NativeProxySettings) || source?.DeclaringType == typeof(NativeProxySettings) ||
+                    source == typeof(NativePersonMenu) || source?.DeclaringType == typeof(NativePersonMenu)) return;
                 string action = ContextAction(source, __1.onClick.Method.Name);
                 if (action != null)
                 {

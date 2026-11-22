@@ -49,6 +49,8 @@ namespace Queyang.Integration
         private bool facilitiesDone;
         private bool readonlyFixture, steamLobby;
         private SteamSocketPairCheck steamPair;
+        private SteamDualHost dualHost;
+        private SteamDualGuest dualGuest;
         private GuestLifecycle lifecycle;
         private NativeScenario native;
         private NativeLifecycle nativeLifecycle;
@@ -59,6 +61,25 @@ namespace Queyang.Integration
         private void Awake()
         {
             report = Environment.GetEnvironmentVariable("QY_SMOKE_REPORT");
+            string dualRole=Environment.GetEnvironmentVariable("QY_DUAL_ROLE");
+            if (!string.IsNullOrEmpty(dualRole))
+            {
+                Application.runInBackground=true;
+                start=Time.realtimeSinceStartup;
+                try
+                {
+                    if (dualRole=="host")
+                    {
+                        isHost=true; steamLobby=true; hostDialogs=new FixtureDialogs(Log);
+                        dualHost=new SteamDualHost(Log,report);
+                    }
+                    else if (dualRole=="guest") dualGuest=new SteamDualGuest(Log);
+                    else throw new InvalidOperationException("Unknown dual Steam fixture role");
+                    Log("DUAL_MENU "+dualRole);
+                }
+                catch (Exception ex) { finished=true; Log("FAIL "+ex); }
+                return;
+            }
             isHost = Environment.GetEnvironmentVariable("QY_SMOKE_ROLE") == "host";
             if (isHost && (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("QY_NATIVE_RECORDING")) ||
                            Environment.GetEnvironmentVariable("QY_SMOKE_HOST_CAPTURE") == "1"))
@@ -91,13 +112,19 @@ namespace Queyang.Integration
             if (finished || Time.realtimeSinceStartup - start < 2) return;
             try
             {
-                if (nativeLifecycle != null) finished = nativeLifecycle.Update();
+                if (dualGuest!=null) dualGuest.Tick();
+                else if (nativeLifecycle != null) finished = nativeLifecycle.Update();
                 else if (native != null) finished = native.Update();
                 else if (lifecycle != null) { lifecycle.Update(); finished = lifecycle.Done; }
                 else if (isHost) HostStep();
                 else GuestStep();
             }
-            catch (Exception ex) { finished = true; Log("FAIL " + ex); }
+            catch (Exception ex)
+            {
+                finished = true;
+                Log("FAIL " + ex);
+                if (dualHost!=null) dualHost.Abort();
+            }
         }
         private void HostStep()
         {
@@ -114,14 +141,17 @@ namespace Queyang.Integration
             }
             if (global::Game.Instance == null || ClusterManager.Instance?.activeWorld == null ||
                 SpeedControlScreen.Instance == null || GameClock.Instance == null || Components.LiveMinionIdentities.Items.Count == 0) return;
+            if (dualHost!=null && hostDialogs.Check(loadedVanillaHost:true)) return;
             if (!hostReady)
             {
+                if (dualHost!=null && !dualHost.BeforeHosting()) return;
                 CoopSession.Host(steamLobby);
                 if (!CoopSession.IsHosting) throw new Exception(CoopSession.Status);
                 hostReady = true;
                 SpeedControlScreen.Instance.SetSpeed(soak ? 0 : 2);
                 hostTime = GameClock.Instance.GetTime();
             }
+            if (dualHost!=null) { finished=dualHost.Tick(); return; }
             if (!steamLobby && !hostPublished)
             {
                 if (hostFrame != null && !CaptureHostHud()) return;

@@ -38,6 +38,7 @@ namespace Queyang.Game
             if (markerRoot == null)
             {
                 markerRoot = new GameObject("Co-op display objects");
+                markerRoot.AddComponent<NativeDupePose>();
                 foreach (var def in Assets.BuildingDefs)
                     buildings[new HashedString(def.PrefabID).HashValue] = def;
             }
@@ -55,6 +56,7 @@ namespace Queyang.Game
                 if ((sample.Flags & 1) == 0) continue;
                 ApplyElement(cell, sample);
                 ApplyDig(cell, (sample.Flags & 8) != 0);
+                if (sample.DigMaterial!=0) NativeOrderColors.ApplyDig(GetDigRenderer(cell),sample);
                 if (view.HasEnvironment) ApplyMop(cell, sample.MopOrdered);
                 ApplyBuilding(cell, sample);
                 if (view.CoversEnvironment(i) && sample.BuildingSaveId > 0)
@@ -82,6 +84,7 @@ namespace Queyang.Game
             bool solid = (sample.Flags & 2) != 0;
             bool redraw = Grid.Element[cell] != element || Grid.RenderedByWorld[cell] != sample.RenderGround ||
                 Grid.Solid[cell] != solid;
+            if (redraw && Grid.Damage!=null) Grid.Damage[cell]=0;
             Grid.Element[cell] = element;
             Grid.elementIdx[cell] = element.idx;
             Grid.mass[cell] = Mathf.Clamp(sample.Mass, 0, Sim.MaxMass);
@@ -103,7 +106,7 @@ namespace Queyang.Game
                 if (dig != null && dig.materialDisplay != null) dig.materialDisplay.enabled = ordered;
             }
             bool needed = ordered && local == null;
-            ApplyDesignation(cell, needed, DigPlacerConfig.ID, digMarkers);
+            ApplyDesignation(cell, needed, DigPlacerConfig.ID, DigTool.Instance, digMarkers);
         }
 
         static void ApplyMop(int cell, bool ordered)
@@ -114,27 +117,32 @@ namespace Queyang.Game
                 var mesh = local.GetComponentInChildren<MeshRenderer>(true);
                 if (mesh != null) mesh.enabled = ordered;
             }
-            ApplyDesignation(cell, ordered && local == null, MopPlacerConfig.ID, mopMarkers);
+            ApplyDesignation(cell, ordered && local == null, MopPlacerConfig.ID, MopTool.Instance, mopMarkers);
         }
 
-        static void ApplyDesignation(int cell, bool needed, string prefabId, Dictionary<int, GameObject> markers)
+        static void ApplyDesignation(int cell, bool needed, string prefabId, InterfaceTool tool, Dictionary<int, GameObject> markers)
         {
             if (markers.TryGetValue(cell, out var marker))
             {
                 if (!needed) { Object.Destroy(marker); markers.Remove(cell); }
                 return;
             }
-            if (!needed) return;
+            if (!needed || tool == null) return;
             var prefab = Assets.TryGetPrefab(new Tag(prefabId));
-            var source = prefab == null ? null : prefab.GetComponentInChildren<MeshFilter>(true);
-            if (source == null) return;
-            var sourceRenderer = source.GetComponent<MeshRenderer>();
+            if (prefab == null) return;
+            var sourceRenderer = prefabId==DigPlacerConfig.ID ? prefab.GetComponent<Diggable>()?.materialDisplay :
+                prefab.GetComponentInChildren<MeshRenderer>(true);
             if (sourceRenderer == null) return;
+            var source = sourceRenderer.GetComponent<MeshFilter>();
+            if (source==null || source.sharedMesh==null) return;
             marker = new GameObject(prefabId);
             marker.layer = source.gameObject.layer;
             marker.transform.SetParent(markerRoot.transform, false);
-            marker.transform.position = Grid.CellToPosCCC(cell, Grid.SceneLayer.FXFront2) +
-                source.transform.position - prefab.transform.position;
+            // Vanilla DigTool.PlaceDig and MopTool.OnDragTool both position the
+            // prefab at the bottom centre of the tile, slightly in front of its tool layer.
+            var origin=Grid.CellToPosCBC(cell,tool.visualizerLayer);
+            origin.z-=.15f;
+            marker.transform.position = origin + (source.transform.position - prefab.transform.position);
             marker.transform.localScale = source.transform.lossyScale;
             marker.transform.rotation = source.transform.rotation;
             marker.AddComponent<MeshFilter>().sharedMesh = source.sharedMesh;
@@ -142,15 +150,19 @@ namespace Queyang.Game
             markers.Add(cell, marker);
         }
 
-        internal static bool IsDigVisible(int cell)
+        internal static MeshRenderer GetDigRenderer(int cell)
         {
-            if (!Grid.IsValidCell(cell)) return false;
+            if (!Grid.IsValidCell(cell)) return null;
             var local = Grid.Objects[cell, (int)ObjectLayer.DigPlacer];
             var renderer = local == null ? null : local.GetComponent<Diggable>()?.materialDisplay;
-            if (renderer != null && renderer.enabled && renderer.gameObject.activeInHierarchy) return true;
-            if (!digMarkers.TryGetValue(cell, out var marker) || marker == null) return false;
-            var mesh = marker.GetComponent<MeshRenderer>();
-            return mesh != null && mesh.enabled && mesh.sharedMaterial != null && marker.activeInHierarchy;
+            if (renderer!=null) return renderer;
+            return digMarkers.TryGetValue(cell,out var marker) && marker!=null ? marker.GetComponent<MeshRenderer>() : null;
+        }
+
+        internal static bool IsDigVisible(int cell)
+        {
+            var mesh=GetDigRenderer(cell);
+            return mesh!=null && mesh.enabled && mesh.sharedMaterial!=null && mesh.gameObject.activeInHierarchy;
         }
 
         internal static bool IsMopVisible(int cell)
@@ -178,6 +190,7 @@ namespace Queyang.Game
                 if (!match || (sample.AnchorDX == 0 && sample.AnchorDY == 0)) SetVisible(anim, match);
                 if (match && sample.AnchorDX == 0 && sample.AnchorDY == 0)
                 {
+                    if (anim!=null && sample.HasBlueprintTint) anim.TintColour=NativeOrderColors.Unpack(sample.BlueprintTint);
                     Pose(anim, sample.BuildingAnimation, sample.BuildingFrame);
                     ApplyPrimary(item.GetComponent<PrimaryElement>(), sample.Structure);
                     if (sample.TargetId > 0 && item.GetComponent<Door>() != null && item.GetComponent<BuildingComplete>() != null)
@@ -203,12 +216,8 @@ namespace Queyang.Game
                 (current.Style & 127) == (sample.BuildingStyle & 127) && current.Flags == flags &&
                 current.Target == sample.TargetId && current.SaveId == sample.BuildingSaveId)
             {
-                if (current.Style != sample.BuildingStyle)
-                {
-                    current.Anim.TintColour = deconstruct ? new Color32(255, 90, 80, 220) :
-                        (flags & 32) != 0 ? new Color32(145, 208, 255, 200) : new Color32(255, 255, 255, 255);
-                    current.Style = sample.BuildingStyle;
-                }
+                current.Anim.TintColour = NativeOrderColors.BuildingTint(sample);
+                current.Style = sample.BuildingStyle;
                 Pose(current.Anim, sample.BuildingAnimation, sample.BuildingFrame);
                 ApplyPrimary(current.Primary, sample.Structure);
                 return;
@@ -236,8 +245,7 @@ namespace Queyang.Game
                 controller.Rotation = -90 * (int)orientation;
             controller.FlipX = orientation == Orientation.FlipH;
             controller.FlipY = orientation == Orientation.FlipV;
-            controller.TintColour = deconstruct ? new Color32(255, 90, 80, 220) :
-                (flags & 32) != 0 ? new Color32(145, 208, 255, 200) : new Color32(255, 255, 255, 255);
+            controller.TintColour = NativeOrderColors.BuildingTint(sample);
             var collider = marker.AddComponent<KBoxCollider2D>();
             collider.size = new Vector2(def.WidthInCells, def.HeightInCells);
             collider.offset = new Vector2(def.GetVisualizerOffset().x, def.HeightInCells * .5f);
@@ -299,7 +307,7 @@ namespace Queyang.Game
 
         internal static KSelectable GetDupeSelectable(int hostId)
         {
-            if (localDupes.TryGetValue(hostId, out var local) && local != null) return local.GetComponent<KSelectable>();
+            if (localDupes.TryGetValue(hostId, out var local) && local != null && !hidden.Contains(local.GetComponent<KBatchedAnimController>())) return local.GetComponent<KSelectable>();
             if (spawnedDupes.TryGetValue(hostId, out var marker) && marker != null) return marker.GetComponent<KSelectable>();
             return null;
         }
@@ -309,16 +317,32 @@ namespace Queyang.Game
             visibleDupes.Clear();
             localDupes.Clear();
             foreach (var local in Components.LiveMinionIdentities.Items)
-                if (local != null) localDupes[local.GetComponent<KPrefabID>().InstanceID] = local;
+            {
+                if (local == null) continue;
+                var prefab = local.GetComponent<KPrefabID>();
+                if (localDupes.TryGetValue(prefab.InstanceID, out var duplicate))
+                {
+                    if (KPrefabIDTracker.Get().GetInstance(prefab.InstanceID) != prefab)
+                    {
+                        SetVisible(local.GetComponent<KBatchedAnimController>(), false);
+                        continue;
+                    }
+                    SetVisible(duplicate.GetComponent<KBatchedAnimController>(), false);
+                }
+                localDupes[prefab.InstanceID] = local;
+            }
             foreach (var d in view.Dupes)
             {
                 if (d.X < view.X || d.Y < view.Y || d.X >= view.X + ColonyView.Width ||
                     d.Y >= view.Y + ColonyView.Height || d.X >= Grid.WidthInCells || d.Y >= Grid.HeightInCells ||
                     (view.Cells[(d.Y - view.Y) * ColonyView.Width + d.X - view.X].Flags & 1) == 0) continue;
                 if (d.SaveId < 0 || !visibleDupes.Add(d.SaveId)) continue;
+                bool current = NativeDupePose.Current(d.SaveId, view.DupePoseTick);
+                if (!current && !NativeDupePose.Knows(d.SaveId)) continue;
                 KBatchedAnimController anim;
                 if (localDupes.TryGetValue(d.SaveId, out var dupe))
                 {
+                    if (spawnedDupes.ContainsKey(d.SaveId)) RemoveDupeProxy(d.SaveId);
                     if (!string.IsNullOrEmpty(d.Name) && dupe.GetProperName() != d.Name) dupe.SetName(d.Name);
                     anim = dupe.GetComponent<KBatchedAnimController>();
                 }
@@ -334,9 +358,18 @@ namespace Queyang.Game
                     anim.gameObject.name = d.Name;
                     anim.GetComponent<KSelectable>().SetName(d.Name);
                 }
+                // A newer unreliable motion sample must not suppress name/selector
+                // updates from the reliable identity stream.
+                if (!current) continue;
+                SetVisible(anim, true);
+                if (view.DupePoseTick > 0)
+                {
+                    NativeDupePose.Apply(anim, d, view.DupePoseTick, view.Paused);
+                    continue;
+                }
+                NativeDupePose.Forget(d.SaveId, 0);
                 var pos = anim.transform.position;
                 anim.transform.position = new Vector3(d.X + d.SubX / 255f, d.Y + d.SubY / 255f, pos.z);
-                SetVisible(anim, true);
                 anim.FlipX = d.FlipX;
                 Pose(anim, d.Animation, d.AnimationPosition);
                 anim.SetDirty();
@@ -345,18 +378,23 @@ namespace Queyang.Game
             {
                 if (dupe == null) continue;
                 int id=dupe.GetComponent<KPrefabID>().InstanceID;
-                if (!view.CoversDupeId(id) || visibleDupes.Contains(id)) continue;
-                var pos = dupe.transform.position;
-                if (pos.x >= view.X && pos.x < view.X + ColonyView.Width && pos.y >= view.Y &&
-                    pos.y < view.Y + ColonyView.Height) SetVisible(dupe.GetComponent<KBatchedAnimController>(), false);
+                if (visibleDupes.Contains(id) || !NativeDupePose.Current(id, view.DupePoseTick)) continue;
+                var pos = NativeDupePose.LastPosition(id, dupe.transform.position);
+                bool sampled = pos.x >= view.X && pos.x < view.X + ColonyView.Width && pos.y >= view.Y &&
+                    pos.y < view.Y + ColonyView.Height && view.CoversDupeId(id);
+                if (sampled || (view.DupePoseTick > 0 && !NativeDupePose.Knows(id)))
+                {
+                    if (sampled) NativeDupePose.Forget(id, view.DupePoseTick);
+                    SetVisible(dupe.GetComponent<KBatchedAnimController>(), false);
+                }
             }
             expiredDupes.Clear();
             var camera = CameraController.Instance?.baseCamera;
             foreach (var pair in spawnedDupes)
             {
                 var anim = pair.Value;
-                if (anim == null || visibleDupes.Contains(pair.Key)) continue;
-                var pos = anim.transform.position;
+                if (anim == null || visibleDupes.Contains(pair.Key) || !NativeDupePose.Current(pair.Key, view.DupePoseTick)) continue;
+                var pos = NativeDupePose.LastPosition(pair.Key, anim.transform.position);
                 bool sampled = pos.x >= view.X && pos.x < view.X + ColonyView.Width && pos.y >= view.Y &&
                     pos.y < view.Y + ColonyView.Height;
                 bool offCamera = camera != null && (Mathf.Abs(pos.x - camera.transform.position.x) >
@@ -366,11 +404,19 @@ namespace Queyang.Game
             }
             foreach (int id in expiredDupes)
             {
-                var anim = spawnedDupes[id];
-                spawnedDupes.Remove(id);
-                hidden.Remove(anim);
-                if (anim != null) DestroySelectableProxy(anim.gameObject);
+                NativeDupePose.Forget(id, view.DupePoseTick);
+                RemoveDupeProxy(id);
             }
+        }
+
+        static void RemoveDupeProxy(int id)
+        {
+            var anim = spawnedDupes[id];
+            spawnedDupes.Remove(id);
+            if (anim == null) return;
+            SetVisible(anim, false);
+            hidden.Remove(anim);
+            DestroySelectableProxy(anim.gameObject);
         }
 
         static KBatchedAnimController CreateDupe(ColonyDupe dupe)
@@ -430,6 +476,7 @@ namespace Queyang.Game
 
         internal static void Reset()
         {
+            NativeDupePose.ClearTracks();
             if (markerRoot != null) DestroySelectableProxy(markerRoot);
             markerRoot = null;
             buildingMarkers.Clear(); digMarkers.Clear(); mopMarkers.Clear(); buildings.Clear(); visibleDupes.Clear(); hidden.Clear();

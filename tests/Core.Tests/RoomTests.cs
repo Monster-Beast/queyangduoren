@@ -61,6 +61,20 @@ public class RoomTests
     }
 
     [Fact]
+    public void NewVisibleOrderBringsForwardTheNextWorldUpdate()
+    {
+        var p=new Pair();
+        p.Live(); p.Client.Subscribe(24,16); p.Live();
+        p.Colony=new byte[]{7,3,9};
+        p.Host.WorldCellChanged(23,16,24,16);
+        for (int i=0;i<4;i++) p.Step();
+        Assert.NotEqual(p.Colony,p.Client.View);
+        p.Host.WorldCellChanged(24,16,24,16);
+        p.Step(); p.Step();
+        Assert.Equal(p.Colony,p.Client.View);
+    }
+
+    [Fact]
     public void LargeBaselineRemainsAtomicAndDoesNotBlockWorldChanges()
     {
         var p = new Pair(); var world = new byte[11 * 1024 * 1024]; new Random(457140).NextBytes(world);

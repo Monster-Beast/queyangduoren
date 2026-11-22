@@ -39,6 +39,10 @@ namespace Queyang.Game
 
         internal SteamBackend(CoopTransport owner) : base(owner) { }
 
+        internal override string DisplayName(int id) => id==0 ? SteamFriends.GetPersonaName() :
+            peers.TryGetValue(id,out var peer) && peer.Ready ? SteamFriends.GetFriendPersonaName(peer.Account) : null;
+        internal override string Account(int id) => peers.TryGetValue(id,out var peer) && peer.Ready ? "steam/" + peer.Account.m_SteamID : null;
+
         internal override void Start(bool host, string endpoint)
         {
             hosting = host;
@@ -246,8 +250,11 @@ namespace Queyang.Game
             try
             {
                 long number;
+                bool motion=packet.Length>=16 && BitConverter.ToUInt16(packet,8)==(ushort)Queyang.Core.Message.Motion;
                 var result = SteamNetworkingSockets.SendMessageToConnection(peer.Handle, pinned.AddrOfPinnedObject(),
-                    (uint)packet.Length, Steamworks.Constants.k_nSteamNetworkingSend_Reliable, out number);
+                    (uint)packet.Length, motion ? Steamworks.Constants.k_nSteamNetworkingSend_UnreliableNoDelay :
+                    Steamworks.Constants.k_nSteamNetworkingSend_Reliable, out number);
+                if(motion && (result==EResult.k_EResultIgnored || result==EResult.k_EResultLimitExceeded)) return;
                 // Valve caps its send buffer and reports LimitExceeded on backpressure.
                 if (result != EResult.k_EResultOK) peer.Failure = "Steam send failed: " + result;
             }

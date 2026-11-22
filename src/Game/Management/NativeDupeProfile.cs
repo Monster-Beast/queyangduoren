@@ -237,14 +237,10 @@ namespace Queyang.Game
                 hoveredDupe = IdentityObject(__0); hoverExpires = Time.unscaledTime + 2f;
             }
         }
-        [HarmonyPatch(typeof(ConsumableConsumer), "SetPermitted")]
+        [HarmonyPatch(typeof(ConsumableConsumer), "SetPermitted",new[]{typeof(string),typeof(bool)})]
         static class ConsumableRules
         {
-            static bool Prefix()
-            {
-                if (!NativeGuestScene.Ready) return true;
-                NativeGuestFeedback.Show("食物和药物许可由房主设置。"); return false;
-            }
+            static bool Prefix(ConsumableConsumer __instance,string __0,bool __1) => GuestPermit(__instance,__0,__1);
         }
     }
 }

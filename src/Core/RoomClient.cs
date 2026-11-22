@@ -8,6 +8,7 @@ namespace Queyang.Core
     public sealed class RoomClient : IDisposable
     {
         readonly string fingerprint;
+        public Guid Installation { private get; set; }
         readonly Action<byte[]> send;
         readonly string nativeSaveDirectory;
         readonly Action<string> nativeSaveReady;
@@ -30,6 +31,7 @@ namespace Queyang.Core
         public event Action<double> CommandLatencyMs;
         public event Action<byte[]> ViewReceived;
         public event Action<byte[]> PeripheralReceived;
+        public event Action<byte[]> MotionReceived;
         bool peripheralPending;
         uint peripheralGeneration;
         byte[] peripheral;
@@ -54,7 +56,9 @@ namespace Queyang.Core
         }
         public void Connected() => send(Wire.Pack(Message.Hello,w => {
             Wire.Text(w,fingerprint);
-            if (nativeSaveReady != null) w.Write((byte)1);
+            byte mode = (byte)((nativeSaveReady != null ? 1 : 0) | (Installation != Guid.Empty ? 2 : 0));
+            if (mode != 0) w.Write(mode);
+            if (Installation != Guid.Empty) w.Write(Installation.ToByteArray());
         }));
 
         public void NativeWorldReady()
@@ -130,6 +134,13 @@ namespace Queyang.Core
                 if (!ViewPatch.Equal(room,identity) || source != peer) throw new InvalidDataException("Wrong session");
                 switch (type)
                 {
+                    case Message.Motion:
+                        var motionGeneration=r.ReadUInt32();
+                        int motionBytes=checked((int)(r.BaseStream.Length-r.BaseStream.Position));
+                        if(!worldReady || motionBytes>1100) throw new InvalidDataException("Unexpected character motion");
+                        var motion=Wire.Bytes(r,motionBytes);
+                        if(motionGeneration==generation) MotionReceived?.Invoke(motion);
+                        break;
                     case Message.PeripheralChunk:
                         int total = r.ReadInt32(), at = r.ReadInt32();
                         if (!peripheralPending || at != peripheralOffset || total < 1 || total > Wire.MaxFrame ||

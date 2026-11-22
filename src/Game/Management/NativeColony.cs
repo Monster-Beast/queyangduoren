@@ -44,8 +44,7 @@ namespace Queyang.Game
             var list=ScheduleManager.Instance.GetSchedules();
             if (list.Count < 1 || list.Count > MaxSchedules || page < 0) return Conflict;
             if (page > (list.Count-1)/RowsPerPage) page=0;
-            string version=Digest(string.Join(",",list.Select(s=>StableId(s)+"."+Key(s)+"."+s.GetBlocks().Count+
-                (s.alarmActivated ? "a" : "s")+(s.isDefaultForBionics ? "b" : "n"))));
+            string version=ScheduleCatalogueVersion(list);
             var groups=Db.Get().ScheduleGroups.allGroups;
             using (var s=new MemoryStream())
             using (var w=new BinaryWriter(s))
@@ -118,7 +117,8 @@ namespace Queyang.Game
                 bool dirty=item.name!=row.Name || item.alarmActivated!=row.Alarm || item.isDefaultForBionics!=row.Bionic;
                 item.name=row.Name; item.alarmActivated=row.Alarm; item.isDefaultForBionics=row.Bionic;
                 var blocks=item.GetBlocks();
-                if (blocks.Count!=row.Blocks.Length)
+                bool resized=blocks.Count!=row.Blocks.Length;
+                if (resized)
                 {
                     blocks.Clear();
                     foreach (byte id in row.Blocks) { var g=groups[id-1]; blocks.Add(new ScheduleBlock(g.Name,g.Id)); }
@@ -130,7 +130,13 @@ namespace Queyang.Game
                         {
                             var g=groups[row.Blocks[i]-1]; blocks[i]=new ScheduleBlock(g.Name,g.Id); dirty=true;
                         }
-                if (dirty) { item.ClearNullReferences(); ScheduleChanged.Invoke(item,null); changed=true; }
+                if (dirty)
+                {
+                    item.ClearNullReferences();
+                    // Old row controls still hold indices from before resizing.
+                    if (!resized) ScheduleChanged.Invoke(item,null);
+                    changed=true;
+                }
             }
             foreach (var removed in available)
                 foreach (var reference in removed.GetAssigned().ToArray())
@@ -141,7 +147,7 @@ namespace Queyang.Game
             if (!list.SequenceEqual(ordered)) { list.Clear(); list.AddRange(ordered); changed=true; }
             guestSchedules.Clear();
             foreach (var entry in current) guestSchedules.Add(entry.Key,entry.Value);
-            if (changed && ScheduleScreen.Instance!=null && ScheduleScreen.Instance.isActiveAndEnabled)
+            if (changed && ScheduleScreen.Instance!=null)
                 RefreshSchedules.Invoke(ScheduleScreen.Instance,new object[]{list});
         }
 

@@ -11,6 +11,7 @@ namespace Queyang.Core
         sealed class Peer
         {
             public int SessionId;
+            public Guid Installation;
             public bool Accepted, Subscribed, Live;
             public bool Disconnected;
             public int X, Y;
@@ -19,12 +20,13 @@ namespace Queyang.Core
             public byte[] Base = Array.Empty<byte>(), Target;
             public ViewPatch Patch;
             public int Sent, Confirmed, Tokens = 32;
-            public double Progress, ScanAt, RefillAt, LastSeen;
+            public double Progress, ScanAt, LastScan, RefillAt, LastSeen;
             public NativeStage Native;
             public NativeSaveSource Save;
             public int PeripheralX, PeripheralY;
             public bool PeripheralPending;
-            public double NextPeripheral;
+            public double NextPeripheral, NextMotion;
+            public bool MotionPaused;
             public int CenterPage;
             public readonly Dictionary<long,int> PeripheralPages = new Dictionary<long,int>();
             public readonly Queue<long> PeripheralOrder = new Queue<long>();
@@ -42,9 +44,24 @@ namespace Queyang.Core
         readonly Func<double> now;
         readonly Func<Stream> openNativeSave;
         public event Action<Exception> NativeCaptureFailed;
+        public Func<int,Guid,string,int,int,string> ExecuteForPeer { get; set; }
+        public Func<int,int,IEnumerable<byte[]>> CaptureMotion { get; set; }
+        public Func<bool> IsMotionPaused { get; set; }
         ulong sequence;
         int lastSessionId;
         public int Guests => peers.Count;
+
+        // An order may arrive immediately after the periodic view was sent.
+        // Coalesce a drag into one early capture per interested peer.
+        public void WorldCellChanged(int x,int y,int width,int height)
+        {
+            foreach (var p in peers.Values)
+            {
+                if (!p.Live || !p.Subscribed) continue;
+                if (p.X>=0 && p.Y>=0 && (x<p.X || y<p.Y || (long)x-p.X>=width || (long)y-p.Y>=height)) continue;
+                p.ScanAt=Math.Min(p.ScanAt,p.LastScan+.05);
+            }
+        }
 
         public RoomHost(string fingerprint, Action<int,byte[]> send, Action<int> drop,
             Func<int,int,byte[]> capture, Func<string,int,int,string> execute, Func<double> now,
@@ -90,8 +107,10 @@ namespace Queyang.Core
                 {
                     if (type != Message.Hello) throw new InvalidDataException("Expected Hello");
                     var version = Wire.Text(r);
-                    bool wantsSave = r.BaseStream.Position < r.BaseStream.Length;
-                    if (wantsSave && r.ReadByte() != 1) throw new InvalidDataException("Unknown join mode.");
+                    byte mode = r.BaseStream.Position == r.BaseStream.Length ? (byte)0 : r.ReadByte();
+                    if (mode > 3) throw new InvalidDataException("Unknown join mode.");
+                    bool wantsSave = (mode & 1) != 0;
+                    if ((mode & 2) != 0) p.Installation = new Guid(Wire.Bytes(r,16));
                     Wire.End(r);
                     if (version != fingerprint || (wantsSave && openNativeSave == null))
                     {
@@ -160,7 +179,7 @@ namespace Queyang.Core
                         if (p.Results.TryGetValue(cmd,out var cached)) { send(id,cached); break; }
                         if (cmd == 0 || cmd <= p.LastCommand) { Result(id,p,cmd,"ERROR Expired",false); break; }
                         p.LastCommand = cmd;
-                        string outcome = g == p.Generation && p.Live ? execute(action,cx,cy) : "ERROR View not ready";
+                        string outcome = g == p.Generation && p.Live ? (ExecuteForPeer == null ? execute(action,cx,cy) : ExecuteForPeer(id,p.Installation,action,cx,cy)) : "ERROR View not ready";
                         Result(id,p,cmd,outcome,true); break;
                     case Message.Ping:
                         var stamp = r.ReadInt64(); Wire.End(r);
@@ -269,6 +288,20 @@ namespace Queyang.Core
                 if (!p.Subscribed) continue;
                 try
                 {
+                    bool paused=IsMotionPaused?.Invoke()==true;
+                    if (CaptureMotion!=null && p.Native==NativeStage.Ready && (time>=p.NextMotion || paused!=p.MotionPaused))
+                    {
+                        double interval=paused?.25:.05;
+                        p.NextMotion=p.NextMotion>0 && paused==p.MotionPaused ?
+                            Math.Max(time+.001,p.NextMotion+interval) : time+interval;
+                        p.MotionPaused=paused;
+                        foreach(var packet in CaptureMotion(p.X,p.Y))
+                        {
+                            if(p.Disconnected) break;
+                            if(packet.Length>1100) throw new InvalidDataException("Oversized motion sample");
+                            Send(id,Message.Motion,w=>{ w.Write(p.Generation); w.Write(packet); });
+                        }
+                    }
                     if (p.PeripheralPending && time >= p.NextPeripheral)
                     {
                         p.PeripheralPending = false; p.NextPeripheral = time + .125;
@@ -285,6 +318,7 @@ namespace Queyang.Core
                     if (p.Disconnected) continue;
                     if (p.Target == null && time >= p.ScanAt)
                     {
+                        p.LastScan = time;
                         p.ScanAt = time + 0.25;
                         var view = Capture(p,false);
                         if (p.Live && ViewPatch.Equal(p.Base,view)) continue;

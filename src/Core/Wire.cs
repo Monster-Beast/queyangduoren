@@ -8,7 +8,7 @@ namespace Queyang.Core
     {
         Hello = 1, Welcome, Reject, Subscribe, Begin, Chunk, Applied, Resync,
         Command, Result, Ping, Pong, Window,
-        NativeBegin, NativeChunk, NativeWindow, NativeEnd, NativeReady, NativeError, PeripheralRequest, PeripheralChunk
+        NativeBegin, NativeChunk, NativeWindow, NativeEnd, NativeReady, NativeError, PeripheralRequest, PeripheralChunk, Motion
     }
 
     public static class Wire
