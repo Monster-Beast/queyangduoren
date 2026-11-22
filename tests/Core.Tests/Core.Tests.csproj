@@ -2,6 +2,7 @@
   <PropertyGroup><TargetFramework>net9.0</TargetFramework><IsPackable>false</IsPackable><IsTestProject>true</IsTestProject></PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Core/Core.csproj"/>
+    <Compile Include="../../src/Game/Host/MotionPhase.cs" Link="MotionPhase.cs" />
     <Compile Include="../../src/Game/Client/ColonyView.cs" Link="Client/ColonyView.cs"/>
     <Compile Include="../../src/Game/Client/EntityStateCodec.cs" Link="Client/EntityStateCodec.cs"/>
     <Compile Include="../../src/Game/Client/ColonyViewExtensions.cs" Link="Client/ColonyViewExtensions.cs"/>

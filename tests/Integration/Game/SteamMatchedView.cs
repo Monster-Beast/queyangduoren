@@ -13,6 +13,7 @@ namespace Queyang.Integration
     internal sealed class SteamMatchedView
     {
         bool configured,published,complete;
+        float nextStatus;
         FixtureFrame frame;
         int blueprintCell,blueprintId;
         string tint;
@@ -33,7 +34,16 @@ namespace Queyang.Integration
                     host?"matched-host.png":"matched-guest.png"));
                 configured=true;
             }
+            // Use the public native camera controls for an exact paired screenshot.
+            // SetTargetPos by itself interpolates and can stop short of the requested zoom.
+            cam.SetPosition(new Vector3(p.x,p.y,cam.transform.position.z));
+            cam.OrthographicSize=10f;
             Vector3 vp=cam.baseCamera.WorldToViewportPoint(p);
+            if (Time.realtimeSinceStartup>=nextStatus)
+            {
+                nextStatus=Time.realtimeSinceStartup+8;
+                log("DUAL_MATCHED_PROGRESS host="+host+" viewport="+vp+" zoom="+cam.baseCamera.orthographicSize+" blueprintPublished="+published+" frameRequested="+frame.Requested);
+            }
             if (Mathf.Abs(vp.x-.5f)>.0005f || Mathf.Abs(vp.y-.5f)>.0005f || Mathf.Abs(cam.baseCamera.orthographicSize-10f)>.01f) return false;
             if (PlayerController.Instance.ActiveTool!=DigTool.Instance || OverlayScreen.Instance.GetMode()!=OverlayModes.None.ID)
                 throw new InvalidDataException("Matched scene requires DigTool with the normal overlay");
@@ -63,7 +73,7 @@ namespace Queyang.Integration
                 if (parts.Length!=3 || !int.TryParse(parts[0],out blueprintCell) || !int.TryParse(parts[1],out blueprintId))
                     throw new InvalidDataException("Bad blueprint comparison metadata");
                 var anim=NativeWorldMirror.GetBuildingSelectable(blueprintCell,blueprintId)?.GetComponent<KBatchedAnimController>();
-                if (anim==null || !anim.IsVisible()) return false;
+                if (anim==null || !anim.gameObject.activeInHierarchy) return false;
                 tint=ColorUtility.ToHtmlStringRGBA(anim.TintColour);
                 if (tint!=parts[2]) throw new InvalidDataException("Blueprint renderer tint mismatch: host="+parts[2]+" guest="+tint);
                 SteamMatchmaking.SetLobbyMemberData(lobby,"qy_matched_scene","ready");

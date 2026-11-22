@@ -9,7 +9,7 @@ namespace Queyang.Game
     // visibility and deletion. These messages can only move an already projected actor.
     internal static class NativeMotionStream
     {
-        const int PerPacket=6, MinRowBytes=55;
+        const int PerPacket=6, MinRowBytes=59;
         internal static IEnumerable<byte[]> Capture(int left,int bottom)
         {
             bool paused=SpeedControlScreen.Instance.IsPaused;
@@ -19,7 +19,7 @@ namespace Queyang.Game
             using(var stream=new MemoryStream())
             using(var w=new BinaryWriter(stream))
             {
-                w.Write(tick); w.Write(paused);
+                w.Write(tick); w.Write(paused); w.Write(Time.unscaledTime);
                 int count=0;
                 foreach(var dupe in Components.LiveMinionIdentities.Items)
                 {
@@ -40,36 +40,36 @@ namespace Queyang.Game
                     w.Write(a.FlipX); w.Write(pose.X); w.Write(pose.Y);
                     w.Write(pose.M00); w.Write(pose.M01); w.Write(pose.M02);
                     w.Write(pose.M10); w.Write(pose.M11); w.Write(pose.M12);
-                    w.Write(pose.File); w.Write(pose.Frame); w.Write(rate); w.Write(a.PlayMode==KAnim.PlayMode.Loop);
+                    w.Write(pose.File); w.Write(pose.Frame); w.Write(a.GetCurrentNumFrames()); w.Write(rate); w.Write(a.PlayMode==KAnim.PlayMode.Loop);
                     NativeDigVisuals.Write(w,a);
                     if(++count<PerPacket) continue;
                     yield return stream.ToArray();
-                    count=0; stream.SetLength(5); stream.Position=5;
+                    count=0; stream.SetLength(9); stream.Position=9;
                 }
                 if(count>0) yield return stream.ToArray();
             }
         }
         internal static void Apply(byte[] packet)
         {
-            if(packet.Length<5+MinRowBytes || packet.Length>1100)
+            if(packet.Length<9+MinRowBytes || packet.Length>1100)
                 throw new InvalidDataException("Invalid character motion payload");
             using(var r=new BinaryReader(new MemoryStream(packet,false)))
             {
-                int tick=r.ReadInt32(); bool paused=r.ReadBoolean();
-                if(tick<1) throw new InvalidDataException("Invalid character motion time");
+                int tick=r.ReadInt32(); bool paused=r.ReadBoolean(); float sourceTime=r.ReadSingle();
+                if(tick<1 || !(sourceTime>=0 && sourceTime<float.MaxValue)) throw new InvalidDataException("Invalid character motion time");
                 while(r.BaseStream.Position<packet.Length)
                 {
                     var d=new ColonyDupe { SaveId=r.ReadInt32(), Animation=r.ReadInt32(), FlipX=r.ReadBoolean() };
                     d.Pose=new ColonyDupePose { X=r.ReadSingle(),Y=r.ReadSingle(),M00=r.ReadSingle(),M01=r.ReadSingle(),M02=r.ReadSingle(),
                         M10=r.ReadSingle(),M11=r.ReadSingle(),M12=r.ReadSingle(),File=r.ReadInt32(),Frame=r.ReadInt32() };
-                    float rate=r.ReadSingle(); bool loop=r.ReadBoolean();
+                    int frames=r.ReadInt32(); float rate=r.ReadSingle(); bool loop=r.ReadBoolean();
                     if(!(d.Pose.X>=0 && d.Pose.X<Grid.WidthInCells && d.Pose.Y>=-.05f && d.Pose.Y<Grid.HeightInCells) ||
-                        !(rate>=-600 && rate<=600) || d.SaveId<0) throw new InvalidDataException("Invalid character motion values");
+                        !(rate>=-600 && rate<=600) || frames<0 || frames>65536 || d.Pose.Frame>=frames || d.SaveId<0) throw new InvalidDataException("Invalid character motion values");
                     Grid.CellToXY(Grid.PosToCell(new Vector2(d.Pose.X,d.Pose.Y)),out d.X,out d.Y);
                     ColonyView.ValidatePose(d);
                     var a=NativeDupePose.Knows(d.SaveId) && NativeDupePose.Current(d.SaveId,tick) ?
                         NativeWorldMirror.GetDupeSelectable(d.SaveId)?.GetComponent<KBatchedAnimController>() : null;
-                    if(a!=null) NativeDupePose.Apply(a,d,tick,paused,true,rate,loop);
+                    if(a!=null) NativeDupePose.Apply(a,d,tick,paused,true,rate,loop,frames,sourceTime);
                     NativeDigVisuals.Read(r,d.SaveId,a);
                 }
             }

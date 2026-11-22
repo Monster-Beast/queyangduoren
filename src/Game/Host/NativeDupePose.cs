@@ -19,6 +19,7 @@ namespace Queyang.Game
             internal Vector2 Start, MatrixStart, Velocity;
             internal float Rate, LastFast;
             internal bool Loop, Fast;
+            internal MotionPhase Phase;
             internal float Since, Duration, OriginalSpeed;
             internal KAnimFile Added;
         }
@@ -70,7 +71,7 @@ namespace Queyang.Game
         internal static Vector2 LastPosition(int id,Vector3 fallback) => tracks.TryGetValue(id,out var track)
             ? new Vector2(track.Dupe.X,track.Dupe.Y) : (Vector2)fallback;
 
-        internal static void Apply(KBatchedAnimController anim,ColonyDupe dupe,int tick,bool paused,bool fast=false,float rate=0,bool loop=false)
+        internal static void Apply(KBatchedAnimController anim,ColonyDupe dupe,int tick,bool paused,bool fast=false,float rate=0,bool loop=false,int frames=0,float sourceTime=-1)
         {
             int id=dupe.SaveId;
             if(!tracks.TryGetValue(id,out var track) || track.Anim!=anim)
@@ -101,6 +102,9 @@ namespace Queyang.Game
             track.Rate=paused?0:fast?rate:recentFast && sameAnim?track.Rate:0;
             track.Loop=fast?loop:sameAnim && track.Loop;
             track.Fast=fast;
+            if(!fast && anim.currentAnim.HashValue==dupe.Animation) frames=anim.GetCurrentNumFrames();
+            track.Phase.Anchor(p.Frame,frames,track.Rate,track.Loop,sourceTime,interval,
+                !paused && sameAnim && interval<.5f);
             track.Velocity=nearby && recentFast && interval>.015f ? Vector2.ClampMagnitude(delta/interval,16f) : Vector2.zero;
             track.Start=root; track.MatrixStart=new Vector2(m.m02,m.m12);
             // Blend from the image already on screen. No queued snapshots or fixed playback delay.
@@ -125,13 +129,7 @@ namespace Queyang.Game
             bool moved=root!=next;
             if(moved) anim.transform.position=next;
             if(anim.FlipX!=d.FlipX) anim.FlipX=d.FlipX;
-            int desired=p.Frame;
-            var active=anim.GetCurrentAnim();
-            if(desired>=0 && t.Rate!=0 && active!=null && active.numFrames>0)
-            {
-                int frame=desired+Mathf.RoundToInt(Mathf.Min(.14f,now-t.Since)*t.Rate);
-                desired=t.Loop?(frame%active.numFrames+active.numFrames)%active.numFrames:Mathf.Clamp(frame,0,active.numFrames-1);
-            }
+            int desired=t.Phase.Frame(now-t.Since);
             if(newPose || anim.currentAnim.HashValue!=d.Animation || RenderFrame(anim)!=desired)
             {
                 var name=new HashedString(d.Animation);
