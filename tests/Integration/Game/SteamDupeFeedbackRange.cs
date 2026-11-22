@@ -17,11 +17,11 @@ namespace Queyang.Integration
             AccessTools.MethodDelegate<Func<NameDisplayScreen, GameObject, NameDisplayScreen.Entry>>(
                 AccessTools.Method(typeof(NameDisplayScreen), "GetEntry"));
         int id, cell = Grid.InvalidCell;
-        float deadline, zoom, showAt;
+        float deadline, zoom, showAt, visibleSince;
         Vector3 cameraPosition;
         FixtureFrame photo;
         GameObject source;
-        bool started, hidden, captured, complete;
+        bool started, hidden, captured, complete, wasPaused;
 
         internal bool Check(CSteamID room, CSteamID peer, bool host, int round, Action<string> log)
         {
@@ -72,6 +72,10 @@ namespace Queyang.Integration
                 {
                     if (entry?.thoughtBubble == null || SteamMatchmaking.GetLobbyMemberData(room, peer, Prefix + "ready") != "1")
                         return false;
+                    var speed = SpeedControlScreen.Instance;
+                    wasPaused = speed.IsPaused;
+                    speed.SetSpeed(0);
+                    while (speed.IsPaused) speed.Unpause(false);
                     // The fixture supplies the same native bubble and buff that a
                     // passersby acknowledgement displays during ordinary play.
                     screen.SetThoughtBubbleDisplay(target, true, thought.hoverText, thought.bubbleSprite, thought.sprite);
@@ -85,15 +89,21 @@ namespace Queyang.Integration
             {
                 if (photo == null)
                 {
-                    bool bubble = entry?.thoughtBubble?.gameObject.activeInHierarchy == true &&
-                        entry.thoughtBubble.GetReference<Image>("icon_sprite").sprite == thought.sprite;
+                    var active = entry?.thoughtBubble;
+                    var icon = active?.GetReference<Image>("icon_sprite");
+                    var backdrop = active?.GetReference<Image>("bubble_sprite");
+                    bool bubble = active?.gameObject.activeInHierarchy == true &&
+                        Visible(icon, thought.sprite) && Visible(backdrop, thought.bubbleSprite);
                     bool text = UnityEngine.Object.FindObjectsByType<PopFX>(FindObjectsSortMode.None)
                         .Any(fx => fx.TextDisplay != null && fx.TextDisplay.isActiveAndEnabled && fx.TextDisplay.text == effect.Name);
                     if (!bubble || !text)
                     {
-                        if (host && now - showAt > 2.5f) throw new InvalidDataException($"Native duplicant source did not display both cues: bubble={bubble} text={text} trigger={effect.triggerFloatingText}");
+                        if (host && now - showAt > 2.5f) throw new InvalidDataException($"Native duplicant source did not display both cues: bubble={bubble} iconAlpha={icon?.canvasRenderer.GetInheritedAlpha()} backdropAlpha={backdrop?.canvasRenderer.GetInheritedAlpha()} text={text} trigger={effect.triggerFloatingText}");
+                        visibleSince = 0;
                         return false;
                     }
+                    if (visibleSince == 0) visibleSince = now;
+                    if (now - visibleSince < .35f) return false;
                     string folder = Path.GetDirectoryName(Environment.GetEnvironmentVariable("QY_SMOKE_REPORT"));
                     photo = new FixtureFrame(Path.Combine(folder, $"dupe-feedback-{Role(host)}.png"));
                     photo.Capture();
@@ -117,6 +127,7 @@ namespace Queyang.Integration
                 SteamMatchmaking.SetLobbyMemberData(room, Prefix + "hidden", "1");
             }
             else if (SteamMatchmaking.GetLobbyMemberData(room, peer, Prefix + "hidden") != "1") return false;
+            if (host && wasPaused) SpeedControlScreen.Instance.Pause(false);
             log($"DUPE_FEEDBACK_HIDDEN role={Role(host)} id={id}");
             camera.SetTargetPos(cameraPosition, zoom, false);
             camera.SetPosition(cameraPosition);
@@ -126,6 +137,8 @@ namespace Queyang.Integration
         }
 
         static string Role(bool host) => host ? "host" : "guest";
+        static bool Visible(Image image, Sprite expected) => image != null && image.isActiveAndEnabled &&
+            image.sprite == expected && image.canvasRenderer.GetInheritedAlpha() > .1f;
         static string Read(CSteamID room, string field) => SteamMatchmaking.GetLobbyData(room, Prefix + field);
         static void Publish(CSteamID room, string field, string value)
         {

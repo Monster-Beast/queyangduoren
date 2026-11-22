@@ -132,6 +132,7 @@ namespace Queyang.Integration
             if (!SpeedControlScreen.Instance.IsPaused) SpeedControlScreen.Instance.Pause(false);
             var world = ClusterManager.Instance.activeWorld;
             var workers = Components.LiveMinionIdentities.Items.Where(d => d != null && ClusterUtil.GetMyWorldId(d) == world.id).ToArray();
+            var placement = def.BuildingUnderConstruction.GetComponent<Constructable>();
             int origin = Grid.PosToCell(workers[0]);
             var inventory = world.worldInventory.GetAccessibleAmounts();
             var material = MaterialSelector.GetValidMaterials(def.MaterialCategory[0], true)
@@ -144,7 +145,7 @@ namespace Queyang.Integration
                 {
                     if (!Grid.IsValidCell(target) || Grid.GetCellDistance(anchor, target) != 1 || Grid.WorldIdx[target] != world.id ||
                         Grid.Visible[target] == 0 || Grid.Solid[target] || HostWorld.FindBuilding(target) != null ||
-                        !workers.Any(worker => worker.GetComponent<Navigator>().CanReach(Grid.CellAbove(target))) ||
+                        !workers.Any(worker => worker.GetComponent<Navigator>().CanReach(target, placement.GetOffsets(target))) ||
                         !HostWorld.VacantFootprint(def, target, Orientation.Neutral, world)) continue;
                     var obj = def.TryPlace(def.BuildingPreview, Grid.CellToPosCBC(target, def.SceneLayer), Orientation.Neutral, new[] { material });
                     if (obj == null) continue;
