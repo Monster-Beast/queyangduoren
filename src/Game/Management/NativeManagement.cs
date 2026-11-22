@@ -77,7 +77,7 @@ namespace Queyang.Game
             }
             if (Time.unscaledTime < nextPoll) return;
             nextPoll = Time.unscaledTime + .7f;
-            if (ClusterManager.Instance?.activeWorld!=null) Send("population/"+ClusterManager.Instance.activeWorldId);
+            if (!hasHud && ClusterManager.Instance?.activeWorld!=null) Send("population/"+ClusterManager.Instance.activeWorldId);
             var menu = ManagementMenu.Instance;
             var researchScreen = CurrentResearchScreen;
             if ((researchScreen != null && researchScreen.isActiveAndEnabled && researchScreen.IsScreenActive()) ||
@@ -118,6 +118,7 @@ namespace Queyang.Game
             ResetBuilding();
             ResetColony();
             populationWorld=-1;
+            hasHud=false; hudInventory=null; sampledWorld=null;
             ResetVitals();
             ResetProfile();
         }

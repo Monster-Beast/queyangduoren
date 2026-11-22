@@ -117,6 +117,7 @@ namespace Queyang.Game
             view.SetDupePage(dupes,sample>=0 ? sample : Mathf.FloorToInt(Time.unscaledTime));
             view.HasDupeAppearance=view.Dupes.Length>0;
             NativeResources.Capture(view, world,sample);
+            NativeManagement.CaptureHud(view,world);
             OrderOwnership.Capture(view,sample);
             return view.Encode();
         }

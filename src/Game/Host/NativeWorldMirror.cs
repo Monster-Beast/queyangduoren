@@ -44,6 +44,7 @@ namespace Queyang.Game
                     buildings[new HashedString(def.PrefabID).HashValue] = def;
             }
             NativeUtilities.Clock(view);
+            if (view.HasColonyHud) NativeManagement.ReceiveHud(view);
             NativeUtilityDisplay.Begin(markerRoot.transform);
             for (int i = 0; i < view.Cells.Length; i++)
             {

@@ -88,6 +88,9 @@ namespace Queyang.Game
         public bool Detailed;
         public bool HasResources;
         public bool HasDupeAppearance;
+        public bool HasColonyHud;
+        public int HudWorld,HudLocalPopulation,HudTotalPopulation;
+        public float HudCalories,HudStress;
         public const int MaxPiles = 128, MaxStocks = 384;
         public byte[] PileCoverage = new byte[Width * Height / 8];
         public int PileFrom, PileThrough = int.MaxValue;
@@ -136,6 +139,12 @@ namespace Queyang.Game
         }
 
         public byte[] Encode() => Encode(Native ? 50 : MaxNameBytes, false);
+        void ValidateHud()
+        {
+            if (HudWorld<0 || HudWorld>=255 || HudLocalPopulation<0 || HudTotalPopulation<HudLocalPopulation ||
+                !(HudCalories>=0) || float.IsInfinity(HudCalories) || float.IsNaN(HudStress) || float.IsInfinity(HudStress))
+                throw new InvalidDataException("Invalid colony HUD");
+        }
 
         private byte[] Encode(int nameBytes, bool pageEnvironment)
         {
@@ -161,7 +170,8 @@ namespace Queyang.Game
                 bool dupeRange = DupeFrom!=0 || DupeThrough!=int.MaxValue;
                 bool extended = HasEnvironment || EntityPayload != null || dupeRange || DupePoseTick!=0 || OrderMarks!=null || HasDupeAppearance;
                 if (extended && !HasResources) throw new InvalidDataException("Extended state requires native resource state.");
-                w.Write(extended ? (ushort)8 : HasResources ? (ushort)7 : Detailed ? (ushort)6 : Native ? NativeVersion : (ushort)4);
+                if (HasColonyHud && !extended) throw new InvalidDataException("HUD requires a native viewport");
+                w.Write(HasColonyHud ? (ushort)9 : extended ? (ushort)8 : HasResources ? (ushort)7 : Detailed ? (ushort)6 : Native ? NativeVersion : (ushort)4);
                 bool orders = extended && Array.Exists(Cells,c=>c.DigMaterial!=0 || c.HasBlueprintTint || c.MopOrdered || c.OrderPriority!=0 || c.OrderTargetId!=0 || c.SeparateOrderPriority!=0);
                 if (extended) w.Write((byte)((HasEnvironment ? 1 : 0) | (EntityPayload != null ? 2 : 0) | (orders ? 4 : 0) | (dupeRange ? 8 : 0) | (DupePoseTick!=0 ? 16 : 0) | (OrderMarks!=null ? 32 : 0) | (HasDupeAppearance ? 64 : 0)));
                 w.Write(X); w.Write(Y);
@@ -228,6 +238,11 @@ namespace Queyang.Game
                         if (d.HeadVisibility>7) throw new InvalidDataException("Invalid head symbols");
                         w.Write(d.Hat); w.Write(d.Hair); w.Write(d.HatHair); w.Write(d.HeadVisibility);
                     }
+                if (HasColonyHud)
+                {
+                    ValidateHud();
+                    w.Write((byte)HudWorld); w.Write(HudLocalPopulation); w.Write(HudTotalPopulation); w.Write(HudCalories); w.Write(HudStress);
+                }
                 if (extended && stream.Length > MaxViewport)
                 {
                     // Keep all readings and stock labels when a dense full tile compresses well.
@@ -272,10 +287,10 @@ namespace Queyang.Game
             using (var r = new BinaryReader(stream))
             {
                 ushort version = r.ReadUInt16();
-                if (version < 4 || version > 8 || (inflated && version != 8)) throw new InvalidDataException("Unknown viewport version.");
-                byte extensions = version == 8 ? r.ReadByte() : (byte)0;
-                if (extensions == 128 && !inflated) return InflateViewport(r);
-                if (version == 8 && ((extensions & 123) == 0 || (extensions & ~127) != 0)) throw new InvalidDataException("Invalid viewport extensions.");
+                if (version < 4 || version > 9 || (inflated && version < 8)) throw new InvalidDataException("Unknown viewport version.");
+                byte extensions = version >= 8 ? r.ReadByte() : (byte)0;
+                if (version==8 && extensions == 128 && !inflated) return InflateViewport(r);
+                if (version >= 8 && ((extensions & 123) == 0 || (extensions & ~127) != 0)) throw new InvalidDataException("Invalid viewport extensions.");
                 var v = new ColonyView { Native = version >= 5, Detailed = version >= 6, HasResources = version >= 7,
                     X = r.ReadInt32(), Y = r.ReadInt32() };
                 if (v.X < 0 || v.Y < 0 || v.X > int.MaxValue - Width || v.Y > int.MaxValue - Height)
@@ -355,7 +370,7 @@ namespace Queyang.Game
                 }
                 ValidateDupes(v.Dupes);
                 if (v.HasResources) v.ReadResources(r);
-                if (version == 8) v.ReadExtensions(r, extensions);
+                if (version >= 8) v.ReadExtensions(r, extensions);
                 if ((extensions & 4) != 0) v.ReadOrders(r);
                 if ((extensions & 8) != 0)
                 {
@@ -372,6 +387,11 @@ namespace Queyang.Game
                         v.Dupes[i].HeadVisibility=r.ReadByte();
                         if (v.Dupes[i].HeadVisibility>7) throw new InvalidDataException("Invalid head symbols");
                     }
+                if (version>=9)
+                {
+                    v.HasColonyHud=true; v.HudWorld=r.ReadByte(); v.HudLocalPopulation=r.ReadInt32(); v.HudTotalPopulation=r.ReadInt32();
+                    v.HudCalories=r.ReadSingle(); v.HudStress=r.ReadSingle(); v.ValidateHud();
+                }
                 if (stream.Position != stream.Length) throw new InvalidDataException("Trailing viewport bytes.");
                 return v;
             }

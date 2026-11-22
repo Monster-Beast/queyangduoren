@@ -9,6 +9,7 @@ param(
     [string]$BoxRoot,
     [string]$SandboxStart="$env:ProgramFiles/Sandboxie-Plus/Start.exe",
     [string]$FixtureDriverPath,
+    [ValidatePattern('^[0-9a-f]{32}$')][string]$PrivateAssetRun,
     [Alias('MotionBaselineOnly')][switch]$SkipManagement,
     [switch]$SkipPerson,
     [switch]$SkipWork,
@@ -63,12 +64,46 @@ if (!$FixtureDriverPath) {
 }
 $cecil=Get-ChildItem "$env:USERPROFILE/.nuget/packages/microsoft.codecoverage" -Filter Mono.Cecil.dll -Recurse | Select-Object -First 1
 [void][Reflection.Assembly]::LoadFrom($cecil.FullName)
-function Copy-PrivateGame([string]$from,[string]$to) {
-    & robocopy $from $to /E /XJ /R:1 /W:0 /NFL /NDL /NJH /NJS /NP | Out-Null
+function Copy-PrivateGame([string]$from,[string]$to,[string]$privateAssets) {
+    if ($privateAssets) {
+        # Link only immutable Unity and FMOD data between our isolated copies.
+        # Never point a link at files in the user's Steam installation.
+        $seed=Get-CheckedPath $qaRoot (Resolve-Path -LiteralPath $privateAssets).Path
+        foreach ($asset in Get-ChildItem -LiteralPath $seed -Recurse -File | Where-Object { $_.Extension -in '.resS','.bank','.assets','.resource' }) {
+            $relative=$asset.FullName.Substring($seed.Length+1)
+            $original=Get-Item -LiteralPath (Join-Path $from $relative) -ErrorAction SilentlyContinue
+            if (!$original -or $original.Length -ne $asset.Length -or $original.LastWriteTimeUtc -ne $asset.LastWriteTimeUtc) { continue }
+            if ((Get-FileHash -LiteralPath $original.FullName).Hash -ne (Get-FileHash -LiteralPath $asset.FullName).Hash) { continue }
+            $dest=Join-Path $to $relative
+            [IO.Directory]::CreateDirectory((Split-Path $dest)) | Out-Null
+            New-Item -ItemType HardLink -Path $dest -Target $asset.FullName -ErrorAction Stop | Out-Null
+        }
+    }
+    # Share private read-only copies of large art/audio assets between fixture runs.
+    # All binaries, configuration and writable files still get independent copies.
+    $patterns=@('*.resS','*.assets','*.resource','*.bank')
+    & robocopy $from $to /E /XJ /R:1 /W:0 /NFL /NDL /NJH /NJS /NP /XF $patterns | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "Private game copy failed ($LASTEXITCODE)." }
+    $cache=Join-Path $qaRoot 'readonly-oni-assets'
+    [IO.Directory]::CreateDirectory($cache) | Out-Null
+    foreach ($asset in Get-ChildItem -LiteralPath $from -File -Recurse | Where-Object {$_.Extension -in '.resS','.assets','.resource','.bank'}) {
+        $digest=(Get-FileHash -LiteralPath $asset.FullName).Hash
+        $cached=Join-Path $cache $digest
+        if (!(Test-Path -LiteralPath $cached)) {
+            $temp=Join-Path $cache ([Guid]::NewGuid().ToString('N'))
+            [IO.File]::Copy($asset.FullName,$temp)
+            if ((Get-FileHash -LiteralPath $temp).Hash -ne $digest) { throw 'Game asset changed during copy.' }
+            [IO.File]::SetAttributes($temp,[IO.FileAttributes]::ReadOnly)
+            [IO.File]::Move($temp,$cached)
+        }
+        if ((Get-FileHash -LiteralPath $cached).Hash -ne $digest) { throw "Corrupt QA asset cache entry $digest" }
+        $dest=Join-Path $to $asset.FullName.Substring($from.Length+1)
+        New-Item -ItemType HardLink -Path $dest -Target $cached | Out-Null
+    }
 }
 $copy=Join-Path $run 'host-game'
-Copy-PrivateGame $GameDir $copy
+$seed=if ($PrivateAssetRun) { Join-Path $qaRoot "steam-dual-$PrivateAssetRun/host-game" }
+Copy-PrivateGame $GameDir $copy $seed
 $managed=Get-CheckedPath $copy (Join-Path $copy 'OxygenNotIncluded_Data/Managed')
 $firstpass=Get-CheckedPath $managed (Join-Path $managed 'Assembly-CSharp-firstpass.dll')
 $resolver=New-Object Mono.Cecil.DefaultAssemblyResolver
@@ -92,7 +127,7 @@ try {
 } finally { $module.Dispose(); $resolver.Dispose() }
 [IO.File]::Replace("$firstpass.isolated",$firstpass,[System.Management.Automation.Language.NullString]::Value)
 
-Copy-PrivateGame $copy (Join-Path $run 'guest-game')
+Copy-PrivateGame $copy (Join-Path $run 'guest-game') $(if ($PrivateAssetRun) { $copy })
 $roles=@('host','guest')
 $drivers=@{}
 foreach ($role in $roles) {
@@ -318,6 +353,11 @@ try {
         $p=Get-Player $d
         if ($p -and !$p.HasExited) { $p.Kill(); [void]$p.WaitForExit(10000) }
         if ($role -eq 'guest') {
+            foreach ($leaf in @('drill.csv','dual-guest-drill.png')+@(0..7 | ForEach-Object { "hat-guest-$_.png" })) {
+                $dest=Join-Path $d.base $leaf
+                $src=Get-Physical $d $dest
+                if ($src -ne $dest -and (Test-Path $src)) { Copy-Item -LiteralPath $src -Destination $dest }
+            }
             foreach ($stage in 'printed','rejoined','death') {
                 $dest=Join-Path $d.base "dual-guest-population-$stage.png"
                 $src=Get-Physical $d $dest

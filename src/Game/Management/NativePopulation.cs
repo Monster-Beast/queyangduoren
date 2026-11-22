@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using HarmonyLib;
+using UnityEngine;
 
 namespace Queyang.Game
 {
@@ -10,6 +11,77 @@ namespace Queyang.Game
         static readonly AccessTools.FieldRef<MeterScreen,LocText> populationLabel=
             AccessTools.FieldRefAccess<MeterScreen,LocText>("currentMinions");
         static int populationWorld=-1,localPopulation,totalPopulation;
+        static bool hasHud;
+        static WorldInventory hudInventory;
+        static WorldContainer sampledWorld;
+        static float sampleNext,sampledCalories,sampledStress,hudCalories,hudStress;
+        static readonly System.Reflection.MethodInfo refreshMeter=AccessTools.Method(typeof(MeterScreen),"Refresh",Type.EmptyTypes);
+
+        internal static void CaptureHud(ColonyView view,WorldContainer world)
+        {
+            var tracker=RationTracker.Get();
+            if (tracker==null || world.worldInventory==null || world.id<0 || world.id>=255) return;
+            if (sampledWorld!=world || Time.unscaledTime>=sampleNext)
+            {
+                sampledWorld=world;
+                sampleNext=Time.unscaledTime+.25f;
+                sampledCalories=tracker.CountAmount(null,world.worldInventory,true);
+                sampledStress=GameUtil.GetMaxStressInActiveWorld();
+            }
+            view.HasColonyHud=true; view.HudWorld=world.id;
+            worldPopulation.Clear();
+            Components.LiveMinionIdentities.GetWorldItems(worldPopulation,world.id,false);
+            view.HudLocalPopulation=worldPopulation.Count;
+            view.HudTotalPopulation=Components.LiveMinionIdentities.Count;
+            worldPopulation.Clear();
+            view.HudCalories=sampledCalories; view.HudStress=sampledStress;
+        }
+
+        internal static void ReceiveHud(ColonyView view)
+        {
+            var world=ClusterManager.Instance.activeWorld;
+            if (world==null || world.id!=view.HudWorld) return;
+            bool refresh=!hasHud || hudInventory!=world.worldInventory || hudStress!=view.HudStress || hudCalories!=view.HudCalories;
+            hudInventory=world.worldInventory; hudStress=view.HudStress; hudCalories=view.HudCalories; hasHud=true;
+            ApplyPopulation(world.id,view.HudLocalPopulation,view.HudTotalPopulation);
+            if (refresh && MeterScreen.Instance!=null) refreshMeter.Invoke(MeterScreen.Instance,null);
+        }
+
+        internal static void ShowBaselineHud()
+        {
+            if (MeterScreen.Instance!=null && ClusterManager.Instance?.activeWorld!=null)
+                refreshMeter.Invoke(MeterScreen.Instance,null);
+        }
+
+        [HarmonyPatch(typeof(GameUtil),nameof(GameUtil.GetMaxStressInActiveWorld),new Type[0])]
+        static class GuestHudStress
+        {
+            static bool Prefix(ref float __result)
+            {
+                if (!NativeGuestScene.Ready || !hasHud || ClusterManager.Instance?.activeWorldId!=populationWorld) return true;
+                __result=hudStress; return false;
+            }
+        }
+
+        [HarmonyPatch(typeof(WorldResourceAmountTracker<RationTracker>),"CountAmount",new[]{typeof(Dictionary<string,float>),typeof(WorldInventory),typeof(bool)})]
+        static class GuestRations
+        {
+            static bool Prefix(object __instance,Dictionary<string,float> __0,WorldInventory __1,ref float __result)
+            {
+                if (!(__instance is RationTracker) || !NativeGuestScene.Ready || !hasHud || __1!=hudInventory) return true;
+                if (__0!=null)
+                {
+                    __0.Clear();
+                    foreach (var item in EdiblesManager.GetAllLoadedFoodTypes())
+                    {
+                        string id=((IConsumableUIItem)item).ConsumableId;
+                        float units=__1.GetTotalAmount(new Tag(id),false);
+                        if (units>0) __0[id]=units;
+                    }
+                }
+                __result=hudCalories; return false;
+            }
+        }
 
         static string Population(int world)
         {

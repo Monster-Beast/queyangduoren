@@ -180,6 +180,28 @@ namespace Queyang.Core.Tests
         }
 
         [Fact]
+        public void NativeAppearanceAndColonyHudRoundTripWithoutChangingLegacyViews()
+        {
+            var view=View();
+            view.HasDupeAppearance=true;
+            view.Dupes=new[]{new ColonyDupe { Id=1,SaveId=2,Hat=42,Hair=57,HatHair=63,HeadVisibility=5 }};
+            view.Cells[0].Flags=1;
+            view.HasColonyHud=true; view.HudWorld=0; view.HudLocalPopulation=4; view.HudTotalPopulation=5;
+            view.HudCalories=18571428f; view.HudStress=3.5f;
+            var restored=ColonyView.Decode(view.Encode());
+            Assert.True(restored.HasColonyHud);
+            Assert.Equal(view.HudTotalPopulation,restored.HudTotalPopulation);
+            Assert.Equal(view.HudCalories,restored.HudCalories);
+            Assert.Equal((42,57,63,(byte)5),(restored.Dupes[0].Hat,restored.Dupes[0].Hair,restored.Dupes[0].HatHair,restored.Dupes[0].HeadVisibility));
+            view.HudTotalPopulation=2;
+            Assert.Throws<InvalidDataException>(()=>view.Encode());
+            view.HasColonyHud=false;
+            Assert.False(ColonyView.Decode(view.Encode()).HasColonyHud);
+            view.Dupes[0].HeadVisibility=8;
+            Assert.Throws<InvalidDataException>(()=>view.Encode());
+        }
+
+        [Fact]
         public void FullEntropyWorldKeepsEntityPageAndVisitsEachEnvironmentCellWithinFourPages()
         {
             var v = DenseWorld();

@@ -38,6 +38,17 @@ namespace Queyang.Integration
         {
             var camera=CameraController.Instance.baseCamera;
             var pt=PropertyTextures.instance;
+            var meter=MeterScreen.Instance;
+            if (meter!=null)
+            {
+                var people=(LocText)AccessTools.Field(typeof(MeterScreen),"currentMinions").GetValue(meter);
+                var rations=meter.GetComponentInChildren<MeterScreen_Rations>(true);
+                var stress=meter.GetComponentInChildren<MeterScreen_Stress>(true);
+                var field=AccessTools.Field(typeof(MeterScreen_ValueTrackerDisplayer),"Label");
+                log("DUAL_ARRIVAL_HUD role="+role+" round="+round+" people="+people?.text+
+                    " calories="+(rations==null?"-":((LocText)field.GetValue(rations)).text)+
+                    " stress="+(stress==null?"-":((LocText)field.GetValue(stress)).text));
+            }
             foreach (var flow in UnityEngine.Object.FindObjectsByType<FlowOffsetRenderer>(FindObjectsSortMode.None))
             {
                 string name=(string)AccessTools.Field(typeof(FlowOffsetRenderer),"OffsetTextureName").GetValue(flow);
