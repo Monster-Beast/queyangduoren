@@ -10,7 +10,7 @@ namespace Queyang.Game
     {
         sealed class Display
         {
-            internal int Owner,Cell;
+            internal int Owner,Cell,Tick;
             internal KSelectable Target;
             internal float Fill;
             internal ProgressBar Bar;
@@ -100,14 +100,6 @@ namespace Queyang.Game
             }
         }
 
-        static KSelectable Find(int cell,int owner)
-        {
-            var target=NativeWorldMirror.GetBuildingSelectable(cell,owner);
-            if(target!=null) return target;
-            var local=KPrefabIDTracker.Get().GetInstance(owner)?.GetComponent<Building>();
-            return local!=null && local.GetCell()==cell ? local.GetComponent<KSelectable>() : null;
-        }
-
         internal static void Apply(ColonyView view)
         {
             if(view.WorkBars==null) return;
@@ -117,9 +109,10 @@ namespace Queyang.Game
             foreach(var state in view.WorkBars)
             {
                 int cell=Grid.XYToCell(view.X+state.Cell%ColonyView.Width,view.Y+state.Cell/ColonyView.Width);
-                var target=Find(cell,state.Owner);
+                var target=NativeWorldMirror.GetBuildingSelectable(cell,state.Owner);
                 if(target==null) continue;
                 current.Add(state.Token);
+                if(displays.TryGetValue(state.Token,out var known) && view.DupePoseTick<known.Tick) continue;
                 if(!displays.TryGetValue(state.Token,out var d) || d.Target!=target || d.Bar==null)
                 {
                     Remove(state.Token);
@@ -129,6 +122,7 @@ namespace Queyang.Game
                     finally { creating=false; }
                 }
                 d.Fill=state.Fill;
+                d.Tick=view.DupePoseTick;
                 autoHide(d.Bar)=state.AutoHide;
                 d.Bar.transform.position=new Vector3(state.X,state.Y,state.Z);
                 d.Bar.barColor=new Color32((byte)state.Color,(byte)(state.Color>>8),(byte)(state.Color>>16),(byte)(state.Color>>24));
@@ -141,10 +135,12 @@ namespace Queyang.Game
             {
                 if(current.Contains(p.Key)) continue;
                 var d=p.Value;
-                Grid.CellToXY(d.Cell,out int x,out int y);x-=view.X;y-=view.Y;
-                if(d.Target==null || (uint)x>=ColonyView.Width || (uint)y>=ColonyView.Height) { Remove(p.Key);continue; }
-                long key=((long)(y*ColonyView.Width+x)<<32)|(uint)p.Key;
-                if(key>=view.WorkBarFrom && key<=view.WorkBarThrough) Remove(p.Key);
+                if(d.Target==null || !d.Target.IsSelectable) { Remove(p.Key);continue; }
+                if(view.DupePoseTick<d.Tick) continue;
+                Grid.CellToXY(d.Cell,out int x,out int y);
+                // A peripheral tile is delivered between center snapshots. Its
+                // absence cannot stop a job on a different section of the map.
+                if(view.CoversWorkBar(x,y,p.Key)) Remove(p.Key);
             }
         }
         static void Remove(int token)

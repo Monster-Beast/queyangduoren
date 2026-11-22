@@ -11,6 +11,19 @@ namespace Queyang.Core.Tests
         static ColonyView View() => new ColonyView { Native = true, Detailed = true, HasResources = true };
 
         [Fact]
+        public void NeighborTileCannotRemoveWorkBarFromAnotherCell()
+        {
+            var view=View();
+            view.X=50;view.Y=20;view.WorkBars=Array.Empty<ColonyWorkBar>();
+            view.Cells[0].Flags=1;
+            Assert.True(view.CoversWorkBar(50,20,37));
+            Assert.False(view.CoversWorkBar(49,20,37));
+            Assert.False(view.CoversWorkBar(51,20,37));
+            view.WorkBarFrom=38;
+            Assert.False(view.CoversWorkBar(50,20,37));
+        }
+
+        [Fact]
         public void BuildingWarningPagesCoverAbsentAndPresentIconsWithoutGaps()
         {
             var view=View();

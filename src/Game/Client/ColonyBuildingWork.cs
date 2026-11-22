@@ -19,6 +19,14 @@ namespace Queyang.Game
         public ColonyWorkBar[] WorkBars;
         public long WorkBarFrom,WorkBarThrough=long.MaxValue;
         const int WorkPageSize=32;
+        internal bool CoversWorkBar(int x,int y,int token)
+        {
+            x-=X;y-=Y;
+            if(WorkBars==null || (uint)x>=Width || (uint)y>=Height) return false;
+            int cell=y*Width+x;
+            long key=((long)cell<<32)|(uint)token;
+            return (Cells[cell].Flags&1)!=0 && key>=WorkBarFrom && key<=WorkBarThrough;
+        }
         internal void SetWorkBars(List<ColonyWorkBar> all,int sequence)
         {
             all.Sort((a,b)=>a.Key.CompareTo(b.Key));

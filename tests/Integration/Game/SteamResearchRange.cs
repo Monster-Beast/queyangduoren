@@ -18,6 +18,10 @@ namespace Queyang.Integration
             AccessTools.FieldRefAccess<Workable,ProgressBar>("progressBar");
         int stage,prepared=-1,stableId,cell=-1;
         float deadline,nextLog;
+        float watchUntil,nextPeripheral;
+        int otherTiles;
+        bool lostBar;
+        static SteamResearchRange watching;
         ResearchCenter station;
         Tech tech;
         float required;
@@ -28,6 +32,19 @@ namespace Queyang.Integration
         void Set(CSteamID room,string field,string value)
         { if(!SteamMatchmaking.SetLobbyData(room,Key(field),value)) throw new IOException("Could not publish research reading"); }
         string Read(CSteamID room,string field)=>SteamMatchmaking.GetLobbyData(room,Key(field));
+        [HarmonyPatch(typeof(NativeWorldMirror),nameof(NativeWorldMirror.Apply))]
+        static class CheckBetweenSnapshots
+        {
+            static void Postfix(ColonyView __0)
+            {
+                var monitor=watching;
+                if(monitor==null) return;
+                Grid.CellToXY(monitor.cell,out int x,out int y);
+                if((uint)(x-__0.X)>=ColonyView.Width || (uint)(y-__0.Y)>=ColonyView.Height) monitor.otherTiles++;
+                if(NativeBuildingWork.GetDisplayed(monitor.stableId)?.gameObject.activeInHierarchy!=true)
+                    monitor.lostBar=true;
+            }
+        }
         static string VisualOrigin(KSelectable target)
         {
             var anim=target.GetComponent<KBatchedAnimController>();
@@ -121,6 +138,26 @@ namespace Queyang.Integration
                     nextLog=Time.realtimeSinceStartup+5;
                 }
                 return false;
+            }
+            if(!host && stage==1 && otherTiles<3)
+            {
+                watching=this;
+                if(watchUntil==0) watchUntil=Time.realtimeSinceStartup+1.5f;
+                if(Time.realtimeSinceStartup>=nextPeripheral)
+                {
+                    Grid.CellToXY(cell,out int x,out int y);
+                    int far=x+48<Grid.WidthInCells?x+48:Math.Max(0,x-48);
+                    CoopSession.RequestPeripheral(far,Math.Max(0,y-8));
+                    nextPeripheral=Time.realtimeSinceStartup+.16f;
+                }
+                return false;
+            }
+            if(!host && stage==1 && watching==this)
+            {
+                if(lostBar) throw new InvalidDataException("Research bar disappeared while applying a viewport tile");
+                if(Time.realtimeSinceStartup<watchUntil) return false;
+                watching=null;
+                log("RESEARCH_RANGE_CONTINUOUS unrelatedTiles="+otherTiles+" lostBar=False");
             }
             if(photo==null)
             {
