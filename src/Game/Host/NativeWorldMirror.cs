@@ -230,7 +230,7 @@ namespace Queyang.Game
                 (current.Style & 127) == (sample.BuildingStyle & 127) && current.Flags == flags &&
                 current.Target == sample.TargetId && current.SaveId == sample.BuildingSaveId)
             {
-                current.Anim.TintColour = NativeOrderColors.BuildingTint(sample);
+                if (current.Anim != null) current.Anim.TintColour = NativeOrderColors.BuildingTint(sample);
                 current.Style = sample.BuildingStyle;
                 NativeBuildingAnimation.Snapshot(current.Anim,sample.BuildingAnimation,sample.BuildingFrame,tick);
                 ApplyPrimary(current.Primary, sample.Structure);
@@ -239,23 +239,30 @@ namespace Queyang.Game
             RemoveBuildingMarker(cell);
             var prefab = (flags & 32) != 0 ? def.BuildingUnderConstruction : def.BuildingComplete;
             var source = prefab == null ? null : prefab.GetComponent<KBatchedAnimController>();
-            if (source == null || source.AnimFiles == null || source.AnimFiles.Length == 0) return;
+            bool hasAnimation = source != null && source.AnimFiles != null && source.AnimFiles.Length > 0;
+            // An atlas tile's artwork belongs to BlockTileRenderer. It still
+            // needs the same selection and inspection proxy as other buildings.
+            if (prefab == null || !hasAnimation && !NativeBlockTiles.UsesBlockRenderer(def)) return;
             var marker = new GameObject(def.PrefabID);
             marker.SetActive(false);
             marker.layer = prefab.layer;
             marker.transform.SetParent(markerRoot.transform, false);
             marker.transform.position = Grid.CellToPosCBC(cell, def.SceneLayer);
-            var controller = marker.AddComponent<KBatchedAnimController>();
-            controller.AnimFiles = source.AnimFiles;
-            controller.animScale = source.animScale;
-            controller.initialAnim = source.initialAnim;
-            controller.defaultAnim = source.defaultAnim;
-            controller.sceneLayer = source.sceneLayer;
-            controller.fgLayer = source.fgLayer;
-            controller.materialType = source.materialType;
-            var orientation = (Orientation)((sample.BuildingStyle >> 4) & 7);
-            ApplyBuildingVisualizer(def,prefab,source,controller,orientation,(flags&32)==0);
-            controller.TintColour = NativeOrderColors.BuildingTint(sample);
+            KBatchedAnimController controller = null;
+            if (hasAnimation)
+            {
+                controller = marker.AddComponent<KBatchedAnimController>();
+                controller.AnimFiles = source.AnimFiles;
+                controller.animScale = source.animScale;
+                controller.initialAnim = source.initialAnim;
+                controller.defaultAnim = source.defaultAnim;
+                controller.sceneLayer = source.sceneLayer;
+                controller.fgLayer = source.fgLayer;
+                controller.materialType = source.materialType;
+                var orientation = (Orientation)((sample.BuildingStyle >> 4) & 7);
+                ApplyBuildingVisualizer(def,prefab,source,controller,orientation,(flags&32)==0);
+                controller.TintColour = NativeOrderColors.BuildingTint(sample);
+            }
             var collider = marker.AddComponent<KBoxCollider2D>();
             collider.size = new Vector2(def.WidthInCells, def.HeightInCells);
             collider.offset = new Vector2(def.GetVisualizerOffset().x, def.HeightInCells * .5f);

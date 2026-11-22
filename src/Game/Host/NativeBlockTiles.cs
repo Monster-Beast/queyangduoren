@@ -42,7 +42,7 @@ namespace Queyang.Game
             }
         }
 
-        static bool UsesBlockRenderer(BuildingDef def) => def != null && def.TileLayer == Foundation &&
+        internal static bool UsesBlockRenderer(BuildingDef def) => def != null && def.TileLayer == Foundation &&
             def.WidthInCells == 1 && def.HeightInCells == 1 && def.BlockTileAtlas != null && def.BuildingComplete != null;
 
         internal static void Apply(int cell, ColonyCell sample, BuildingDef definition)
