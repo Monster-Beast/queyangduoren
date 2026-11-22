@@ -61,7 +61,7 @@ namespace Queyang.Integration
             var scheduleScreen=manager.scheduleScreen;
             if (reportedStage!=stage || Time.unscaledTime-lastReport>=8f)
             {
-                log($"DUAL_WORK_PROGRESS round={round} stage={stage} schedules={list.Count} renamed={s!=null} clicked={clicked}");
+                log($"DUAL_WORK_PROGRESS round={round} stage={stage} schedules={list.Count} renamed={s!=null} clicked={clicked} status={Queyang.Game.CoopSession.Status}");
                 reportedStage=stage;lastReport=Time.unscaledTime;
             }
             if (stage<5 && !opened)
@@ -90,7 +90,18 @@ namespace Queyang.Integration
                     var entry=entries.FirstOrDefault(e=>e.schedule==list.Last());
                     if (entry==null || !ReadyKey(entry.schedule)) return false;
                     var title=Field<EditableTitleBar>(entry,"title");
-                    title.inputField.onEndEdit.Invoke(TestName);clicked=true;
+                    // The new row enters the hierarchy before KMonoBehaviour.Start binds its input.
+                    if (!title.isSpawned) return false;
+                    if (!title.inputField.gameObject.activeInHierarchy)
+                    {
+                        title.editNameButton.SignalClick(KKeyCode.Mouse0);
+                        return false;
+                    }
+                    if (!title.inputField.isFocused) return false;
+                    title.inputField.text=TestName;
+                    title.inputField.DeactivateInputField();
+                    clicked=true;
+                    log("DUAL_WORK_NAME_SUBMITTED nativeEditButton=True nativeText="+title.inputField.text);
                 }
                 if (s==null) return false;
                 stage++;clicked=false;

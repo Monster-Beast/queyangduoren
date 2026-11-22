@@ -16,6 +16,7 @@ namespace Queyang.Integration
     {
         GameObject printed;
         Clinic clinic;
+        GameObject testPlan;
         int step,done,loggedStep=-1;
         float lastProgress;
         string skill,hat,food;
@@ -40,6 +41,71 @@ namespace Queyang.Integration
             return Components.LiveMinionIdentities.Items.First(d=>d!=null && d.GetComponent<KPrefabID>().InstanceID==id);
         }
 
+        static void VerifyCotFootprint(BuildingDef cot,Action<string> log)
+        {
+            var world=ClusterManager.Instance.activeWorld;
+            var box=Components.BuildingCompletes.Items.FirstOrDefault(b=>b!=null && b.PrefabID()==RationBoxConfig.ID &&
+                ClusterUtil.GetMyWorldId(b)==world.id);
+            if (box==null) return;
+            var building=box.GetComponent<Building>();
+            int origin=building.GetCell();
+            var footprint=new HashSet<int>(building.Def.PlacementOffsets.Select(off=>
+                Grid.OffsetCell(origin,Rotatable.GetRotatedCellOffset(off,building.Orientation))));
+            var anchors=new HashSet<int>();
+            foreach (int occupied in footprint)
+                foreach (var off in cot.PlacementOffsets)
+                {
+                    var xy=Grid.CellToXY(occupied);
+                    int cx=xy.x-off.x,cy=xy.y-off.y;
+                    if (cx<0 || cy<0 || cx>=Grid.WidthInCells || cy>=Grid.HeightInCells) continue;
+                    anchors.Add(Grid.XYToCell(cx,cy));
+                }
+            int wouldPassOld=0,edgeOnly=0;
+            foreach (int anchor in anchors)
+            {
+                if (cot.IsValidBuildLocation(null,anchor,Orientation.Neutral,true,out _)) wouldPassOld++;
+                if (!footprint.Contains(anchor)) edgeOnly++;
+                if (HostWorld.VacantFootprint(cot,anchor,Orientation.Neutral,world))
+                    throw new InvalidDataException("Medical cot placement ignored an occupied food-box cell");
+            }
+            int previous=Grid.XYToCell(125,194);
+            bool oldOverlaps=anchors.Contains(previous);
+            log($"DUAL_MEDICAL_PLACEMENT box={origin} blocked={anchors.Count} edgeOnly={edgeOnly} oldCheckAccepted={wouldPassOld} oldAnchor125x194Overlaps={oldOverlaps}");
+        }
+
+        bool SameFramePlans(Action<string> log)
+        {
+            if (testPlan!=null)
+            {
+                if (!testPlan.GetComponent<KPrefabID>().isSpawned) return false;
+                // Retire only this disposable fixture's blueprint after its OnSpawn.
+                Util.KDestroyGameObject(testPlan);
+                return true;
+            }
+            var def=Assets.GetBuildingDef(RationBoxConfig.ID);
+            var world=ClusterManager.Instance.activeWorld;
+            var material=new[]{MaterialSelector.GetValidMaterials(def.MaterialCategory[0],true).First()};
+            int origin=clinic.GetComponent<Building>().GetCell();
+            foreach (int anchor in Enumerable.Range(0,Grid.CellCount).Where(c=>Grid.WorldIdx[c]==world.id && Grid.Visible[c]!=0)
+                .OrderBy(c=>Grid.GetCellDistance(origin,c)))
+            {
+                if (!HostWorld.VacantFootprint(def,anchor,Orientation.Neutral,world) ||
+                    def.PlacementOffsets.Any(o=>Grid.Solid[Grid.OffsetCell(anchor,o)])) continue;
+                var p=Grid.CellToPosCBC(anchor,Grid.SceneLayer.Building);
+                testPlan=def.TryPlace(def.BuildingPreview,p,Orientation.Neutral,material);
+                if (testPlan==null) continue;
+                if (def.TryPlace(def.BuildingPreview,p,Orientation.Neutral,material)!=null)
+                    throw new InvalidDataException("Two native plans accepted in the same frame");
+                int edge=Grid.CellRight(anchor);
+                if (HostWorld.VacantFootprint(def,edge,Orientation.Neutral,world) ||
+                    def.TryPlace(def.BuildingPreview,Grid.CellToPosCBC(edge,Grid.SceneLayer.Building),Orientation.Neutral,material)!=null)
+                    throw new InvalidDataException("Native plan overlapping the previous plan's edge was accepted");
+                log($"DUAL_SAME_FRAME_PLACEMENT accepted=1 sameAnchorRejected=True sharedEdgeRejected=True cell={anchor}");
+                return false;
+            }
+            throw new InvalidDataException("No free space for the same-frame placement fixture");
+        }
+
         internal bool Host(CSteamID lobby,int round,Action<string> log)
         {
             if (Early || done==round) return true;
@@ -53,18 +119,8 @@ namespace Queyang.Integration
                 clinic=Components.Clinics.Items.FirstOrDefault(c=>c!=null && c.GetComponent<Assignable>()?.assignee==null && ClusterUtil.GetMyWorldId(c)==ClusterManager.Instance.activeWorldId);
                 if (clinic==null)
                 {
-                    int bed=Grid.InvalidCell;
-                    for (int radius=1;radius<=18 && bed==Grid.InvalidCell;radius++)
-                        for(int dx=-radius;dx<=radius && bed==Grid.InvalidCell;dx++)
-                            for(int dy=-radius;dy<=radius;dy++)
-                            {
-                                if (Math.Abs(dx)+Math.Abs(dy)!=radius || x+dx<0 || y+dy<0 || x+dx>=Grid.WidthInCells || y+dy>=Grid.HeightInCells) continue;
-                                int c=Grid.XYToCell(x+dx,y+dy);
-                                if (Grid.Visible[c]!=0 && Grid.WorldIdx[c]==Grid.WorldIdx[at] &&
-                                    def.IsValidBuildLocation(null,c,Orientation.Neutral,true,out _)) { bed=c; break; }
-                            }
-                    if (bed==Grid.InvalidCell) throw new InvalidDataException("The isolated test save has no suitable space for a medical cot.");
-                    clinic=def.Build(bed,Orientation.Neutral,null,new[]{ElementLoader.FindElementByHash(SimHashes.SandStone).tag},295f,false,-1f).GetComponent<Clinic>();
+                    VerifyCotFootprint(def,log);
+                    clinic=NativeFacilityChecks.Build(MedicalCotConfig.ID,ClusterManager.Instance.activeWorldId).GetComponent<Clinic>();
                 }
                 step++; return false;
             }
@@ -72,6 +128,7 @@ namespace Queyang.Integration
             if (!printed.GetComponent<KPrefabID>().isSpawned || !clinic.isSpawned) return false;
             if (step==1)
             {
+                if (!SameFramePlans(log)) return false;
                 var hp=printed.GetComponent<Health>(); hp.Damage(hp.maxHitPoints*.85f);
                 if (!clinic.GetComponent<Assignable>().CanAssignTo(printed.GetComponent<MinionIdentity>().assignableProxy.Get()))
                     throw new InvalidDataException("Clinic did not recognize the test patient as eligible");

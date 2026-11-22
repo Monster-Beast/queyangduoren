@@ -360,18 +360,7 @@ namespace Queyang.Game
                 return "ERROR Building locked or unavailable";
             if (specified != null && def.MaterialCategory.Length != specified.Length)
                 return "ERROR Construction materials changed";
-            int x, y;
-            Grid.CellToXY(cell, out x, out y);
-            var pending = Pending.GetOrCreateValue(world);
-            ReleaseRegistered(pending);
-            foreach (var original in def.PlacementOffsets)
-            {
-                var offset = Rotatable.GetRotatedCellOffset(original, orientation);
-                int occupied;
-                if (!VisibleCell(world, x + offset.x, y + offset.y, out occupied) ||
-                    Grid.Objects[occupied, (int)def.ObjectLayer] != null || pending.ContainsKey(Slot(occupied, def.ObjectLayer)))
-                    return "ERROR Footprint hidden or occupied";
-            }
+            if (!VacantFootprint(def,cell,orientation,world)) return "ERROR Footprint hidden or occupied";
             var materials = new List<Tag>();
             for (int i = 0; i < def.MaterialCategory.Length; i++)
             {
@@ -390,14 +379,52 @@ namespace Queyang.Game
             var position = Grid.CellToPosCBC(cell, Grid.SceneLayer.Building);
             order = def.TryPlace(def.isUtility ? null : def.BuildingPreview, position, orientation, materials, 0);
             if (order == null) return "ERROR Game rejected placement";
+            // The TryPlace postfix also reserves local host orders in the same frame.
+            if (!CoopSession.IsHosting) ReservePlacement(def,cell,orientation,order);
+            return "OK Construction planned";
+        }
+
+        internal static bool VacantFootprint(BuildingDef def,int cell,Orientation orientation,WorldContainer world)
+        {
+            if (world==null || def==null || !Grid.IsValidCell(cell)) return false;
+            var pending=Pending.GetOrCreateValue(world);
+            ReleaseRegistered(pending);
+            Grid.CellToXY(cell,out int x,out int y);
             foreach (var original in def.PlacementOffsets)
             {
-                var offset = Rotatable.GetRotatedCellOffset(original, orientation);
-                int occupied = Grid.XYToCell(x + offset.x, y + offset.y);
-                if (Grid.Objects[occupied, (int)def.ObjectLayer] == null)
-                    pending[Slot(occupied, def.ObjectLayer)] = order;
+                var offset=Rotatable.GetRotatedCellOffset(original,orientation);
+                if (!VisibleCell(world,x+offset.x,y+offset.y,out int occupied) ||
+                    Grid.Objects[occupied,(int)def.ObjectLayer]!=null || pending.ContainsKey(Slot(occupied,def.ObjectLayer))) return false;
             }
-            return "OK Construction planned";
+            return true;
+        }
+
+        internal static bool PendingPlacement(BuildingDef def,int cell,Orientation orientation)
+        {
+            var world=ClusterManager.Instance?.activeWorld;
+            if (world==null || !Grid.IsValidCell(cell) || !Pending.TryGetValue(world,out var pending)) return false;
+            ReleaseRegistered(pending);
+            if (pending.Count==0) return false;
+            foreach (var original in def.PlacementOffsets)
+            {
+                var offset=Rotatable.GetRotatedCellOffset(original,orientation);
+                if (Grid.IsCellOffsetValid(cell,offset) && pending.ContainsKey(Slot(Grid.OffsetCell(cell,offset),def.ObjectLayer))) return true;
+            }
+            return false;
+        }
+
+        internal static void ReservePlacement(BuildingDef def,int cell,Orientation orientation,GameObject order)
+        {
+            var world=ClusterManager.Instance?.activeWorld;
+            if (world==null || !Grid.IsValidCell(cell)) return;
+            var pending=Pending.GetOrCreateValue(world);
+            foreach (var original in def.PlacementOffsets)
+            {
+                var offset=Rotatable.GetRotatedCellOffset(original,orientation);
+                if (!Grid.IsCellOffsetValid(cell,offset)) continue;
+                int occupied=Grid.OffsetCell(cell,offset);
+                if (Grid.Objects[occupied,(int)def.ObjectLayer]==null) pending[Slot(occupied,def.ObjectLayer)]=order;
+            }
         }
 
         private static long Slot(int cell, ObjectLayer layer) => ((long)cell << 8) | (byte)layer;

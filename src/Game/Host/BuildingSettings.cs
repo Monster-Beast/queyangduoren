@@ -99,9 +99,9 @@ namespace Queyang.Game
             if (p.Length < 3 || world == null || !VisibleCell(world, x, y, out int cell))
                 return "ERROR Building unavailable";
             var target = FindBuilding(cell);
-            if (p[1] == "readings" && p.Length == 3 && target != null &&
+            if (p[1] == "readings" && (p.Length == 3 || p.Length==4) && target != null &&
                 target.GetComponent<KPrefabID>().InstanceID == NativeManagement.Number(p[2]))
-                return NativeManagement.ReadBuilding(target, target.GetComponent<KPrefabID>().InstanceID);
+                return NativeManagement.ReadBuilding(target, target.GetComponent<KPrefabID>().InstanceID, p.Length==4?NativeManagement.Number(p[3]):0);
             var button = target == null ? null : target.GetComponent<BuildingEnabledButton>();
             var toggle = target == null ? null : target.GetComponent<Toggleable>();
             if (target == null || target.GetComponent<BuildingComplete>() == null ||

@@ -88,7 +88,7 @@ namespace Queyang.Game
                     active[e.Id] = item;
                 }
                 item.State = e; item.Cell = cell;
-                if (building) continue;
+                if (building) { NativeFacilityStorage.ApplyMeter(target,e); continue; }
                 SetVisible(target, true);
                 float px = x + e.SubX / 255f, py = y + e.SubY / 255f;
                 var t = target.transform;

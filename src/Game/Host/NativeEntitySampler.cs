@@ -193,7 +193,7 @@ namespace Queyang.Game
         static float Fraction(Klei.AI.AmountInstance amount) => amount == null || amount.GetMax() <= 0 ? -1 :
             Mathf.Clamp01(Amount(amount.value / amount.GetMax()));
 
-        static void ReadStorage(GameObject obj, ColonyEntity e)
+        internal static void ReadStorage(GameObject obj, ColonyEntity e, NativeFacilityStorage.Snapshot details=null)
         {
             var stores = obj.GetComponents<Storage>();
             var totals = new Dictionary<int, ColonyIngredient>();
@@ -210,6 +210,10 @@ namespace Queyang.Game
                     int hash = prefab.PrefabTag.GetHash();
                     if (!totals.TryGetValue(hash, out var row)) row = new ColonyIngredient { Tag = hash, Freshness = -1 };
                     float mass = Amount(primary.Mass); stored += mass; stacks++;
+                    var pickup=item.GetComponent<Pickupable>();
+                    float available=pickup!=null && pickup.TotalAmount>0 ? mass*Mathf.Clamp01(pickup.UnreservedAmount/pickup.TotalAmount) : mass;
+                    e.Available+=available; e.Reserved+=mass-available;
+                    details?.Add(item,primary,hash,available);
                     row.Stored += mass;
                     if (item.GetComponent<Edible>() != null)
                     {

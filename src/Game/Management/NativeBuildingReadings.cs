@@ -30,14 +30,14 @@ namespace Queyang.Game
             }
             if (id != inspectedId || cell != inspectedCell)
             {
-                inspectedId = id; inspectedCell = cell; buildingReadout = null;
+                inspectedId = id; inspectedCell = cell; buildingReadout = null; ResetStoragePanel();
             }
             if (id <= 0 || !Grid.IsValidCell(cell)) return;
             Grid.CellToXY(cell, out int x, out int y);
-            CoopSession.Command("nm/readings/" + id, x, y);
+            CoopSession.Command("nm/readings/" + id + (nextStoragePage==0?"":"/"+nextStoragePage), x, y);
         }
 
-        internal static string ReadBuilding(GameObject target, int id)
+        internal static string ReadBuilding(GameObject target, int id,int page=0)
         {
             var lines = new List<string>();
             var assignment = target.GetComponent<Assignable>();
@@ -90,7 +90,8 @@ namespace Queyang.Game
                 text.Append(line);
             }
             return Prefix + "g/" + id.ToString(CultureInfo.InvariantCulture) + "/" +
-                Convert.ToBase64String(Encoding.UTF8.GetBytes(text.ToString())).Replace('/', '_');
+                Convert.ToBase64String(Encoding.UTF8.GetBytes(text.ToString())).Replace('/', '_') +
+                (NativeFacilityStorage.Supported(target)?"/"+NativeFacilityStorage.Encode(target,page):"");
         }
 
         static void AddPort(List<string> lines, string label, ConduitType type, int cell)
@@ -106,7 +107,8 @@ namespace Queyang.Game
 
         static void ReceiveReadings(string[] fields)
         {
-            if (fields.Length != 4 || Number(fields[2]) != inspectedId || inspectedId <= 0) return;
+            if ((fields.Length!=4 && fields.Length!=5) || Number(fields[2])!=inspectedId || inspectedId<=0) return;
+            if(fields.Length==5) ReceiveStoragePanel(fields[4]);
             string text = Encoding.UTF8.GetString(Convert.FromBase64String(fields[3].Replace('_', '/')));
             if (text == buildingReadout) return;
             buildingReadout = text;

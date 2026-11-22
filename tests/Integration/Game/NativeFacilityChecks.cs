@@ -42,12 +42,10 @@ namespace Queyang.Integration
                 .OrderBy(c=>Grid.GetCellDistance(origin,c));
             foreach(int c in cells)
             {
-                if (def.PlacementOffsets.Any(off=>
-                {
-                    int pos=Grid.OffsetCell(c,off);
-                    return !Grid.IsValidCell(pos) || Grid.WorldIdx[pos]!=world || Grid.Visible[pos]==0 ||
-                        Grid.Solid[pos] || Grid.Objects[pos,(int)ObjectLayer.Building]!=null;
-                })) continue;
+                if (!HostWorld.VacantFootprint(def,c,Orientation.Neutral,ClusterManager.Instance.activeWorld) ||
+                    !def.IsValidPlaceLocation(def.BuildingPreview,c,Orientation.Neutral,false,out _) ||
+                    !def.IsValidBuildLocation(def.BuildingPreview,c,Orientation.Neutral,false,out _) ||
+                    def.PlacementOffsets.Any(off=>Grid.Solid[Grid.OffsetCell(c,off)])) continue;
                 var materials=def.MaterialCategory.Select(kind=>MaterialSelector.GetValidMaterials(kind,true).First()).ToArray();
                 var built=def.Build(c,Orientation.Neutral,null,materials,295f,false,-1f);
                 if (built!=null) return built;

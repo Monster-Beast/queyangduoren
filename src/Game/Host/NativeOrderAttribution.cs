@@ -51,8 +51,12 @@ namespace Queyang.Game
     {
         static MethodBase TargetMethod() => AccessTools.DeclaredMethod(typeof(BuildingDef),"TryPlace",
             new[]{typeof(GameObject),typeof(Vector3),typeof(Orientation),typeof(IList<Tag>),typeof(string),typeof(bool),typeof(int)});
-        static void Postfix(GameObject __result)
+        static bool Prefix(BuildingDef __instance,Vector3 __1,Orientation __2) => !CoopSession.IsHosting ||
+            !HostWorld.PendingPlacement(__instance,Grid.PosToCell(__1),__2);
+        static void Postfix(BuildingDef __instance,Vector3 __1,Orientation __2,GameObject __result)
         {
+            if (CoopSession.IsHosting && __result!=null)
+                HostWorld.ReservePlacement(__instance,Grid.PosToCell(__1),__2,__result);
             if (OrderOwnership.Actor!=0 && __result!=null && __result.GetComponent<Constructable>()!=null)
                 OrderOwnership.Record(__result,OrderKind.Build);
         }
