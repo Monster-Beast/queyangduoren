@@ -93,7 +93,7 @@ namespace Queyang.Game
                     var a=critters ? NativeEntityDisplay.MovingCritter(d.SaveId,tick,Grid.XYToCell(d.X,d.Y)) :
                         NativeDupePose.Knows(d.SaveId) && NativeDupePose.Current(d.SaveId,tick) ?
                         NativeWorldMirror.GetDupeSelectable(d.SaveId)?.GetComponent<KBatchedAnimController>() : null;
-                    if(a!=null) NativeDupePose.Apply(a,d,tick,paused,true,rate,loop,frames,sourceTime);
+                    if(a!=null) NativeDupePose.Apply(a,d,tick,paused,true,rate,loop,frames,sourceTime,critters);
                     if(!critters) NativeDigVisuals.Read(r,d.SaveId,a);
                     if(tools) NativeToolSymbols.Read(r,a);
                 }

@@ -15,7 +15,9 @@ namespace Queyang.Game
         static WorldInventory hudInventory;
         static WorldContainer sampledWorld;
         static float sampleNext,sampledCalories,sampledStress,hudCalories,hudStress;
-        static readonly System.Reflection.MethodInfo refreshMeter=AccessTools.Method(typeof(MeterScreen),"Refresh",Type.EmptyTypes);
+        static MeterScreen hudScreen;
+        static MeterScreen_Stress stressMeter;
+        static MeterScreen_Rations rationMeter;
 
         internal static void CaptureHud(ColonyView view,WorldContainer world)
         {
@@ -44,13 +46,21 @@ namespace Queyang.Game
             bool refresh=!hasHud || hudInventory!=world.worldInventory || hudStress!=view.HudStress || hudCalories!=view.HudCalories;
             hudInventory=world.worldInventory; hudStress=view.HudStress; hudCalories=view.HudCalories; hasHud=true;
             ApplyPopulation(world.id,view.HudLocalPopulation,view.HudTotalPopulation);
-            if (refresh && MeterScreen.Instance!=null) refreshMeter.Invoke(MeterScreen.Instance,null);
-        }
-
-        internal static void ShowBaselineHud()
-        {
-            if (MeterScreen.Instance!=null && ClusterManager.Instance?.activeWorld!=null)
-                refreshMeter.Invoke(MeterScreen.Instance,null);
+            var screen=MeterScreen.Instance;
+            if (screen==null) return;
+            if (hudScreen!=screen || stressMeter==null || rationMeter==null)
+            {
+                hudScreen=screen;
+                stressMeter=screen.GetComponentInChildren<MeterScreen_Stress>(true);
+                rationMeter=screen.GetComponentInChildren<MeterScreen_Rations>(true);
+                refresh=true;
+            }
+            if (!refresh) return;
+            // A reloaded world's graph trackers can start after the native meter labels.
+            // Set the two authoritative values without requesting a graph refresh on scene load.
+            if (stressMeter!=null && stressMeter.Label!=null) stressMeter.Label.text=Mathf.Round(hudStress).ToString();
+            if (rationMeter!=null && rationMeter.Label!=null)
+                rationMeter.Label.text=GameUtil.GetFormattedCalories((long)hudCalories,GameUtil.TimeSlice.None,true);
         }
 
         [HarmonyPatch(typeof(GameUtil),nameof(GameUtil.GetMaxStressInActiveWorld),new Type[0])]

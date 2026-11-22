@@ -94,7 +94,6 @@ namespace Queyang.Game
                          ClusterManager.Instance?.activeWorld != null && CameraController.Instance != null)
                 {
                     phase = Phase.Live;
-                    NativeManagement.ShowBaselineHud();
                     Debug.Log("[QueyangCoop] Native guest colony ready");
                 }
                 else if (Ready && CoopSession.View != null && Time.unscaledTime >= nextPeripheralCheck)

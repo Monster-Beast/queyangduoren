@@ -17,6 +17,8 @@ namespace Queyang.Game
             internal KBatchedAnimController Anim;
             internal ColonyDupe Dupe;
             internal Vector2 Start, MatrixStart, Velocity;
+            internal Vector2 Corner;
+            internal bool FollowCorner;
             internal float Rate, LastFast;
             internal bool Loop, Fast;
             internal MotionPhase Phase;
@@ -73,7 +75,7 @@ namespace Queyang.Game
         internal static Vector2 LastPosition(int id,Vector3 fallback) => tracks.TryGetValue(id,out var track)
             ? new Vector2(track.Dupe.X,track.Dupe.Y) : (Vector2)fallback;
 
-        internal static void Apply(KBatchedAnimController anim,ColonyDupe dupe,int tick,bool paused,bool fast=false,float rate=0,bool loop=false,int frames=0,float sourceTime=-1)
+        internal static void Apply(KBatchedAnimController anim,ColonyDupe dupe,int tick,bool paused,bool fast=false,float rate=0,bool loop=false,int frames=0,float sourceTime=-1,bool critter=false)
         {
             int id=dupe.SaveId;
             if(!tracks.TryGetValue(id,out var track) || track.Anim!=anim)
@@ -88,15 +90,23 @@ namespace Queyang.Game
             var root=anim.transform.position;
             var m=RenderMatrix(anim);
             float interval=now-track.Since;
-            bool nearby=!paused && track.Since>0 && interval<.5f &&
-                Vector2.Distance(root,new Vector2(p.X,p.Y))<2.5f;
+            float distance=Vector2.Distance(root,new Vector2(p.X,p.Y));
+            bool nearby=!paused && track.Since>0 && interval<.5f && distance<(critter?4f:2.5f);
+            track.FollowCorner=false;
             // Do not cut diagonally across the solid corner of a turn.
             var delta=new Vector2(p.X-track.Dupe.Pose.X,p.Y-track.Dupe.Pose.Y);
             if(nearby && Mathf.Abs(delta.x)>.01f && Mathf.Abs(delta.y)>.01f)
             {
                 int cornerA=Grid.PosToCell(new Vector2(p.X,root.y));
                 int cornerB=Grid.PosToCell(new Vector2(root.x,p.Y));
-                nearby=Grid.IsValidCell(cornerA) && Grid.IsValidCell(cornerB) && !Grid.Solid[cornerA] && !Grid.Solid[cornerB];
+                bool openA=Grid.IsValidCell(cornerA) && !Grid.Solid[cornerA];
+                bool openB=Grid.IsValidCell(cornerB) && !Grid.Solid[cornerB];
+                if(critter && openA!=openB)
+                {
+                    track.FollowCorner=true;
+                    track.Corner=openA?new Vector2(p.X,root.y):new Vector2(root.x,p.Y);
+                }
+                else nearby=openA && openB;
             }
             if(fast) track.LastFast=now;
             bool recentFast=track.LastFast>0 && now-track.LastFast<.15f;
@@ -111,6 +121,9 @@ namespace Queyang.Game
             track.Start=root; track.MatrixStart=new Vector2(m.m02,m.m12);
             // Blend from the image already on screen. No queued snapshots or fixed playback delay.
             track.Duration=nearby? Mathf.Min(interval*.65f,recentFast?.035f:.18f):0;
+            // Several authority ticks may arrive together. Their arrival gap is
+            // not a playback duration for a fast-flying critter at colony speed 3.
+            if(critter && nearby) track.Duration=Mathf.Clamp(Mathf.Max(interval,distance/16f),.045f,.12f);
             track.Since=now; track.Dupe=dupe; ticks[id]=tick;
             Draw(track,now,true);
         }
@@ -128,6 +141,14 @@ namespace Queyang.Game
             advance.y=Mathf.Clamp(p.Y+advance.y,d.Y-.05f,d.Y+.94999f)-p.Y;
             var root=anim.transform.position;
             var next=new Vector3(Mathf.Lerp(t.Start.x,p.X,f)+advance.x,Mathf.Lerp(t.Start.y,p.Y,f)+advance.y,root.z);
+            if(t.FollowCorner && f<1)
+            {
+                var end=new Vector2(p.X,p.Y);
+                float first=Vector2.Distance(t.Start,t.Corner);
+                float along=f*(first+Vector2.Distance(t.Corner,end));
+                var point=along<first ? Vector2.MoveTowards(t.Start,t.Corner,along) : Vector2.MoveTowards(t.Corner,end,along-first);
+                next.x=point.x; next.y=point.y;
+            }
             bool moved=root!=next;
             if(moved) anim.transform.position=next;
             if(anim.FlipX!=d.FlipX) anim.FlipX=d.FlipX;
@@ -156,8 +177,10 @@ namespace Queyang.Game
             }
             var data=anim.GetBatchInstanceData();
             if(data==null) return;
-            data.SetOverrideTransformMatrix(new Matrix2x3 { m00=p.M00, m01=p.M01, m02=Mathf.Lerp(t.MatrixStart.x,p.M02,f)+advance.x,
-                m10=p.M10, m11=p.M11, m12=Mathf.Lerp(t.MatrixStart.y,p.M12,f)+advance.y });
+            data.SetOverrideTransformMatrix(new Matrix2x3 { m00=p.M00, m01=p.M01,
+                m02=t.FollowCorner && f<1 ? next.x+Mathf.Lerp(t.MatrixStart.x-t.Start.x,p.M02-p.X,f) : Mathf.Lerp(t.MatrixStart.x,p.M02,f)+advance.x,
+                m10=p.M10, m11=p.M11,
+                m12=t.FollowCorner && f<1 ? next.y+Mathf.Lerp(t.MatrixStart.y-t.Start.y,p.M12-p.Y,f) : Mathf.Lerp(t.MatrixStart.y,p.M12,f)+advance.y });
             if(newPose || moved || f<1 || t.Duration>0) anim.SetDirty();
 
         }
