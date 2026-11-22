@@ -365,6 +365,7 @@ namespace Queyang.Game
                 {
                     anim.gameObject.name = d.Name;
                     anim.GetComponent<KSelectable>().SetName(d.Name);
+                    NameDisplayScreen.Instance?.UpdateName(anim.gameObject);
                 }
                 // A newer unreliable motion sample must not suppress name/selector
                 // updates from the reliable identity stream.
@@ -451,6 +452,8 @@ namespace Queyang.Game
             collider.size = new Vector2(.75f, 1.8f); collider.offset = new Vector2(0, .9f);
             marker.AddComponent<KPrefabID>().PrefabTag = new Tag(MinionConfig.ID);
             marker.AddComponent<KSelectable>().SetName(dupe.Name);
+            var overlay=prefab.GetComponent<CharacterOverlay>();
+            if(overlay!=null) marker.AddComponent<CharacterOverlay>().shouldShowName=overlay.shouldShowName;
             marker.AddComponent<NativeDupeIdentityMarker>().HostId = dupe.SaveId;
             marker.AddComponent<NativePersonMenu>();
             SymbolOverrideControllerUtil.AddToPrefab(marker);

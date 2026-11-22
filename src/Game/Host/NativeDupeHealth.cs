@@ -37,7 +37,9 @@ namespace Queyang.Game
                 if(entry==null)
                 {
                     if(fill<0) return;
-                    display.AddNewEntry(body.gameObject);
+                    var overlay=body.GetComponent<CharacterOverlay>();
+                    if(overlay!=null) overlay.Register();
+                    else display.AddNewEntry(body.gameObject);
                     entry=entryFor(display,body.gameObject);
                 }
                 if(entry.healthBar==null)

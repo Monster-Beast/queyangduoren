@@ -79,6 +79,11 @@ namespace Queyang.Integration
             if(!host) SteamMatchmaking.SetLobbyMemberData(room,key,"1");
             log("DUAL_HEALTH_BAR step="+step+" id="+id+" shown="+shown+" fill="+bar.PercentFull+
                 " colour="+ColorUtility.ToHtmlStringRGBA(bar.barColor));
+            var body=target.GetComponent<KBatchedAnimController>();
+            log("DUAL_HEALTH_BODY step="+step+" id="+id+" name="+info.nameLabel?.text+
+                " nameVisible="+(info.nameLabel!=null && info.nameLabel.isActiveAndEnabled)+
+                " visible="+body.IsVisible()+" enabled="+body.enabled+" tint="+ColorUtility.ToHtmlStringRGBA(body.TintColour)+
+                " action="+body.currentAnim.HashValue+" index="+body.GetCurrentFrameIndex()+" pos="+body.transform.position);
             step++;frame=null;stable=0;
             return step>=3;
         }
