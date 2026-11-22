@@ -15,6 +15,8 @@ param(
     [switch]$SkipPerson,
     [switch]$SkipWork,
     [switch]$CheckBuildings,
+    [switch]$PrepareFacilityRange,
+    [string]$FacilityRangeManifest,
     [switch]$CheckConstruction,
     [switch]$CheckFloor,
     [switch]$CheckAreaDig,
@@ -60,6 +62,13 @@ $SandboxStart=(Resolve-Path -LiteralPath $SandboxStart).Path
 $GameDir=(Resolve-Path -LiteralPath $GameDir).Path
 $SavePath=(Resolve-Path -LiteralPath $SavePath).Path
 $PackagePath=(Resolve-Path -LiteralPath $PackagePath).Path
+$facilityStations=''
+if ($FacilityRangeManifest) {
+    if ($PrepareFacilityRange) { throw 'Prepare the range before requesting its readback.' }
+    $manifest=Get-Content -Raw -LiteralPath (Resolve-Path -LiteralPath $FacilityRangeManifest).Path | ConvertFrom-Json
+    if (($manifest.stations.prefab -join ',') -cne 'RationBox,WashBasin,MedicalCot') { throw 'Unexpected facility range layout.' }
+    $facilityStations=($manifest.stations | ForEach-Object { '{0}:{1}' -f [int]$_.cell,[int]$_.id }) -join ','
+}
 $qaRoot=Join-Path $repo 'artifacts/qa'
 $run=Get-CheckedPath $qaRoot (Join-Path $qaRoot ('steam-dual-'+[Guid]::NewGuid().ToString('N')))
 [IO.Directory]::CreateDirectory($run) | Out-Null
@@ -142,8 +151,11 @@ try {
 } finally { $module.Dispose(); $resolver.Dispose() }
 [IO.File]::Replace("$firstpass.isolated",$firstpass,[System.Management.Automation.Language.NullString]::Value)
 
-Copy-PrivateGame $copy (Join-Path $run 'guest-game')
-$roles=@('host','guest')
+$roles=@('host')
+if (!$PrepareFacilityRange) {
+    Copy-PrivateGame $copy (Join-Path $run 'guest-game')
+    $roles+=@('guest')
+}
 $drivers=@{}
 foreach ($role in $roles) {
     $base=Join-Path $run $role
@@ -174,6 +186,8 @@ foreach ($role in $roles) {
         QY_DUAL_SELF=$self; QY_DUAL_FRIEND=$friend; QY_DUAL_HOST_ID=$HostSteamId; QY_DUAL_WAIT_INVITE_SECONDS=([string]$InviteWaitSeconds); QY_DUAL_ACCEPT_INVITE=([int]$AcceptDeliveredInvite.IsPresent).ToString()
     }
     $values.QY_CHECK_BUILDINGS=([int]$CheckBuildings.IsPresent).ToString()
+    $values.QY_PREPARE_FACILITY_RANGE=([int]$PrepareFacilityRange.IsPresent).ToString()
+    $values.QY_FACILITY_RANGE_STATIONS=$facilityStations
     $values.QY_CONSTRUCTION_RANGE=([int]$CheckConstruction.IsPresent).ToString()
     $values.QY_FLOOR_RANGE=([int]$CheckFloor.IsPresent).ToString()
     $values.QY_AREA_DIG_RANGE=([int]$CheckAreaDig.IsPresent).ToString()
@@ -313,7 +327,17 @@ try {
             }
             if ($lines -match '^FAIL ') { throw "Game reported failure in $role. See private report." }
             if ($lines -match '^NATIVE_RESTART_REQUIRED') { Restart-Player $driver $report; continue }
-            if ($role -eq 'host' -and !$drivers.guest.started) {
+            if ($PrepareFacilityRange -and $role -eq 'host' -and $lines -match '^PASS FACILITY_RANGE_PREPARED\b') {
+                foreach ($leaf in 'FacilityRange.sav','facility-range.json','facility-range-overview.png') {
+                    $out=Join-Path $driver.base $leaf
+                    if (!(Test-Path -LiteralPath $out) -or (Get-Item -LiteralPath $out).Length -lt 45) {
+                        throw "Missing prepared range artifact $leaf."
+                    }
+                }
+                Write-Output "PASS facility range prepared in $($driver.base)"
+                return
+            }
+            if (!$PrepareFacilityRange -and $role -eq 'host' -and !$drivers.guest.started) {
                 $mark=@($lines -match '^DUAL_HOST_LOBBY [0-9]+$')
                 if ($mark.Count) {
                     $drivers.guest.env.QY_DUAL_LOBBY=$mark[-1].Split(' ')[1]
@@ -519,6 +543,21 @@ try {
                 if (!($lines -match "^DUAL_STORAGE_RENDERED stage=$stage ") -or !(Test-Path $file) -or (Get-Item $file).Length -lt 45) {
                     throw "Missing rendered building panel evidence for $role stage $stage."
                 }
+            }
+        }
+    }
+    if ($FacilityRangeManifest) {
+        foreach ($role in $roles) {
+            $d=$drivers[$role]
+            $report=Get-Physical $d $d.env.QY_SMOKE_REPORT
+            foreach ($station in 'RationBox','WashBasin','MedicalCot') {
+                if (!(Select-String -LiteralPath $report -Pattern "^FACILITY_RANGE_STATION role=$role prefab=$station " -Quiet)) {
+                    throw "Missing $role range station $station."
+                }
+                $dest=Join-Path $d.base "facility-$role-$station.png"
+                $src=Get-Physical $d $dest
+                if (!(Test-Path -LiteralPath $src) -or (Get-Item -LiteralPath $src).Length -lt 45) { throw "Missing $role screenshot for $station." }
+                if ($src -ne $dest) { Copy-Item -LiteralPath $src -Destination $dest }
             }
         }
     }

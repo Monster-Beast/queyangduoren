@@ -23,6 +23,7 @@ namespace Queyang.Integration
         readonly SteamDualWork work=new SteamDualWork();
         readonly SteamRoomControls roomControls=new SteamRoomControls();
         readonly SteamDualBuildings buildings=new SteamDualBuildings();
+        readonly FacilityRangeWitness facilityRange=new FacilityRangeWitness();
         readonly SteamDualFallingOre fallingOre=new SteamDualFallingOre();
         readonly SteamDualBuriedItems buriedItems=new SteamDualBuriedItems();
         readonly SteamDualLighting lighting=new SteamDualLighting();
@@ -278,6 +279,7 @@ namespace Queyang.Integration
                 case Phase.Invite: Join(); break;
                 case Phase.Loading: WorldReady(); break;
                 case Phase.Dig:
+                    if (!facilityRange.Check(lobby,self,false,log)) break;
                     if (!alertRange.Check(lobby,self,false,round,Grid.InvalidCell,log)) break;
                     if (!sweepRange.Check(lobby,self,false,round,log)) break;
                     if (!powerRange.Check(lobby,self,false,round,log)) break;

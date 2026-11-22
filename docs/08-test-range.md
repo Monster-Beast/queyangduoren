@@ -22,6 +22,40 @@
 | Beautiful Galaxy | 2026-09-27 | 第 88 周期，9 名复制人，启用 `EXPANSION1_ID` 和 `DLC2_ID` 至 `DLC5_ID` | [下载原始存档](https://raw.githubusercontent.com/nomansheikh/oni-duplicity/463279777c1e7266411a3ddccc2e691847b73133/test-data/saves/beautiful-galaxy.sav) |
 | Beautiful Galaxy（仓库文件名标注 744825） | 2026-09-27 | 第 89 周期，9 名复制人，同样启用了五项 DLC。文件名中的构建号与当前测试的 764025 不同 | [下载原始存档](https://raw.githubusercontent.com/nomansheikh/oni-duplicity/cc511c245fc7aee1102cc6e685b63eee26631ccb/test-data/saves/beautiful-galaxy-build-744825.sav) |
 
+## 建筑侧栏靶场
+
+从第 3 周期的基础版隔离档生成 `artifacts/qa/facility-range/FacilityRange.sav`。三个工位都在基地右侧同一层。生成器用原版建筑实例保存起点，附带地图坐标、建筑存档 ID、储量和病人生命值。每轮从同一个文件复制一份开房。
+
+| 工位 | 坐标 | 起始状态 | 后续操作检查 |
+|---|---|---|---|
+| 食物储存箱 | (140, 194) | 6 kg 食物，容量 150 kg | 客机用原版侧栏调整过滤和优先级，核对两端储量和重连结果。 |
+| 洗手池 | (143, 194) | 双向使用，40 kg 清水，10 kg 污水 | 客机切换原版方向按钮，记录供水提示、实际洗手及表计变化。 |
+| 医疗床 | (146, 194) | 未分配，复制人 ID 79 生命值 55/100 | 客机通过原版侧栏分配和取消，记录任务、占用和治疗阶段。 |
+
+生成时从基础档副本开始，`-PrepareFacilityRange` 启动单个隔离主机。成功后，运行目录的 `host` 下会出现新存档、工位清单和主机全景。把这三个文件放在同一目录备用。
+
+~~~powershell
+$test = @{
+    HostSteamId = $hostSteamId
+    GuestSteamId = $guestSteamId
+    PackagePath = '.\dist\QueyangCoop-0.3.2-printing-preview.zip'
+}
+.\tests\Integration\Game\steam-dual.ps1 @test -SavePath '.\artifacts\qa\range-starter\Fixture.sav' -PrepareFacilityRange
+~~~
+
+用新档开房，并传入同次生成的清单。两端会根据格号和建筑 ID 打开各工位的原版详情。预期每端三条 `FACILITY_RANGE_STATION` 和三张独立的 `facility-*.png`，另有两轮入房截图。
+
+~~~powershell
+$range = '.\artifacts\qa\facility-range'
+$test.SavePath = "$range\FacilityRange.sav"
+$test.FacilityRangeManifest = "$range\facility-range.json"
+.\tests\Integration\Game\steam-dual.ps1 @test -SkipManagement
+~~~
+
+已回读的靶场 SHA-256 为 `996A809781C8ED0553994CD640ADC4A4ABB85B304CF104040A59E079A0AE68BF`。同机双 Steam 运行 `f2a68e0e7e3a4942bbaea31f6a9847e5` 在两端读到了相同的三个建筑 ID 和表中的起始状态。两次入房以及带 Mod、无 Mod 的独立读档均通过。对照图左侧为主机，右侧为客机。[工位全景](evidence/qa/facility-range-overview.jpg) · [食物储存箱](evidence/qa/facility-range-RationBox.jpg) · [洗手池](evidence/qa/facility-range-WashBasin.jpg) · [医疗床](evidence/qa/facility-range-MedicalCot.jpg)
+
+本次记录覆盖工位准备、两端选中与初始状态。筛选和优先级修改、切换方向后实际洗手、分配医疗床后治疗，以及这些操作的录像，仍按上表验收。
+
 ## 自动施工工位
 
 当前 `-CheckConstruction` 用房主原版放置入口在附近放一个储物箱蓝图。双方随后对照三个阶段。下单和放置使用原版，运料、施工以及生成成品由房主原版模拟完成。
