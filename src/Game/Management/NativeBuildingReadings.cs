@@ -17,6 +17,58 @@ namespace Queyang.Game
         static int inspectedId, inspectedCell;
         static string buildingReadout;
         static CollapsibleDetailContentPanel visibleInfoPanel;
+        static CollapsibleDetailContentPanel statusPanel;
+        static GameObject statusTarget;
+        static string statusReadout;
+
+        static bool MatchesStatusTarget() => statusTarget!=null && inspectedId>0 &&
+            NativeWorldMirror.GetBuildingSelectable(inspectedCell,inspectedId)?.gameObject==statusTarget;
+
+        static void DrawStatuses(CollapsibleDetailContentPanel panel)
+        {
+            int count=0;
+            if(!string.IsNullOrEmpty(statusReadout))
+                foreach(string line in statusReadout.Split('\n'))
+                    panel.SetLabel("CoopStatus"+count++,line,"");
+            panel.Commit();
+            panel.gameObject.SetActive(count>0);
+        }
+
+        [HarmonyPatch(typeof(SimpleInfoScreen),"OnSelectTarget")]
+        static class SelectStatusTarget
+        {
+            static void Prefix(GameObject __0, CollapsibleDetailContentPanel ___statusItemPanel)
+            {
+                if(!NativeGuestScene.Ready || !CoopSession.IsNativeClient || __0==null ||
+                    (__0.GetComponent<Building>()==null && __0.GetComponent<NativeBuildingIdentity>()==null)) return;
+                statusTarget=__0; statusPanel=___statusItemPanel;
+            }
+        }
+
+        [HarmonyPatch(typeof(SimpleInfoScreen),"DoAddStatusItem")]
+        static class AddOriginalStatus
+        {
+            static bool Prefix() => !NativeGuestScene.Ready || !CoopSession.IsNativeClient || statusTarget==null;
+        }
+
+        [HarmonyPatch(typeof(SimpleInfoScreen),"OnDeselectTarget")]
+        static class DeselectStatusTarget
+        {
+            static void Prefix()
+            {
+                if(statusPanel!=null) statusPanel.Commit();
+                statusTarget=null; statusPanel=null;
+            }
+        }
+
+        [HarmonyPatch(typeof(SimpleInfoScreen),"Refresh")]
+        static class RefreshStatusTarget
+        {
+            static void Postfix()
+            {
+                if(statusPanel!=null && MatchesStatusTarget()) DrawStatuses(statusPanel);
+            }
+        }
 
         static void PollBuildingReadings(KSelectable selected)
         {
@@ -52,15 +104,6 @@ namespace Queyang.Game
             }
             var op = target.GetComponent<Operational>();
             if (op != null) lines.Add(op.IsActive ? "运行中" : op.IsOperational ? "待机" : "停止运行");
-            var selectable = target.GetComponent<KSelectable>();
-            var statuses = selectable == null ? null : selectable.GetStatusItemGroup();
-            if (statuses != null)
-                foreach (var entry in statuses)
-                {
-                    string name = entry.GetName();
-                    if (!string.IsNullOrWhiteSpace(name)) lines.Add(name);
-                    if (lines.Count >= 12) break;
-                }
             var hp = target.GetComponent<BuildingHP>();
             if (hp != null) lines.Add($"耐久 {hp.HitPoints}/{hp.MaxHitPoints}");
             var battery = target.GetComponent<Battery>();
@@ -91,7 +134,27 @@ namespace Queyang.Game
             }
             return Prefix + "g/" + id.ToString(CultureInfo.InvariantCulture) + "/" +
                 Convert.ToBase64String(Encoding.UTF8.GetBytes(text.ToString())).Replace('/', '_') +
-                (NativeFacilityStorage.Supported(target)?"/"+NativeFacilityStorage.Encode(target,page):"");
+                "/" + (NativeFacilityStorage.Supported(target)?NativeFacilityStorage.Encode(target,page):"-") +
+                "/" + EncodeStatuses(target);
+        }
+
+        static string EncodeStatuses(GameObject target)
+        {
+            var names=new StringBuilder();
+            int used=0;
+            var group=target.GetComponent<KSelectable>()?.GetStatusItemGroup();
+            if(group!=null)
+                foreach(var entry in group)
+                {
+                    if(entry.item.showInHoverCardOnly) continue;
+                    string name=entry.GetName();
+                    if(string.IsNullOrWhiteSpace(name)) continue;
+                    int bytes=Encoding.UTF8.GetByteCount(name)+1;
+                    if(used+bytes>1400) continue;
+                    if(names.Length>0) names.Append('\n');
+                    names.Append(name); used+=bytes;
+                }
+            return Convert.ToBase64String(Encoding.UTF8.GetBytes(names.ToString())).Replace('/','_');
         }
 
         static void AddPort(List<string> lines, string label, ConduitType type, int cell)
@@ -107,8 +170,13 @@ namespace Queyang.Game
 
         static void ReceiveReadings(string[] fields)
         {
-            if ((fields.Length!=4 && fields.Length!=5) || Number(fields[2])!=inspectedId || inspectedId<=0) return;
-            if(fields.Length==5) ReceiveStoragePanel(fields[4]);
+            if (fields.Length<4 || fields.Length>6 || Number(fields[2])!=inspectedId || inspectedId<=0) return;
+            if(fields.Length>=5 && fields[4]!="-") ReceiveStoragePanel(fields[4]);
+            if(fields.Length==6)
+            {
+                statusReadout=Encoding.UTF8.GetString(Convert.FromBase64String(fields[5].Replace('_','/')));
+                if(statusPanel!=null && MatchesStatusTarget()) DrawStatuses(statusPanel);
+            }
             string text = Encoding.UTF8.GetString(Convert.FromBase64String(fields[3].Replace('_', '/')));
             if (text == buildingReadout) return;
             buildingReadout = text;

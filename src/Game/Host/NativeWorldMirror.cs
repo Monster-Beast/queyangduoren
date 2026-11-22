@@ -17,6 +17,7 @@ namespace Queyang.Game
         static readonly List<int> expiredDupes = new List<int>();
         static readonly HashSet<KBatchedAnimController> hidden = new HashSet<KBatchedAnimController>();
         static GameObject markerRoot;
+        internal static Transform DisplayRoot => markerRoot==null ? null : markerRoot.transform;
 
         sealed class Marker
         {

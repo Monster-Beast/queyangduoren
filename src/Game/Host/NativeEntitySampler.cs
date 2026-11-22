@@ -195,16 +195,24 @@ namespace Queyang.Game
 
         internal static void ReadStorage(GameObject obj, ColonyEntity e, NativeFacilityStorage.Snapshot details=null)
         {
-            var stores = obj.GetComponents<Storage>();
+            IStorage[] stores = details==null ? obj.GetComponents<Storage>() : obj.GetComponentsInChildren<IStorage>();
+            if(details==null && e.Kind==ColonyEntityKind.Storage) e.StorageMeter=NativeFacilityStorage.SampleFoodMeter(obj);
+            var seen = details==null ? null : new HashSet<GameObject>();
+            var lists = details==null ? null : new HashSet<List<GameObject>>();
+            IStorage washStore = details!=null && obj.GetComponent<HandSanitizer>()!=null ? obj.GetComponent<Storage>() : null;
             var totals = new Dictionary<int, ColonyIngredient>();
             float stored = 0, capacity = 0, needed = 0;
             int stacks = 0;
             foreach (var storage in stores)
             {
-                capacity += Amount(storage.capacityKg);
-                foreach (var item in storage.items)
+                if(details!=null && storage!=washStore && !storage.ShouldShowInUI()) continue;
+                var items = storage.GetItems();
+                if(items==null || (lists!=null && !lists.Add(items))) continue;
+                float limit=details==null ? ((Storage)storage).capacityKg : storage.Capacity();
+                capacity=(float)Math.Min(float.MaxValue,(double)capacity+Amount(limit,float.IsPositiveInfinity(limit)?float.MaxValue:0));
+                foreach (var item in items)
                 {
-                    if (item == null) continue;
+                    if (item == null || (seen!=null && !seen.Add(item))) continue;
                     var primary = item.GetComponent<PrimaryElement>(); var prefab = item.GetComponent<KPrefabID>();
                     if (primary == null || prefab == null) continue;
                     int hash = prefab.PrefabTag.GetHash();

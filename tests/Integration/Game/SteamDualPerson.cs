@@ -15,6 +15,7 @@ namespace Queyang.Integration
     internal sealed class SteamDualPerson
     {
         GameObject printed;
+        readonly SteamPopulation census=new SteamPopulation();
         Clinic clinic;
         GameObject testPlan;
         int step,done,loggedStep=-1;
@@ -108,9 +109,10 @@ namespace Queyang.Integration
 
         internal bool Host(CSteamID lobby,int round,Action<string> log)
         {
-            if (Early || done==round) return true;
+            if (Early) return true;
+            if (done==round) return census.Check(lobby,true,round==1?"printed":"rejoined",id,log);
             var original=Original(lobby);
-            if (round==2) { done=2; return true; }
+            if (round==2) { done=2; return false; }
             if (step==0)
             {
                 int at=Grid.PosToCell(original); Grid.CellToXY(at,out int x,out int y);
@@ -148,19 +150,20 @@ namespace Queyang.Integration
                 log("DUAL_HOST_PERSON_SETUP afterBaseline=True newId="+id+" testPatient=True cot="+bx+","+by+" skill="+skill+" points="+points+" food="+food);
                 step++;return false;
             }
-            if (!r.HasMasteredSkill(skill) || r.TargetHat!=hat || original.GetComponent<ConsumableConsumer>().IsPermitted(food)==originalAllowed ||
+            if (!r.HasMasteredSkill(skill) || (r.TargetHat??r.CurrentHat)!=hat || original.GetComponent<ConsumableConsumer>().IsPermitted(food)==originalAllowed ||
                 !clinic.GetComponent<Assignable>().IsAssignedTo(printed.GetComponent<MinionIdentity>().assignableProxy.Get())) return false;
             if (r.AvailableSkillpoints!=points-1) throw new InvalidDataException("Newcomer was charged the wrong number of skill points");
             Set(lobby,"ack","1");done=1;
             log("DUAL_HOST_PERSON_CONFIRMED newMastery=True newHat=True clinicAssigned=True nativeFoodChanged=True");
-            return true;
+            return false;
         }
+        internal bool Death(CSteamID lobby,bool host,Action<string> log) => Early || census.Death(lobby,host,printed,id,log);
         internal void Baseline(CSteamID lobby,Action<string> log)
         {
             if (Early) return;
             var newcomer=Components.LiveMinionIdentities.Items.First(d=>d!=null && d.GetComponent<KPrefabID>().InstanceID==int.Parse(Data(lobby,"id")));
             var resume=newcomer.GetComponent<MinionResume>();
-            if (!resume.HasMasteredSkill(Data(lobby,"skill")) || resume.TargetHat!=Data(lobby,"hat") ||
+            if (!resume.HasMasteredSkill(Data(lobby,"skill")) || (resume.TargetHat??resume.CurrentHat)!=Data(lobby,"hat") ||
                 Original(lobby).GetComponent<ConsumableConsumer>().IsPermitted(Data(lobby,"food"))==(Data(lobby,"allowed")=="1"))
                 throw new InvalidDataException("Saved newcomer skill/hat or consumption setting missing on rejoin");
             // A patient may have left after recovering while the colony ran.
@@ -178,8 +181,9 @@ namespace Queyang.Integration
         }
         internal bool Guest(CSteamID lobby,int round,Action<string> log)
         {
-            if (Early || done==round) return true;
-            if (round==2) {done=2;return true;}
+            if (Early) return true;
+            if (done==round) return census.Check(lobby,false,round==1?"printed":"rejoined",id,log);
+            if (round==2) {done=2;return false;}
             if (!int.TryParse(Data(lobby,"id"),out id)) return false;
             var original=Original(lobby);
             food=Data(lobby,"food"); originalAllowed=Data(lobby,"allowed")=="1";
@@ -245,7 +249,7 @@ namespace Queyang.Integration
                     if (!screenshot.Requested) {screenshot.Capture();break;}
                     if (!screenshot.Complete) break;
                     log("DUAL_GUEST_PERSON_CONFIRMED newNativeUserMenu=True visualProxyOnly=True learned=True selectedHat=True medicalBed=True foodTable=True");
-                    SelectTool.Instance.Select(null,false);done=1;return true;
+                    SelectTool.Instance.Select(null,false);done=1;return false;
             }
             return false;
         }

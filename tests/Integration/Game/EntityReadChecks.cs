@@ -64,12 +64,47 @@ namespace Queyang.Integration
                     float measured = 0;
                     foreach (var store in obj.GetComponents<Storage>()) measured += store.ExactMassStored();
                     Close(e.Value, measured, "container mass");
+                    if(NativeFacilityStorage.Supported(obj)) CheckPanel(obj);
                 }
                 kinds.Add(kind);
                 log(FormattableString.Invariant($"FEATURE DETAIL native entity={kind} id={id} cell={cell} kg={e.Mass:0.###} value={e.Value:0.###}"));
                 return true;
             }
             return false;
+        }
+        static void CheckPanel(GameObject obj)
+        {
+            var actual=NativeFacilityStorage.Decode(NativeFacilityStorage.Encode(obj,0));
+            var wash=obj.GetComponent<HandSanitizer>();
+            IStorage washStore=wash==null?null:obj.GetComponent<Storage>();
+            var items=new HashSet<GameObject>();
+            var masses=new Dictionary<int,float>();
+            float total=0, available=0;
+            foreach(var store in obj.GetComponentsInChildren<IStorage>())
+            {
+                if(!store.ShouldShowInUI() && store!=washStore) continue;
+                foreach(var item in store.GetItems())
+                {
+                    if(item==null || !items.Add(item)) continue;
+                    var primary=item.GetComponent<PrimaryElement>();
+                    if(primary==null || item.GetComponent<KPrefabID>()==null) continue;
+                    int tag=item.PrefabID().GetHash();
+                    masses.TryGetValue(tag,out float prior);
+                    masses[tag]=prior+primary.Mass;
+                    total+=primary.Mass;
+                    var pickup=item.GetComponent<Pickupable>();
+                    available+=primary.Mass*(pickup!=null && pickup.TotalAmount>0 ?
+                        Mathf.Clamp01(pickup.UnreservedAmount/pickup.TotalAmount):1);
+                }
+            }
+            Close(actual.Stored,total,"contents panel total");
+            Close(actual.Available,available,"contents panel available");
+            if(actual.Total!=masses.Count) throw new InvalidOperationException("Contents panel item type count mismatch");
+            for(int page=0;page<actual.Pages;page++)
+            {
+                var part=page==0?actual:NativeFacilityStorage.Decode(NativeFacilityStorage.Encode(obj,page));
+                foreach(var row in part.Rows.Values) Close(row.Mass,masses[row.Tag],"contents panel item");
+            }
         }
         static void Close(float a,float b,string name)
         {

@@ -247,6 +247,15 @@ try {
     }
     if (!$drivers.host.done -or !$drivers.guest.done) { throw 'Two-account Steam fixture timed out. See private reports.' }
     foreach ($endpoint in $roles) { Confirm-DualRecording $drivers[$endpoint] $recorders[$endpoint] }
+    foreach ($endpoint in $roles) {
+        $d=$drivers[$endpoint]
+        $report=Get-Physical $d $d.env.QY_SMOKE_REPORT
+        foreach ($pattern in '^DUAL_MATCHED_RENDER ','^DUAL_DIG_TINTS ') {
+            if (!(Select-String -LiteralPath $report -Pattern $pattern -Quiet)) { throw "Missing $endpoint evidence for $pattern." }
+        }
+        $shot=Get-Physical $d (Join-Path $d.base "matched-$endpoint.png")
+        if (!(Test-Path $shot) -or (Get-Item $shot).Length -lt 45) { throw "Missing $endpoint matched scene screenshot." }
+    }
     foreach ($evidence in @(@('host','^DUAL_HOST_LOCAL_ORDER '),@('guest','^DUAL_GUEST_HOST_ORDER '),
         @('host','^DUAL_ORDER_OWNERS .*bothTooltipsRepainted=True$'),@('guest','^DUAL_ORDER_OWNERS .*bothTooltipsRepainted=True$'),
         @('host','^DUAL_LEGACY_ORDER '),@('guest','^DUAL_LEGACY_ORDER '))) {
@@ -259,6 +268,18 @@ try {
         $d=$drivers[$entry[0]]
         $path=Get-Physical $d (Join-Path $d.base $entry[1])
         if (!(Test-Path $path) -or (Get-Item $path).Length -lt 45) { throw "Missing screenshot $($entry[1])." }
+    }
+    if ($CheckBuildings) {
+        foreach ($role in $roles) {
+            $d=$drivers[$role]
+            $lines=Get-Content -LiteralPath (Get-Physical $d $d.env.QY_SMOKE_REPORT)
+            foreach ($stage in 0..3) {
+                $file=Get-Physical $d (Join-Path $d.base "building-$role-$stage.png")
+                if (!($lines -match "^DUAL_STORAGE_RENDERED stage=$stage ") -or !(Test-Path $file) -or (Get-Item $file).Length -lt 45) {
+                    throw "Missing rendered building panel evidence for $role stage $stage."
+                }
+            }
+        }
     }
     if (!$SkipManagement) {
         foreach ($role in $roles) {
@@ -287,6 +308,13 @@ try {
         $p=Get-Player $d
         if ($p -and !$p.HasExited) { $p.Kill(); [void]$p.WaitForExit(10000) }
         if ($role -eq 'guest') {
+            if ($CheckBuildings) {
+                foreach ($stage in 0..3) {
+                    $dest=Join-Path $d.base "building-guest-$stage.png"
+                    $src=Get-Physical $d $dest
+                    if ($src -ne $dest -and (Test-Path $src)) { Copy-Item -LiteralPath $src -Destination $dest }
+                }
+            }
             foreach ($leaf in @('guest.report','player.log','matched-guest.png','dual-guest-person.png','dual-guest-skills.png','dual-guest-schedule-1.png','dual-guest-schedule-2.png','dual-guest-priorities-1.png','dual-guest-priorities-2.png','entry-guest-1.png','entry-guest-2.png','dupe-motion.csv','dig-fx.csv','dual-guest-dig.png','dual-guest-resources.png','dual-guest-1.png','dual-guest-2.png')) {
                 $dest=Join-Path $d.base $leaf
                 $src=Get-Physical $d $dest
@@ -313,7 +341,8 @@ $joins=@(foreach ($line in $guestReport) {
     }
 })
 if ($joins.Count -ne 2 -or $joins[0].round -ne 1 -or $joins[1].round -ne 2) { throw 'Missing exact join methods for both rounds.' }
-[ordered]@{packageSha256=$before[0];saveSha256=$before[1];protectedInputsUnchanged=$true;joins=$joins} |
+[ordered]@{packageSha256=$before[0];saveSha256=$before[1];protectedInputsUnchanged=$true;joins=$joins
+    checks=[ordered]@{buildings=$CheckBuildings.IsPresent;skills=!$SkipManagement;person=!$SkipManagement -and !$SkipPerson;work=!$SkipManagement -and !$SkipWork}} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $run 'result.json') -Encoding UTF8
 Write-Output "PASS both Steam game clients; evidence in $run"
 } finally {

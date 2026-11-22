@@ -129,10 +129,11 @@ namespace Queyang.Game
                             Add("learn/"+id+"/"+stamp+"/"+skill.Id,"学习 "+skill.Name+" · "+r.AvailableSkillpoints+" 点可用");
                     break;
                 case 1:
-                    string hats="hat/"+id+"/"+Digest(r.TargetHat??"")+"/";
-                    if (!string.IsNullOrEmpty(r.TargetHat)) Add(hats+"-","摘下职业帽");
+                    string selected=SelectedHat(r);
+                    string hats="hat/"+id+"/"+Digest(selected??"")+"/";
+                    if (!string.IsNullOrEmpty(selected)) Add(hats+"-","摘下职业帽");
                     foreach (var h in r.GetAllHats())
-                        if (!string.IsNullOrEmpty(h.Hat) && h.Hat!=r.TargetHat) Add(hats+h.Hat,"选择职业帽 · "+h.Source);
+                        if (!string.IsNullOrEmpty(h.Hat) && h.Hat!=selected) Add(hats+h.Hat,"选择职业帽 · "+h.Source);
                     break;
                 case 2:
                     var consumer=d.GetComponent<ConsumableConsumer>();

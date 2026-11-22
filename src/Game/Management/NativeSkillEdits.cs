@@ -8,6 +8,7 @@ namespace Queyang.Game
 {
     internal static partial class NativeManagement
     {
+        internal static string SelectedHat(MinionResume r) => string.IsNullOrEmpty(r.TargetHat) ? r.CurrentHat : r.TargetHat;
         // Experience can tick while a player is reading the tree. Only changes that
         // affect a spending decision invalidate the request.
         static string SkillStamp(MinionResume resume)
@@ -47,9 +48,9 @@ namespace Queyang.Game
             else
             {
                 string hat=p[4]=="-" ? null : p[4];
-                if (Digest(resume.TargetHat??"")!=p[3]) return "ERROR 职业帽选择已经变化";
+                if (Digest(SelectedHat(resume)??"")!=p[3]) return "ERROR 职业帽选择已经变化";
                 if (hat!=null && !resume.GetAllHats().Any(h=>h.Hat==hat)) return "ERROR 当前无法选择这顶职业帽";
-                if ((resume.TargetHat??"")!=(hat??""))
+                if ((SelectedHat(resume)??"")!=(hat??""))
                 {
                     // Mirror SkillsScreen.OnHatDropEntryClick, including the delay between
                     // a newly learned profession and owning its physical hat.
@@ -94,7 +95,7 @@ namespace Queyang.Game
                 if (!NativeGuestScene.Active) return true;
                 if (!NativeGuestScene.Ready || (__0!=null && !(__0 is HatListable))) return false;
                 var resume=SelectedSkillResume(__instance);
-                if (resume!=null) Send("hat/"+SaveId(resume.gameObject)+"/"+Digest(resume.TargetHat??"")+"/"+((__0 as HatListable)?.hat??"-"));
+                if (resume!=null) Send("hat/"+SaveId(resume.gameObject)+"/"+Digest(SelectedHat(resume)??"")+"/"+((__0 as HatListable)?.hat??"-"));
                 return false;
             }
         }

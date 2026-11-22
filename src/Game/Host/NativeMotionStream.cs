@@ -15,6 +15,7 @@ namespace Queyang.Game
             bool paused=SpeedControlScreen.Instance.IsPaused;
             var world=ClusterManager.Instance?.activeWorld;
             if(world==null) yield break;
+            foreach (var packet in NativeFallingOre.Capture(world,left,bottom)) yield return packet;
             int tick=Time.frameCount;
             using(var stream=new MemoryStream())
             using(var w=new BinaryWriter(stream))
@@ -51,6 +52,7 @@ namespace Queyang.Game
         }
         internal static void Apply(byte[] packet)
         {
+            if (NativeFallingOre.IsPacket(packet)) { NativeFallingOre.Apply(packet); return; }
             if(packet.Length<9+MinRowBytes || packet.Length>1100)
                 throw new InvalidDataException("Invalid character motion payload");
             using(var r=new BinaryReader(new MemoryStream(packet,false)))

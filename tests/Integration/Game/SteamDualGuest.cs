@@ -334,6 +334,7 @@ namespace Queyang.Integration
                     Set(Phase.Ack,60); break;
                 case Phase.Ack:
                     if (SteamMatchmaking.GetLobbyData(lobby,"qy_dual_ack")!=round.ToString(CultureInfo.InvariantCulture)) break;
+                    if (round==2 && !person.Death(lobby,false,log)) break;
                     string counters=GuestDiagnostics.Summary;
                     if (!counters.StartsWith("simStep=0 findChore=0 setChore=0 saveAttempts=0 worldStarts=0 ",StringComparison.Ordinal))
                         throw new InvalidOperationException("Unexpected local simulation: "+counters);

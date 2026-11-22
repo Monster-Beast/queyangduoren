@@ -203,6 +203,7 @@ namespace Queyang.Integration
                     if(Grid.Solid[cell] || Diggable.GetDiggable(cell)!=null ||
                         SteamMatchmaking.GetLobbyMemberData(lobby,friend,"qy_dual_done")!=RoundText()) return false;
                     if (!ownership.Retained(cell,true)) return false;
+                    if (round==2 && !person.Death(lobby,true,log)) return false;
                     if(actualWorker<0) throw new InvalidDataException("Dig cell cleared without a native duplicant work tick");
                     if(!SteamMatchmaking.SetLobbyData(lobby,"qy_dual_ack",RoundText()))
                         throw new InvalidOperationException("Could not acknowledge corroborated excavation");

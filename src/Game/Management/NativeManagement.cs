@@ -56,7 +56,7 @@ namespace Queyang.Game
         static void Send(string route, int x = 0, int y = 0)
         {
             if (!NativeGuestScene.Ready || !CoopSession.IsNativeClient || CoopSession.NativeView == null) return;
-            if (route == "research" || route == "overview" || route.StartsWith("schedules/", StringComparison.Ordinal) || route.StartsWith("schedule/", StringComparison.Ordinal) ||
+            if (route == "research" || route == "overview" || route.StartsWith("population/",StringComparison.Ordinal) || route.StartsWith("schedules/", StringComparison.Ordinal) || route.StartsWith("schedule/", StringComparison.Ordinal) ||
                 route.StartsWith("choices/", StringComparison.Ordinal) || route.StartsWith("diet/", StringComparison.Ordinal) ||
                 route.StartsWith("vitals/", StringComparison.Ordinal) || route.StartsWith("profile/", StringComparison.Ordinal) ||
                 route.StartsWith("proxy/", StringComparison.Ordinal) ||
@@ -77,6 +77,7 @@ namespace Queyang.Game
             }
             if (Time.unscaledTime < nextPoll) return;
             nextPoll = Time.unscaledTime + .7f;
+            if (ClusterManager.Instance?.activeWorld!=null) Send("population/"+ClusterManager.Instance.activeWorldId);
             var menu = ManagementMenu.Instance;
             var researchScreen = CurrentResearchScreen;
             if ((researchScreen != null && researchScreen.isActiveAndEnabled && researchScreen.IsScreenActive()) ||
@@ -116,6 +117,7 @@ namespace Queyang.Game
             observed.Clear(); pendingEdits.Clear(); lastResearch = null; nextPoll = nextEdit = 0; scheduleCursor = dupeCursor = 0;
             ResetBuilding();
             ResetColony();
+            populationWorld=-1;
             ResetVitals();
             ResetProfile();
         }
@@ -129,6 +131,9 @@ namespace Queyang.Game
             var p = action.Split('/');
             switch (p[1])
             {
+                case "population":
+                    if (p.Length==3) result=Population(Number(p[2]));
+                    break;
                 case "overview":
                     if (p.Length == 2) result = ColonyOverview();
                     break;
@@ -239,7 +244,8 @@ namespace Queyang.Game
             applying = true;
             try
             {
-                if (p[1] == "diet") ApplyDietPage(p);
+                if (p[1] == "pop" && p.Length==5) ApplyPopulation(Number(p[2]),Number(p[3]),Number(p[4]));
+                else if (p[1] == "diet") ApplyDietPage(p);
                 else if (p[1] == "permit") ApplyDiet(p);
                 else if (p[1] == "g") ReceiveReadings(p);
                 else if (p[1] == "sl" && p.Length == 4) ApplySchedulePage(p[2],p[3]);

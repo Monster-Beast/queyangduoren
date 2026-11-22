@@ -13,7 +13,7 @@ namespace Queyang.Game
         static readonly SortedDictionary<int,NativeFacilityStorage.Row> pendingStorageRows=new SortedDictionary<int,NativeFacilityStorage.Row>();
         static void ResetStoragePanel()
         {
-            nextStoragePage=0;storageState=null;storageRows.Clear();pendingStorageRows.Clear();
+            nextStoragePage=0;storageState=null;storageRows.Clear();pendingStorageRows.Clear();statusReadout=null;
         }
         static void ReceiveStoragePanel(string packed)
         {

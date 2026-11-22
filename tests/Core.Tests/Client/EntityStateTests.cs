@@ -9,6 +9,22 @@ namespace Queyang.Core.Tests
     public class EntityStateTests
     {
         [Fact]
+        public void DenseStoragePageCarriesNativeMeterAndReadsLegacyStorage()
+        {
+            var page=new ColonyEntityPage { Entities=Enumerable.Range(1,EntityStateCodec.MaxCount)
+                .Select(id=>new ColonyEntity { Id=id,Kind=ColonyEntityKind.Storage,StorageMeter=(byte)id,
+                    IngredientTypes=6,Contents=new ColonyIngredient[6] }).ToArray() };
+            var bytes=EntityStateCodec.Encode(page);
+            Assert.InRange(bytes.Length,1,ColonyView.MaxEntityPayload);
+            Assert.Equal(page.Entities.Select(e=>e.StorageMeter),EntityStateCodec.Decode(bytes).Entities.Select(e=>e.StorageMeter));
+            // A v3 storage record used the same fixed layout as an unequipped item.
+            page.Entities=new[]{new ColonyEntity { Id=1,Kind=ColonyEntityKind.Item }};
+            var legacy=EntityStateCodec.Encode(page);
+            legacy[0]=3; legacy[14]=(byte)ColonyEntityKind.Storage;
+            Assert.Equal(byte.MaxValue,EntityStateCodec.Decode(legacy).Entities[0].StorageMeter);
+        }
+
+        [Fact]
         public void DensePageRetainsStoredFoodIdentityFreshnessAndRecipeAmounts()
         {
             var entries = Enumerable.Range(800, EntityStateCodec.MaxCount).Select(id => new ColonyEntity {

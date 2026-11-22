@@ -49,6 +49,7 @@ namespace Queyang.Game
             int sequence=sample<0 ? Mathf.FloorToInt(Time.unscaledTime) : sample;
             view.EntityPayload = NativeEntitySampler.Capture(view, world,sequence);
             var piles = new List<ColonyPile>();
+            var ids = new HashSet<int>();
             int cells = view.Cells.Length;
             for (int i = 0; i < cells; i++)
             {
@@ -58,18 +59,11 @@ namespace Queyang.Game
                 for (var item = First(cell); item != null; item = item.nextItem)
                 {
                     var pickup = item.pickupable;
-                    if (!IsOre(pickup) || Grid.PosToCell(pickup) != cell) continue;
-                    var p = pickup.PrimaryElement;
-                    var pos = pickup.transform.position;
-                    var anim = pickup.GetComponent<KBatchedAnimController>();
-                    piles.Add(new ColonyPile { Cell = (ushort)i, SaveId = pickup.KPrefabID.InstanceID,
-                        SubX = (byte)Mathf.RoundToInt(255 * Mathf.Clamp01(pos.x - x)),
-                        SubY = (byte)Mathf.RoundToInt(255 * Mathf.Clamp01(pos.y - y)),
-                        Animation = anim == null ? 0 : anim.currentAnim.HashValue,
-                        Material = NativeMaterialReadings.Capture(p) });
+                    if (IsOre(pickup)) AddPile(view,pickup,ids,piles);
                 }
                 view.PileCoverage[i >> 3] |= (byte)(1 << (i & 7));
             }
+            foreach (var pickup in NativeFallingOre.Active()) AddPile(view,pickup,ids,piles);
             piles.Sort((a, b) => a.SaveId.CompareTo(b.SaveId));
             // A dense dump can exceed an entire network frame. Each page remains authoritative
             // for its ID interval, including objects just removed, even when all stacks share a cell.
@@ -104,10 +98,27 @@ namespace Queyang.Game
             view.Stocks = hostStocks.GetRange(from, count).ToArray();
         }
 
+        static void AddPile(ColonyView view,Pickupable ore,HashSet<int> ids,List<ColonyPile> piles)
+        {
+            var pos=ore.transform.position;
+            int cell=Grid.PosToCell(pos);
+            if (!Grid.IsValidCell(cell)) return;
+            Grid.CellToXY(cell,out int x,out int y);
+            int dx=x-view.X,dy=y-view.Y;
+            if ((uint)dx>=ColonyView.Width || (uint)dy>=ColonyView.Height) return;
+            int i=dy*ColonyView.Width+dx;
+            if ((view.Cells[i].Flags&1)==0 || !ids.Add(ore.KPrefabID.InstanceID)) return;
+            piles.Add(new ColonyPile { Cell=(ushort)i, SaveId=ore.KPrefabID.InstanceID,
+                SubX=(byte)Mathf.RoundToInt(255*Mathf.Clamp01(pos.x-x)), SubY=(byte)Mathf.RoundToInt(255*Mathf.Clamp01(pos.y-y)),
+                Animation=ore.GetComponent<KBatchedAnimController>()?.currentAnim.HashValue??0,
+                Material=NativeMaterialReadings.Capture(ore.PrimaryElement) });
+        }
+
         internal static void Apply(ColonyView view, WorldContainer world, Transform parent)
         {
             if (view.EntityPayload != null && view.EntityPayload.Length > 0)
                 NativeEntityDisplay.Apply(view, world, parent);
+            NativeFallingOre.ObserveCoverage(view);
             observed.Clear();
             foreach (var p in view.Piles)
             {
@@ -117,34 +128,8 @@ namespace Queyang.Game
                 if (!Grid.IsValidCell(cell) || Grid.WorldIdx[cell] != world.id) continue;
                 var element = ElementLoader.FindElementByHash((SimHashes)p.Material.Element);
                 if (element == null || !element.IsSolid || !observed.Add(p.SaveId)) continue;
-                var original = KPrefabIDTracker.Get().GetInstance(p.SaveId);
-                var pickup = original == null ? null : original.GetComponent<Pickupable>();
-                if (IsOre(pickup) && pickup.PrimaryElement.ElementID == element.id)
-                {
-                    if (Grid.PosToCell(pickup) == cell)
-                    {
-                        SetVisible(pickup, true);
-                        NativeWorldMirror.ApplyPrimary(pickup.PrimaryElement, p.Material);
-                        if (view.HasEnvironment) NativeMaterialReadings.Apply(pickup.PrimaryElement, p.Material);
-                        Play(pickup.GetComponent<KBatchedAnimController>(), p.Animation);
-                        Remove(p.SaveId);
-                        continue;
-                    }
-                    SetVisible(pickup, false);
-                }
-                if (!proxies.TryGetValue(p.SaveId, out var visual) || visual.Primary.ElementID != element.id)
-                {
-                    Remove(p.SaveId);
-                    visual = Create(element, p, cell, parent);
-                    if (visual == null) continue;
-                    proxies.Add(p.SaveId, visual);
-                }
-                var pos = visual.Anim.transform.position;
-                visual.Anim.transform.position = new Vector3(x + p.SubX / 255f, y + p.SubY / 255f, pos.z);
-                visual.Cell = cell;
-                NativeWorldMirror.ApplyPrimary(visual.Primary, p.Material);
-                if (view.HasEnvironment) NativeMaterialReadings.Apply(visual.Primary, p.Material);
-                Play(visual.Anim, p.Animation);
+                if (NativeFallingOre.AcceptView(p.SaveId,view.DupePoseTick))
+                    ApplyPile(p,cell,new Vector2(x+p.SubX/255f,y+p.SubY/255f),element,parent,view.HasEnvironment);
             }
             for (int i = 0; i < view.Cells.Length; i++)
             {
@@ -157,14 +142,14 @@ namespace Queyang.Game
                 {
                     var pickup = item.pickupable;
                     if (IsOre(pickup) && pickup.KPrefabID.InstanceID >= view.PileFrom &&
-                        pickup.KPrefabID.InstanceID <= view.PileThrough && !observed.Contains(pickup.KPrefabID.InstanceID))
+                        pickup.KPrefabID.InstanceID <= view.PileThrough && !observed.Contains(pickup.KPrefabID.InstanceID) && NativeFallingOre.AcceptView(pickup.KPrefabID.InstanceID,view.DupePoseTick))
                         SetVisible(pickup, false);
                 }
             }
             removed.Clear();
             foreach (var pair in proxies)
             {
-                if (observed.Contains(pair.Key) || pair.Key < view.PileFrom || pair.Key > view.PileThrough) continue;
+                if (!NativeFallingOre.AcceptView(pair.Key,view.DupePoseTick) || observed.Contains(pair.Key) || pair.Key < view.PileFrom || pair.Key > view.PileThrough) continue;
                 var xy = Grid.CellToXY(pair.Value.Cell);
                 int x = xy.x - view.X, y = xy.y - view.Y;
                 if (x >= 0 && x < ColonyView.Width && y >= 0 && y < ColonyView.Height &&
@@ -172,6 +157,39 @@ namespace Queyang.Game
             }
             foreach (int id in removed) Remove(id);
             ApplyStocks(view, world.worldInventory);
+        }
+
+        internal static void ApplyPile(ColonyPile p,int cell,Vector2 position,Element element,Transform parent,bool environment)
+        {
+            var original = KPrefabIDTracker.Get().GetInstance(p.SaveId);
+            var pickup = original == null ? null : original.GetComponent<Pickupable>();
+            if (IsOre(pickup) && pickup.PrimaryElement.ElementID == element.id)
+            {
+                if (Vector2.Distance(pickup.transform.position,position)<=.006f)
+                {
+                    SetVisible(pickup, true);
+                    NativeWorldMirror.ApplyPrimary(pickup.PrimaryElement, p.Material);
+                    if (environment) NativeMaterialReadings.Apply(pickup.PrimaryElement, p.Material);
+                    Play(pickup.GetComponent<KBatchedAnimController>(), p.Animation);
+                    Remove(p.SaveId);
+                    return;
+                }
+                SetVisible(pickup, false);
+            }
+            if (!proxies.TryGetValue(p.SaveId, out var visual) || visual.Primary.ElementID != element.id)
+            {
+                Remove(p.SaveId);
+                visual = Create(element, p, cell, parent);
+                if (visual == null) return;
+                proxies.Add(p.SaveId, visual);
+            }
+            var pos = visual.Anim.transform.position;
+            visual.Anim.transform.position = new Vector3(position.x,position.y,pos.z);
+            visual.Anim.SetDirty();
+            visual.Cell = cell;
+            NativeWorldMirror.ApplyPrimary(visual.Primary, p.Material);
+            if (environment) NativeMaterialReadings.Apply(visual.Primary, p.Material);
+            Play(visual.Anim, p.Animation);
         }
 
         static PileVisual Create(Element e, ColonyPile pile, int cell, Transform parent)
@@ -307,6 +325,7 @@ namespace Queyang.Game
 
         internal static void Reset()
         {
+            NativeFallingOre.Reset();
             NativeEntityDisplay.Reset();
             foreach (var p in proxies.Values) if (p.Primary != null) NativeWorldMirror.DestroySelectableProxy(p.Primary.gameObject);
             proxies.Clear(); hidden.Clear(); knownTags.Clear(); guestInventory = null; stockWorld = null;

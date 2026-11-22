@@ -30,7 +30,16 @@ namespace Queyang.Game
             }
         }
 
-        internal static bool Supported(GameObject obj) => obj!=null && (obj.GetComponent<HandSanitizer>()!=null ||
+        internal static bool Supported(GameObject obj)
+        {
+            if(obj==null || obj.GetComponent<Building>()==null) return false;
+            if(obj.GetComponent<HandSanitizer>()!=null) return true;
+            foreach(var store in obj.GetComponentsInChildren<IStorage>())
+                if(store.ShouldShowInUI()) return true;
+            return false;
+        }
+
+        static bool HasKnownMeter(GameObject obj) => obj!=null && (obj.GetComponent<HandSanitizer>()!=null ||
             obj.GetComponent<RationBox>()!=null || obj.GetComponent<Refrigerator>()!=null);
 
         internal static string Encode(GameObject obj,int page)
@@ -108,13 +117,26 @@ namespace Queyang.Game
         static readonly AccessTools.FieldRef<FilteredStorage,MeterController> FoodMeter=AccessTools.FieldRefAccess<FilteredStorage,MeterController>("meter");
         static readonly AccessTools.FieldRef<RationBox,FilteredStorage> Box=AccessTools.FieldRefAccess<RationBox,FilteredStorage>("filteredStorage");
         static readonly AccessTools.FieldRef<Refrigerator,FilteredStorage> Fridge=AccessTools.FieldRefAccess<Refrigerator,FilteredStorage>("filteredStorage");
+        static readonly Func<FilteredStorage,float> FoodAmount=AccessTools.MethodDelegate<Func<FilteredStorage,float>>(AccessTools.DeclaredMethod(typeof(FilteredStorage),"GetAmountStored"));
+        static readonly Func<FilteredStorage,float> FoodCapacity=AccessTools.MethodDelegate<Func<FilteredStorage,float>>(AccessTools.DeclaredMethod(typeof(FilteredStorage),"GetMaxCapacityMinusStorageMargin"));
+
+        internal static byte SampleFoodMeter(GameObject obj)
+        {
+            var box=obj.GetComponent<RationBox>();
+            var fridge=obj.GetComponent<Refrigerator>();
+            var store=box!=null ? Box(box) : fridge!=null ? Fridge(fridge) : null;
+            if(store==null || FoodMeter(store)==null) return byte.MaxValue;
+            float amount=FoodAmount(store), limit=FoodCapacity(store);
+            float fraction=limit>0 ? Mathf.Clamp01(amount/limit) : amount>0 ? 1 : 0;
+            return (byte)Mathf.RoundToInt(fraction*254);
+        }
         MeterController clean,dirty,food;
         bool initialized;
         internal static void ApplyMeter(KSelectable target,ColonyEntity e)
         {
             if(e.Kind!=ColonyEntityKind.Storage) return;
             var prefab=Assets.TryGetPrefab(new Tag(e.Prefab));
-            if(!Supported(prefab)) return;
+            if(!HasKnownMeter(prefab)) return;
             var display=target.GetComponent<NativeFacilityStorage>()??target.gameObject.AddComponent<NativeFacilityStorage>();
             display.SetMeter(prefab,e);
         }
@@ -156,6 +178,7 @@ namespace Queyang.Game
                 if(cleanMax>0) clean?.SetPositionPercent(Mathf.Clamp01(supplied/cleanMax));
                 if(max>0) dirty?.SetPositionPercent(Mathf.Clamp01(spent/max));
             }
+            else if(e.StorageMeter!=byte.MaxValue) food?.SetPositionPercent(e.StorageMeter/254f);
             else if(e.Limit>0) food?.SetPositionPercent(Mathf.Clamp01(e.Value/e.Limit));
         }
     }

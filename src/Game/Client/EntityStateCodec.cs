@@ -19,6 +19,8 @@ namespace Queyang.Game
         public int Id, Prefab, Element, Animation;
         public ushort Cell;
         public byte SubX, SubY, Frame, Flags;
+        // 0..254 represents the native meter fraction, 255 means there is no reading.
+        public byte StorageMeter = byte.MaxValue;
         public ColonyEntityKind Kind;
         public ColonyItemPlace Place;
         public int OwnerId = -1;
@@ -52,7 +54,7 @@ namespace Queyang.Game
             using (var stream = new MemoryStream())
             using (var w = new BinaryWriter(stream))
             {
-                w.Write((byte)3); w.Write(page.From); w.Write(page.Through); w.Write((byte)page.Entities.Length);
+                w.Write((byte)4); w.Write(page.From); w.Write(page.Through); w.Write((byte)page.Entities.Length);
                 var ids = new HashSet<int>();
                 foreach (var e in page.Entities)
                 {
@@ -62,6 +64,7 @@ namespace Queyang.Game
                     w.Write((byte)e.Place); w.Write(e.OwnerId); w.Write(e.Available); w.Write(e.Reserved);
                     w.Write(e.Animation); w.Write(e.Frame); w.Write(e.Flags);
                     if (e.IsWorn) { w.Write(e.WearBuild); w.Write((byte)e.WearSymbols.Length); w.Write(e.WearSymbols); }
+                    if(e.Kind==ColonyEntityKind.Storage) w.Write(e.StorageMeter);
                     w.Write(e.Value); w.Write(e.Limit); w.Write(e.Extra); w.Write(e.IngredientTypes); w.Write((byte)e.Contents.Length);
                     foreach (var row in e.Contents) { w.Write(row.Tag); w.Write(row.Stored); w.Write(row.Required); w.Write(row.Freshness); }
                 }
@@ -76,7 +79,7 @@ namespace Queyang.Game
             using (var r = new BinaryReader(stream))
             {
                 byte version = r.ReadByte();
-                if (version < 1 || version > 3) throw new InvalidDataException("Unknown entity payload version.");
+                if (version < 1 || version > 4) throw new InvalidDataException("Unknown entity payload version.");
                 var page = new ColonyEntityPage { From = r.ReadInt32(), Through = r.ReadInt32() };
                 int count = r.ReadByte();
                 int max = version == 1 ? 56 : MaxCount;
@@ -92,13 +95,14 @@ namespace Queyang.Game
                     if (version >= 2) { e.Place = (ColonyItemPlace)r.ReadByte(); e.OwnerId = r.ReadInt32();
                         e.Available = r.ReadSingle(); e.Reserved = r.ReadSingle(); }
                     e.Animation = r.ReadInt32(); e.Frame = r.ReadByte(); e.Flags = r.ReadByte();
-                    if (version == 3 && e.IsWorn)
+                    if (version >= 3 && e.IsWorn)
                     {
                         e.WearBuild = r.ReadInt32(); int length = r.ReadByte();
                         if (length > 64) throw new InvalidDataException("Too many equipment symbols.");
                         e.WearSymbols = r.ReadBytes(length);
                         if (e.WearSymbols.Length != length) throw new EndOfStreamException();
                     }
+                    if(version>=4 && e.Kind==ColonyEntityKind.Storage) e.StorageMeter=r.ReadByte();
                     e.Value = r.ReadSingle(); e.Limit = r.ReadSingle(); e.Extra = r.ReadSingle(); e.IngredientTypes = r.ReadUInt16();
                     int n = r.ReadByte();
                     if (n > MaxIngredients) throw new InvalidDataException("Too many material rows.");

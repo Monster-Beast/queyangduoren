@@ -68,7 +68,7 @@ namespace Queyang.Integration
             if (BaselineOnly) return;
             if (!Resolve(lobby)) throw new InvalidDataException("Missing selected skill target in the fresh save");
             var r=who.GetComponent<MinionResume>();
-            if (!r.HasMasteredSkill(skill) || r.TargetHat!=hat) throw new InvalidDataException("Rejoined guest did not inherit mastered skill and hat in the save");
+            if (!r.HasMasteredSkill(skill) || (r.TargetHat??r.CurrentHat)!=hat) throw new InvalidDataException("Rejoined guest did not inherit mastered skill and hat in the save");
             reloaded=true;
             log("DUAL_GUEST_SKILL_BASELINE mastered=True targetHat=True beforeFirstViewport=True");
         }
@@ -78,7 +78,7 @@ namespace Queyang.Integration
             if (BaselineOnly || finishedRound==round) return true;
             if (!Resolve(lobby) || ManagementMenu.Instance==null) return false;
             var resume=who.GetComponent<MinionResume>();
-            if (host && (!resume.HasMasteredSkill(skill) || resume.TargetHat!=hat)) return false;
+            if (host && (!resume.HasMasteredSkill(skill) || (resume.TargetHat??resume.CurrentHat)!=hat)) return false;
             if (round==2 && !host && !reloaded) throw new InvalidDataException("Missing pre-viewport skill readback");
             if (!opened)
             {
@@ -119,7 +119,7 @@ namespace Queyang.Integration
                     return false;
                 }
             }
-            if (!resume.HasMasteredSkill(skill) || resume.TargetHat!=hat) return false;
+            if (!resume.HasMasteredSkill(skill) || (resume.TargetHat??resume.CurrentHat)!=hat) return false;
             if (round==1 && resume.AvailableSkillpoints!=initialPoints-1) throw new InvalidDataException("Learning spent an incorrect number of points");
             if (round==1)
             {

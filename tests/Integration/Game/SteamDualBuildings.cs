@@ -80,6 +80,11 @@ namespace Queyang.Integration
                 if(Time.unscaledTime-lastReport>5) { log($"DUAL_STORAGE_WAIT stage={stage} id={id} wanted={label}/{amount} actual={texts}");lastReport=Time.unscaledTime; }
                 return false;
             }
+            var labels=info.StoragePanel.GetComponentsInChildren<LocText>(false);
+            var row=labels.FirstOrDefault(t=>t.text.Contains(label));
+            if (row==null || !ShowRow(row.rectTransform)) return false;
+            var amountLabel=labels.FirstOrDefault(t=>t.text.Contains(amount));
+            if (amountLabel==null || !ShowRow(amountLabel.rectTransform)) return false;
             if (photo==null)
             {
                 string role=host?"host":"guest";
@@ -94,6 +99,21 @@ namespace Queyang.Integration
             stage++;photo=null;
             if (stage==4) SelectTool.Instance.Select(null,false);
             return stage==4;
+        }
+        static bool ShowRow(RectTransform row)
+        {
+            var scroll=row.GetComponentInParent<UnityEngine.UI.ScrollRect>();
+            if (scroll==null) return true;
+            var viewport=scroll.viewport??(RectTransform)scroll.transform;
+            var point=viewport.InverseTransformPoint(row.TransformPoint(row.rect.center));
+            if (viewport.rect.Contains(point)) return true;
+            float travel=RectTransformUtility.CalculateRelativeRectTransformBounds(viewport,scroll.content).size.y-viewport.rect.height;
+            if (travel>0)
+            {
+                scroll.StopMovement();
+                scroll.verticalNormalizedPosition=Mathf.Clamp01(scroll.verticalNormalizedPosition+(point.y-viewport.rect.center.y)/travel);
+            }
+            return false;
         }
     }
 }
