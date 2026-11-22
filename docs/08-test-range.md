@@ -7,10 +7,20 @@
 | 来源 | 适合拿来测什么 |
 |---|---|
 | 本机隔离存档，或新开 Terra 基础版并启用原版沙盒 | 推荐作为固定起点。保持地图、游戏版本、DLC、镜头和速度一致。沙盒只用于准备施工地板和材料，实际计时段由复制人原版工作推进。 |
-| 社区分享的完整存档 | 可以验证长期运行、大量建筑以及作者的实际玩法。查到的玩家仓库确实包含可下载的 `.sav`，但最后更新于 2018 年，当前版本能否读取尚未实测。载入前确认对应 DLC、版本、所需 Mod 和发布者的使用条款。 |
+| 最近一年公开的社区存档 | 可以验证长期运行、大量建筑以及作者的实际玩法。以下存档均已下载并读取头部。它们开启了 DLC。当前联机测试以基础版为准，继续使用本机无 DLC 档。 |
 | 社区蓝图 | 用于复建特定电路、管网或工作区。蓝图提供建筑布局，殖民地、人物、供料以及当前机器状态需要在测试档里准备。 |
 
-官方本机安装包含地图生成模板，本机未发现安装包随附的联机测试 `.sav`。公开检索也未找到 Klei 发布、用于联机和建筑进度回归的固定存档。Klei 问题追踪器和支持页面对本次访问返回 403，具体问题帖的附件没有逐个核实。[Klei 问题追踪](https://forums.kleientertainment.com/klei-bug-tracker/oni/) · [游戏沙盒说明](https://oxygennotincluded.wiki.gg/wiki/Sandbox_Mode) · [社区玩家存档示例](https://github.com/forteddyt/ONI-save_files) · [社区蓝图库](https://blueprintnotincluded.org/)
+官方本机安装包含地图生成模板，本机未发现安装包随附的联机测试 `.sav`。公开检索也未找到 Klei 发布、用于联机和建筑进度回归的固定存档。Klei 问题追踪器和支持页面对本次访问返回 403，具体问题帖的附件没有逐个核实。[Klei 问题追踪](https://forums.kleientertainment.com/klei-bug-tracker/oni/) · [游戏沙盒说明](https://oxygennotincluded.wiki.gg/wiki/Sandbox_Mode) · [社区蓝图库](https://blueprintnotincluded.org/)
+
+### 最近一年下载核对
+
+以下日期来自发布存档的 Git 提交。启用的内容和周期来自下载文件的原版存档头部。附件只保存在本机 `artifacts/qa/community-saves/`，未在当前分支的无 DLC 环境载入，也未验证作者所需的其他 Mod。
+
+| 存档 | 公开日期 | 已核对信息 | 来源 |
+|---|---|---|---|
+| Temporal Pigpen | 2026-04-11 | 第 0 周期，3 名复制人，启用 `EXPANSION1_ID`（Spaced Out!） | [下载原始存档](https://raw.githubusercontent.com/Akhunrah/ONI_Share/c30c975f8c975dd38a2473d4a6881428225599f7/Temporal%20Pigpen.sav) |
+| Beautiful Galaxy | 2026-09-27 | 第 88 周期，9 名复制人，启用 `EXPANSION1_ID` 和 `DLC2_ID` 至 `DLC5_ID` | [下载原始存档](https://raw.githubusercontent.com/nomansheikh/oni-duplicity/463279777c1e7266411a3ddccc2e691847b73133/test-data/saves/beautiful-galaxy.sav) |
+| Beautiful Galaxy（仓库文件名标注 744825） | 2026-09-27 | 第 89 周期，9 名复制人，同样启用了五项 DLC。文件名中的构建号与当前测试的 764025 不同 | [下载原始存档](https://raw.githubusercontent.com/nomansheikh/oni-duplicity/cc511c245fc7aee1102cc6e685b63eee26631ccb/test-data/saves/beautiful-galaxy-build-744825.sav) |
 
 ## 自动施工工位
 
@@ -26,7 +36,7 @@
 
 ~~~powershell
 $save = '.\artifacts\qa\range-starter\Fixture.sav'
-$package = '.\artifacts\qa\QueyangCoop-0.3.2-99497FCD49BA2ACC37EC1D1B2C6B502BA35F4FAA385B1A5A8CEF147BE6CB14A9.zip'
+$package = '.\dist\QueyangCoop-0.3.2-construction-preview.zip'
 .\tests\Integration\Game\steam-dual.ps1 -HostSteamId $hostSteamId -GuestSteamId $guestSteamId `
     -SavePath $save -PackagePath $package -CheckConstruction -SkipManagement
 ~~~
@@ -34,6 +44,8 @@ $package = '.\artifacts\qa\QueyangCoop-0.3.2-99497FCD49BA2ACC37EC1D1B2C6B502BA35
 运行成功时，两边报告都出现三个 `CONSTRUCTION_RANGE` 阶段，目录里有 6 张 `range-*.png`。录屏和普通重连验收由既有双端脚本继续执行。若施工阶段超时，先看两端报告中的阶段、格号、已交付质量和施工数值，核对原版复制人有材料、有路可走且正在施工。
 
 首次复现使用 15EB 血条预览包。格 49788 的同一蓝图 ID 2357 在两端均为 0% → 28.2%，客机中间记录为 400 kg 已交付，完工后同为成品 ID 2369。原版施工进度条在房主画面可见，客机画面只有施工效果和侧栏数据。该轮完成重连和带 Mod、无 Mod 两种独立读档。[修复前的两端截图](evidence/qa/dual-construction-range.jpg)
+
+施工预览包 SHA-256 为 `99497FCD49BA2ACC37EC1D1B2C6B502BA35F4FAA385B1A5A8CEF147BE6CB14A9`。运行 `ddfa85a12eb849909b276eefd0a74c1a` 两端实际进度条均为 28.9%，材料均为 400 kg，完工后旧条隐藏。运行 `3e293916b17044ee9e6ac2622ace8a48` 重复通过，进度条 28.8%、同一成品 ID 2380，完成重连及两次独立读档。截图仍有原版优先标志、浮字和部分完工状态标志的差异。[双端修复后截图](evidence/qa/dual-9949-construction.jpg) · [施工预览包](../dist/QueyangCoop-0.3.2-construction-preview.zip)
 
 ## 下一批工位
 
