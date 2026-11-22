@@ -37,8 +37,10 @@ namespace Queyang.Integration
                 .GroupBy(e=>e.targetSymbol).Select(g=>g.OrderByDescending(e=>e.priority).First())
                 .OrderBy(e=>e.targetSymbol.HashValue)
                 .Select(e=>e.targetSymbol+"="+e.sourceSymbol.hash+"@"+e.sourceSymbol.build.fileHash+":"+e.priority);
-            var textures=mat==null ? "-" : string.Join(",",mat.GetTexturePropertyNames().Select(n=>
-                n+"="+(mat.GetTexture(n)?.name??"-")+"/"+(batch.matProperties.GetTexture(n)?.name??"-")));
+            var textures=mat==null ? "-" : string.Join(",",KAnimBatchManager.AtlasNames.Select((key,i)=>
+                i+"="+(mat.GetTexture(key)?.name??"-")+"/"+(batch.matProperties.GetTexture(key)?.name??"-")).Concat(
+                new[]{"instanceTex","buildAndAnimTex","symbolInstanceTex","symbolOverrideInfoTex"}.Select(n=>
+                n+"="+(mat.GetTexture(n)?.name??"-")+"/"+(batch.matProperties.GetTexture(n)?.name??"-"))));
             log("DUAL_SKILL_PORTRAIT frame="+anim.GetCurrentFrameIndex()+" batch="+batch.id+" group="+batch.batchGroup+
                 " material="+mat?.name+" shader="+mat?.shader?.name+" symbols="+string.Join(",",symbols)+" textures="+textures);
         }

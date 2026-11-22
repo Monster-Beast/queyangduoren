@@ -117,7 +117,14 @@ namespace Queyang.Integration
             if (round==2) { done=2; return false; }
             if (step==0)
             {
-                int at=Grid.PosToCell(original); Grid.CellToXY(at,out int x,out int y);
+                int at=Grid.PosToCell(original);
+                int landing=Enumerable.Range(0,Grid.CellCount).Where(c=>Grid.WorldIdx[c]==Grid.WorldIdx[at] &&
+                    Grid.GetCellDistance(c,at)>=4 && Grid.GetCellDistance(c,at)<=10 && !Grid.Solid[c] &&
+                    Grid.IsValidCell(Grid.CellAbove(c)) && !Grid.Solid[Grid.CellAbove(c)] &&
+                    Grid.IsValidCell(Grid.CellBelow(c)) && Grid.Solid[Grid.CellBelow(c)] && Grid.Visible[c]>0 &&
+                    Components.LiveMinionIdentities.Items.All(d=>d==null || Grid.GetCellDistance(Grid.PosToCell(d),c)>=3))
+                    .OrderBy(c=>Grid.GetCellDistance(c,at)).First(c=>original.GetComponent<Navigator>().CanReach(c));
+                Grid.CellToXY(landing,out int x,out int y);
                 printed=NativePrintedDupe.Print(x,y);
                 var def=Assets.GetBuildingDef(MedicalCotConfig.ID);
                 clinic=Components.Clinics.Items.FirstOrDefault(c=>c!=null && c.GetComponent<Assignable>()?.assignee==null && ClusterUtil.GetMyWorldId(c)==ClusterManager.Instance.activeWorldId);
@@ -167,7 +174,10 @@ namespace Queyang.Integration
             var resume=newcomer.GetComponent<MinionResume>();
             if (!resume.HasMasteredSkill(Data(lobby,"skill")) || (resume.TargetHat??resume.CurrentHat)!=Data(lobby,"hat") ||
                 Original(lobby).GetComponent<ConsumableConsumer>().IsPermitted(Data(lobby,"food"))==(Data(lobby,"allowed")=="1"))
-                throw new InvalidDataException("Saved newcomer skill/hat or consumption setting missing on rejoin");
+                throw new InvalidDataException("Saved newcomer "+Data(lobby,"id")+" skill="+Data(lobby,"skill")+
+                    " mastered="+resume.HasMasteredSkill(Data(lobby,"skill"))+" expectedHat="+Data(lobby,"hat")+
+                    " currentHat="+resume.CurrentHat+" targetHat="+resume.TargetHat+" food="+Data(lobby,"food")+
+                    " permitted="+Original(lobby).GetComponent<ConsumableConsumer>().IsPermitted(Data(lobby,"food"))+" originalAllowed="+Data(lobby,"allowed"));
             // A patient may have left after recovering while the colony ran.
             log("DUAL_GUEST_PERSON_BASELINE newNativeDuplicant=True skillAndHat=True foodPermission=True beforeFirstViewport=True");
         }

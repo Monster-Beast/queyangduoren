@@ -109,7 +109,8 @@ namespace Queyang.Game
                 int c=Grid.XYToCell(x,y);
                 bool lit=cells[c]==0?Grid.LightCount[c]>0:cells[c]==2;
                 var next=force?new Color32(255,255,255,255):lit?on:default;
-                if(!pixels[c].Equals(next)) { pixels[c]=next;dirty=true; }
+                var old=pixels[c];
+                if(old.a!=next.a || old.r!=next.r || old.g!=next.g || old.b!=next.b) { pixels[c]=next;dirty=true; }
             }
             if(dirty) texture.Apply(false,false);
         }

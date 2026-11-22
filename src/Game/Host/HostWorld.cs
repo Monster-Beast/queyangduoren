@@ -118,6 +118,7 @@ namespace Queyang.Game
                     Activity = chore == null ? "Idle" : chore.choreType.Id
                 };
                 NativeDupeAppearance.Capture(anim,ref d);
+                d.HealthFill=NativeDupeHealth.Capture(anim);
                 dupes.Add(d);
             }
             view.SetDupePage(dupes,sample>=0 ? sample : Mathf.FloorToInt(Time.unscaledTime));
@@ -125,6 +126,7 @@ namespace Queyang.Game
             NativeResources.Capture(view, world,sample);
             NativeManagement.CaptureHud(view,world);
             NativeColonyLighting.Capture(view,world,sample);
+            view.HasHealthBars=view.LightMask!=null && view.Dupes.Length>0;
             view.HasPileAppearance=view.HasEntombed && view.HasColonyHud;
             OrderOwnership.Capture(view,sample);
             return view.Encode();

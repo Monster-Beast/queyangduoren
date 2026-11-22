@@ -11,6 +11,23 @@ namespace Queyang.Core.Tests
         static ColonyView View() => new ColonyView { Native = true, Detailed = true, HasResources = true };
 
         [Fact]
+        public void HealthBarsStayWithTheirPersonAndOlderViewsOmitThem()
+        {
+            var v=View();
+            v.HasDupeAppearance=true;
+            v.Cells[0].Flags=1;
+            v.Dupes=new[]{new ColonyDupe{Id=1,SaveId=79,HealthFill=-1},new ColonyDupe{Id=2,SaveId=2358,HealthFill=150}};
+            Assert.False(ColonyView.Decode(v.Encode()).HasHealthBars);
+            v.LightMask=new byte[ColonyView.Width*ColonyView.Height/8];
+            v.HasHealthBars=true;
+            var copy=ColonyView.Decode(v.Encode());
+            Assert.True(copy.HasHealthBars);
+            Assert.Equal(v.Dupes.Select(d=>d.HealthFill),copy.Dupes.Select(d=>d.HealthFill));
+            v.Dupes[1].HealthFill=1001;
+            Assert.Throws<InvalidDataException>(()=>v.Encode());
+        }
+
+        [Fact]
         public void BuriedMarkerDistinguishesHiddenSolidReleasedAndOlderViewport()
         {
             var view=View();
@@ -208,6 +225,23 @@ namespace Queyang.Core.Tests
             Assert.Throws<InvalidDataException>(()=>v.Encode());
             v.DupePoseTick=0;
             Assert.Equal(0,ColonyView.Decode(v.Encode()).DupePoseTick);
+        }
+
+        [Fact]
+        public void ArtificialLightMaskAndDrawSourcesSurviveWithoutHud()
+        {
+            var view=View();view.HasEnvironment=true;
+            view.LightMask=new byte[ColonyView.Width*ColonyView.Height/8];view.LightMask[3]=129;
+            var source=new ColonyLight {Id=-40,Order=3,X=13.125f,Y=4.25f,Z=16.1f,OffsetX=.25f,Range=6,
+                DirectionY=-1,Shape=1,Angle=35,Red=1.7f,Green=.75f,Blue=.5f,Overlay=0xF0877208,DrawOverlay=true};
+            view.Lights=new[]{source};
+            var copy=ColonyView.Decode(view.Encode());
+            Assert.False(copy.HasColonyHud);Assert.False(copy.HasPileAppearance);
+            Assert.Equal(view.LightMask,copy.LightMask);Assert.Equal(source,Assert.Single(copy.Lights));
+            view.Lights=new[]{source,source};
+            Assert.Throws<InvalidDataException>(()=>view.Encode());
+            view.LightMask=null;
+            Assert.Null(ColonyView.Decode(view.Encode()).LightMask);
         }
 
         [Fact]

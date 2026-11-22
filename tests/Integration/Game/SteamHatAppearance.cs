@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Collections.Generic;
 using HarmonyLib;
 using Queyang.Game;
 using Steamworks;
@@ -16,6 +17,8 @@ namespace Queyang.Integration
         bool moved;
         string stableSignature;
         float stableAt,nextProgress;
+        int centeredFrames;
+        string desiredHat;
         static string Value(CSteamID lobby,string key)=>SteamMatchmaking.GetLobbyData(lobby,key);
         static void Set(CSteamID lobby,string key,string value)
         { if (!SteamMatchmaking.SetLobbyData(lobby,key,value)) throw new IOException("Could not publish hat evidence"); }
@@ -56,6 +59,7 @@ namespace Queyang.Integration
                 var alternate=Db.Get().Skills.resources.First(s=>!s.deprecated && !string.IsNullOrEmpty(s.hat) && s.hat!=first &&
                     Db.Get().AccessorySlots.Hat.Lookup(s.hat)!=null);
                 string want=change==2 ? null : change==1 ? alternate.hat : first;
+                desiredHat=want;
                 if (opened!=stage)
                 {
                     if (change==1) resume.AddAdditionalHat("QA",alternate.hat);
@@ -66,7 +70,12 @@ namespace Queyang.Integration
                 if (!screen.IsScreenActive()) return false;
                 var callback=AccessTools.Method(typeof(SkillsScreen),"OnHatDropEntryClick",new[]{typeof(IListableOption),typeof(object)});
                 callback.Invoke(screen,new object[]{want==null ? null : new HatListable(want,want),null});
-                // Complete ONI's native hat delivery on this paused fixture after the host selected it.
+                // The isolated fixture completes the actual delivery callback immediately. Remove
+                // the queued vanilla chores so a second delivery cannot apply the cleared target.
+                var provider=identity.GetComponent<ChoreProvider>();
+                var chores=(Dictionary<int,List<Chore>>)AccessTools.Field(typeof(ChoreProvider),"choreWorldMap").GetValue(provider);
+                foreach(var chore in chores.Values.SelectMany(v=>v).OfType<PutOnHatChore>().Where(c=>c.gameObject==identity.gameObject).ToArray())
+                    chore.Cancel("Fixture delivered selected hat");
                 if (want!=null) resume.ApplyTargetHat();
                 if (resume.CurrentHat!=want || resume.TargetHat!=null ||
                     a.GetComponent<Accessorizer>().GetAccessory(Db.Get().AccessorySlots.Hat)?.Id!=want)
@@ -82,12 +91,21 @@ namespace Queyang.Integration
                 // Accessorizer installs the new accessory's batch overrides on a later Unity frame.
                 if (stableSignature!=current) { stableSignature=current;stableAt=Time.unscaledTime;return false; }
                 if (Time.unscaledTime-stableAt<.4f) return false;
+                string required=(desiredHat??"-")+":"+(desiredHat==null?"0":"1")+":";
+                if (!current.StartsWith(required,StringComparison.Ordinal) || identity.GetComponent<MinionResume>().CurrentHat!=desiredHat)
+                    throw new InvalidDataException("Host stable hat differs from selection at stage "+stage+" wanted="+desiredHat+" actual="+current);
                 if (expected!=current) { Set(lobby,key,current);return false; }
             }
             if (string.IsNullOrEmpty(expected) || expected!=current) return false;
             var pos=a.transform.position;
-            camera.SetPosition(new Vector3(pos.x,pos.y+.8f,camera.transform.position.z));
+            var center=new Vector3(pos.x,pos.y+.8f,camera.transform.position.z);
+            camera.SetTargetPos(center,4,false);
+            camera.SetPosition(center);
             camera.OrthographicSize=4f;
+            var inFrame=camera.baseCamera.WorldToViewportPoint(center);
+            if(Mathf.Abs(inFrame.x-.5f)>.025f || Mathf.Abs(inFrame.y-.5f)>.025f ||
+                Mathf.Abs(camera.baseCamera.orthographicSize-4)>.15f) {centeredFrames=0;return false;}
+            if(++centeredFrames<4) return false;
             if (frame==null)
             {
                 frame=new FixtureFrame(Path.Combine(Path.GetDirectoryName(Environment.GetEnvironmentVariable("QY_SMOKE_REPORT")),
@@ -100,7 +118,7 @@ namespace Queyang.Integration
             if (host && SteamMatchmaking.GetLobbyMemberData(lobby,peer,"qy_hat_seen")!=stage.ToString()) return false;
             if (!host) SteamMatchmaking.SetLobbyMemberData(lobby,"qy_hat_seen",stage.ToString());
             log("DUAL_HAT_APPEARANCE role="+role+" stage="+stage+" id="+id+" symbols="+expected);
-            stage++; frame=null;
+            stage++; frame=null;centeredFrames=0;
             if (stage==8) { camera.SetTargetPos(before,zoom,false);camera.SetPosition(before);camera.OrthographicSize=zoom; }
             return stage==8;
         }

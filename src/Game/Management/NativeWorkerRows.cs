@@ -23,6 +23,7 @@ namespace Queyang.Game
         static readonly HashSet<int> seenWorkers=new HashSet<int>();
         static readonly System.Reflection.MethodInfo addWorkerRow=AccessTools.Method(typeof(TableScreen),"AddRow",new[]{typeof(IAssignableIdentity)});
         static readonly System.Reflection.MethodInfo dirtyTable=AccessTools.Method(typeof(TableScreen),"MarkRowsDirty",Type.EmptyTypes);
+        static readonly System.Reflection.MethodInfo refreshWorkerRow=AccessTools.Method(typeof(JobsTableScreen),"RefreshSingleMinionRow",new[]{typeof(IAssignableIdentity)});
         static int workerPage;
         static string workerVersion;
         static bool WorkerTableOpen(KScreen screen) => screen!=null && screen.isActiveAndEnabled && screen.IsScreenActive();
@@ -159,7 +160,18 @@ namespace Queyang.Game
                     stored.choreGroupPriorities[jobs[i].IdHash]=new ChoreConsumer.PriorityInfo{priority=priorities[i]-'0'};
                     dirty=true;
                 }
-            if (dirty) MarkJobs();
+            var table=ManagementMenu.Instance?.jobsScreen;
+            if (dirty && WorkerTableOpen(table)) refreshWorkerRow.Invoke(table,new object[]{stored});
+        }
+
+        [HarmonyPatch(typeof(TableRow),"ConfigureContent")]
+        static class LiveWorkerStyle
+        {
+            static void Postfix(TableRow __instance,IAssignableIdentity __0)
+            {
+                if (__0 is StoredMinionIdentity stored && stored.GetComponent<GuestWorkerCard>()!=null &&
+                    __instance.TryGetComponent<CanvasGroup>(out var group)) group.alpha=1f;
+            }
         }
 
         [HarmonyPatch(typeof(StoredMinionIdentity),"CleanupLimboMinions",new Type[0])]

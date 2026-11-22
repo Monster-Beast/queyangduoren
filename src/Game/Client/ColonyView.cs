@@ -77,6 +77,7 @@ namespace Queyang.Game
         public ColonyDupePose Pose;
         public int Hat,Hair,HatHair;
         public byte HeadVisibility;
+        public short HealthFill; // -1 when ONI hides the health bar, otherwise permille.
     }
 
     public struct ColonyDupePose
@@ -94,6 +95,7 @@ namespace Queyang.Game
         public bool Detailed;
         public bool HasResources;
         public bool HasDupeAppearance;
+        public bool HasHealthBars;
         public bool HasEntombed;
         public bool HasPileAppearance;
         public byte[] LightMask;
@@ -190,7 +192,8 @@ namespace Queyang.Game
                 w.Write(LightMask!=null ? (ushort)11 : HasPileAppearance ? (ushort)10 : HasColonyHud ? (ushort)9 : extended ? (ushort)8 : HasResources ? (ushort)7 : Detailed ? (ushort)6 : Native ? NativeVersion : (ushort)4);
                 bool orders = extended && Array.Exists(Cells,c=>c.DigMaterial!=0 || c.HasBlueprintTint || c.MopOrdered || c.OrderPriority!=0 || c.OrderTargetId!=0 || c.SeparateOrderPriority!=0);
                 if (extended) w.Write((byte)((HasEnvironment ? 1 : 0) | (EntityPayload != null ? 2 : 0) | (orders ? 4 : 0) | (dupeRange ? 8 : 0) | (DupePoseTick!=0 ? 16 : 0) | (OrderMarks!=null ? 32 : 0) | (HasDupeAppearance ? 64 : 0) | (HasEntombed ? 128 : 0)));
-                if (LightMask!=null) w.Write((byte)((HasColonyHud?1:0)|(HasPileAppearance?2:0)));
+                if(HasHealthBars && LightMask==null) throw new InvalidDataException("Health bars require the native v11 viewport");
+                if (LightMask!=null) w.Write((byte)((HasColonyHud?1:0)|(HasPileAppearance?2:0)|(HasHealthBars?4:0)));
                 w.Write(X); w.Write(Y);
                 w.Write(Cycle); w.Write(CycleFraction); w.Write(Paused); w.Write(Speed);
                 w.Write((ushort)names.Count);
@@ -273,6 +276,11 @@ namespace Queyang.Game
                     }
                 }
                 if (LightMask!=null) WriteLighting(w);
+                if (HasHealthBars) foreach(var dupe in Dupes)
+                {
+                    if(dupe.HealthFill< -1 || dupe.HealthFill>1000) throw new InvalidDataException("Invalid health bar");
+                    w.Write(dupe.HealthFill);
+                }
                 if (extended && stream.Length > MaxViewport)
                 {
                     // Keep all readings and stock labels when a dense full tile compresses well.
@@ -322,7 +330,7 @@ namespace Queyang.Game
                 if (version==8 && extensions == 128 && !inflated) return InflateViewport(r);
                 if (version >= 8 && (extensions & 123) == 0) throw new InvalidDataException("Invalid viewport extensions.");
                 int flags=version==11 ? r.ReadByte() : version==10 ? 3 : version==9 ? 1 : 0;
-                if (flags==2 || flags>3) throw new InvalidDataException("Invalid viewport features");
+                if ((flags&3)==2 || flags>7) throw new InvalidDataException("Invalid viewport features");
                 var v = new ColonyView { Native = version >= 5, Detailed = version >= 6, HasResources = version >= 7,
                     X = r.ReadInt32(), Y = r.ReadInt32(), HasEntombed=(extensions & 128)!=0 };
                 if (v.X < 0 || v.Y < 0 || v.X > int.MaxValue - Width || v.Y > int.MaxValue - Height)
@@ -442,6 +450,16 @@ namespace Queyang.Game
                     }
                 }
                 if (version==11) v.ReadLighting(r);
+                if((flags&4)!=0)
+                {
+                    v.HasHealthBars=true;
+                    for(int i=0;i<v.Dupes.Length;i++)
+                    {
+                        short fill=r.ReadInt16();
+                        if(fill< -1 || fill>1000) throw new InvalidDataException("Invalid health bar");
+                        v.Dupes[i].HealthFill=fill;
+                    }
+                }
                 if (stream.Position != stream.Length) throw new InvalidDataException("Trailing viewport bytes.");
                 return v;
             }

@@ -360,6 +360,7 @@ namespace Queyang.Game
                 }
                 if (anim == null) continue;
                 if (view.HasDupeAppearance) NativeDupeAppearance.Apply(anim,d,view.DupePoseTick);
+                if(view.HasHealthBars) NativeDupeHealth.Apply(anim,d.HealthFill);
                 if (dupe == null && !string.IsNullOrEmpty(d.Name) && anim.gameObject.name != d.Name)
                 {
                     anim.gameObject.name = d.Name;
@@ -464,6 +465,7 @@ namespace Queyang.Game
             if (anim == null) return;
             if (visible ? hidden.Remove(anim) : hidden.Add(anim))
             {
+                if(!visible) anim.GetComponent<NativeDupeHealth>()?.Hide();
                 var tool = SelectTool.Instance;
                 if (!visible && tool != null && tool.selected != null && tool.selected.gameObject == anim.gameObject)
                     ClearSelection(anim.gameObject);
