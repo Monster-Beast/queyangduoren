@@ -27,6 +27,7 @@ namespace Queyang.Integration
         readonly SteamDualLighting lighting=new SteamDualLighting();
         readonly SteamDualHealth health=new SteamDualHealth();
         readonly SteamConstructionRange constructionRange=new SteamConstructionRange();
+        readonly SteamFloorRange floorRange=new SteamFloorRange();
         readonly SteamAreaDigRange areaDig=new SteamAreaDigRange();
         readonly SteamAlertRange alertRange=new SteamAlertRange();
         readonly SteamSweepSymbolRange sweepRange=new SteamSweepSymbolRange();
@@ -286,6 +287,7 @@ namespace Queyang.Integration
                     if (!researchMotion.Check(lobby,self,false,round,log)) break;
                     if (!buildingMotion.Check(lobby,self,false,round,log)) break;
                     if (!dupeFeedback.Check(lobby,self,false,round,log)) break;
+                    if (!floorRange.Check(lobby,self,false,round,log)) break;
                     if (!constructionRange.Check(lobby,self,false,round,log)) break;
                     if (!areaDig.Check(lobby,self,false,round,Grid.InvalidCell,log)) break;
                     if (!health.Check(lobby,self,false,round,log)) break;

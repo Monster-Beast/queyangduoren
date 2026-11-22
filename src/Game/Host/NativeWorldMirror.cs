@@ -187,6 +187,8 @@ namespace Queyang.Game
 
         static void ApplyBuilding(int cell,ColonyCell sample,int tick)
         {
+            buildings.TryGetValue(sample.BuildingHash, out var def);
+            NativeBlockTiles.Apply(cell, sample, def);
             var local = HostWorld.FindBuilding(cell);
             var item = local == null ? null : local.GetComponent<Building>();
             bool match = item != null && new HashedString(item.Def.PrefabID).HashValue == sample.BuildingHash &&
@@ -219,7 +221,7 @@ namespace Queyang.Game
             }
             byte flags = (byte)(sample.Flags & 48);
             bool deconstruct = (sample.BuildingStyle & 128) != 0;
-            if (flags == 0 || (match && !deconstruct) || !buildings.TryGetValue(sample.BuildingHash, out var def))
+            if (flags == 0 || (match && !deconstruct) || def == null)
             {
                 RemoveBuildingMarker(cell);
                 return;
@@ -515,6 +517,7 @@ namespace Queyang.Game
 
         internal static void Reset()
         {
+            NativeBlockTiles.Reset();
             NativeDupePose.ClearTracks();
             if (markerRoot != null) DestroySelectableProxy(markerRoot);
             markerRoot = null;
