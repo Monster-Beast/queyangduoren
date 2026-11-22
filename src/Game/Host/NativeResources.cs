@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using HarmonyLib;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -23,6 +24,8 @@ namespace Queyang.Game
         static readonly HashSet<Pickupable> hidden = new HashSet<Pickupable>();
         static readonly AccessTools.FieldRef<KAnimBatch,Dictionary<KAnimConverter.IAnimConverter,int>> BatchSlots=
             AccessTools.FieldRefAccess<KAnimBatch,Dictionary<KAnimConverter.IAnimConverter,int>>("controllersToIdx");
+        static readonly System.Action<KBatchedAnimController> Unregister=AccessTools.MethodDelegate<System.Action<KBatchedAnimController>>(AccessTools.DeclaredMethod(typeof(KBatchedAnimController),"DeRegister"));
+        static readonly System.Action<KBatchedAnimController> Register=AccessTools.MethodDelegate<System.Action<KBatchedAnimController>>(AccessTools.DeclaredMethod(typeof(KBatchedAnimController),"Register"));
 
         sealed class PileVisual
         {
@@ -79,6 +82,14 @@ namespace Queyang.Game
             view.PileFrom = pilePage == 0 ? 0 : piles[firstPile - 1].SaveId + 1;
             view.PileThrough = pilePage == pilePageCount - 1 ? int.MaxValue : piles[firstPile + pileCount - 1].SaveId;
             view.Piles = piles.GetRange(firstPile, pileCount).ToArray();
+            // The ID range defines page coverage. Inside a page preserve the engine's
+            // actual mesh instance order for items which originally shared a batch.
+            System.Array.Sort(view.Piles,(a,b)=>
+            {
+                int c=a.Cell.CompareTo(b.Cell);if(c!=0)return c;
+                c=a.Z.CompareTo(b.Z);if(c!=0)return c;
+                return DrawOrder(a.SaveId).slot.CompareTo(DrawOrder(b.SaveId).slot);
+            });
             if (stockWorld != world || Time.unscaledTime >= nextStockSample)
             {
                 stockWorld = world; nextStockSample = Time.unscaledTime + 1f;
@@ -107,13 +118,13 @@ namespace Queyang.Game
         // Render() offsets each native batch slightly in Z; within one mesh, instances
         // submit triangles in increasing slot order. The two games allocate different
         // batch IDs and slots. Preserve their visible ordering for overlapping piles.
-        static (float depth,int slot) DrawOrder(int id)
+        static (float depth,int slot,int batchId) DrawOrder(int id)
         {
             var anim=KPrefabIDTracker.Get().GetInstance(id)?.GetComponent<KBatchedAnimController>();
             var batch=anim?.GetBatch();
-            if(batch==null) return (anim?.GetZ()??0,-1);
+            if(batch==null) return (anim?.GetZ()??0,-1,-1);
             BatchSlots(batch).TryGetValue(anim,out int slot);
-            return (batch.position.z+.01f/(1+batch.id%256),slot);
+            return (batch.position.z+.01f/(1+batch.id%256),slot,batch.id);
         }
         static void OrderOverlappingPiles(List<ColonyPile> piles)
         {
@@ -124,6 +135,7 @@ namespace Queyang.Game
                 cmp=a.Z.CompareTo(b.Z);if(cmp!=0)return cmp;
                 var left=DrawOrder(a.SaveId);var right=DrawOrder(b.SaveId);
                 cmp=left.depth.CompareTo(right.depth);if(cmp!=0)return cmp;
+                cmp=left.batchId.CompareTo(right.batchId);if(cmp!=0)return cmp;
                 cmp=right.slot.CompareTo(left.slot);return cmp!=0 ? cmp : a.SaveId.CompareTo(b.SaveId);
             });
             for(int start=0;start<piles.Count;)
@@ -131,9 +143,12 @@ namespace Queyang.Game
                 int end=start+1;
                 while(end<piles.Count && piles[end].Cell==piles[start].Cell && piles[end].Z==piles[start].Z) end++;
                 float spacing=Mathf.Min(.012f,Mathf.Abs(Grid.GetLayerZ(Grid.SceneLayer.Ore)-Grid.GetLayerZ(Grid.SceneLayer.Front))*.15f/(end-start));
+                int prior=DrawOrder(piles[start].SaveId).batchId,rank=0;
                 for(int i=start+1;i<end;i++)
                 {
-                    var p=piles[i];p.Z+=(i-start)*spacing;piles[i]=p;
+                    var p=piles[i];int batch=DrawOrder(p.SaveId).batchId;
+                    if(batch!=prior) {rank++;prior=batch;}
+                    p.Z+=rank*spacing;piles[i]=p;
                 }
                 start=end;
             }
@@ -184,6 +199,7 @@ namespace Queyang.Game
                 if (NativeFallingOre.AcceptView(p.SaveId,view.DupePoseTick))
                     ApplyPile(p,cell,new Vector2(x+p.SubX/255f,y+p.SubY/255f),element,parent,view.HasEnvironment);
             }
+            if(view.HasPileAppearance) RestoreMeshOrder(view.Piles);
             for (int i = 0; i < view.Cells.Length; i++)
             {
                 if (!view.CoversPiles(i) || (view.Cells[i].Flags & 1) == 0) continue;
@@ -210,6 +226,41 @@ namespace Queyang.Game
             }
             foreach (int id in removed) Remove(id);
             ApplyStocks(view, world.worldInventory);
+        }
+
+        static void RestoreMeshOrder(ColonyPile[] piles)
+        {
+            for(int i=0;i<piles.Length;)
+            {
+                int end=i+1;
+                while(end<piles.Length && piles[end].Cell==piles[i].Cell && piles[end].Z==piles[i].Z) end++;
+                if(end-i>1)
+                {
+                    var members=new List<KBatchedAnimController>(end-i);
+                    for(int j=i;j<end;j++)
+                    {
+                        var a=GetSelectable(piles[j].SaveId)?.GetComponent<KBatchedAnimController>();
+                        if(a!=null && a.GetBatch()!=null) members.Add(a);
+                    }
+                    foreach(var group in members.GroupBy(a=>a.GetBatch()))
+                    {
+                        var slots=BatchSlots(group.Key);
+                        int last=-1;
+                        foreach(var a in group)
+                        {
+                            if(!slots.TryGetValue(a,out int current)) continue;
+                            if(last>current)
+                            {
+                                foreach(var member in group) Unregister(member);
+                                foreach(var member in group) { Register(member);member.SetDirty(); }
+                                break;
+                            }
+                            last=current;
+                        }
+                    }
+                }
+                i=end;
+            }
         }
 
         internal static void ApplyPile(ColonyPile p,int cell,Vector2 position,Element element,Transform parent,bool environment)

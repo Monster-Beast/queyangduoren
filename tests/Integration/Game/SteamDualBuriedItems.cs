@@ -29,6 +29,7 @@ namespace Queyang.Integration
         float centeredSince=-1;
         int centeredFrames,lastCenteredFrame=-1;
         string published;
+        string batchEvidence;
         float nextArtLog;
         static readonly FieldInfo slots=AccessTools.Field(typeof(KAnimBatch),"controllersToIdx");
 
@@ -49,6 +50,7 @@ namespace Queyang.Integration
         string RenderedPiles()
         {
             var rows=new List<(int id,float depth,int slot,string art)>();
+            var batches=new List<string>();
             void Add(int key,KBatchedAnimController a,PrimaryElement primary)
             {
                 if(!Visible(a) || primary==null || Grid.PosToCell(a.transform.position)!=source ||
@@ -59,6 +61,7 @@ namespace Queyang.Integration
                 var order=(IDictionary)slots.GetValue(batch);
                 if(!order.Contains(a)) return;
                 Color32 c=a.TintColour;
+                batches.Add(FormattableString.Invariant($"{key}/z{a.GetZ():R}/batch{batch.id}/group{batch.batchGroup.HashValue}/meshZ{batch.position.z:R}/slot{order[a]}"));
                 var matrix=string.Join(",",gpu.Skip(2).Select(f=>Mathf.RoundToInt(1000*f).ToString()));
                 rows.Add((key,batch.position.z+.01f/(1+batch.id%256),(int)order[a],
                     $"{key}/{(int)primary.ElementID}/{a.GetCurrentAnim()?.animFile?.hashName.HashValue}/{a.currentAnim.HashValue}/{c.r},{c.g},{c.b},{c.a}/{matrix}"));
@@ -70,6 +73,7 @@ namespace Queyang.Integration
             }
             foreach(var p in UnityEngine.Object.FindObjectsByType<NativeEntityIdentity>(FindObjectsSortMode.None))
                 Add(p.SaveId,p.GetComponent<KBatchedAnimController>(),p.GetComponent<PrimaryElement>());
+            batchEvidence=string.Join("|",batches);
             return string.Join("|",rows.OrderBy(row=>row.depth).ThenByDescending(row=>row.slot).ThenBy(row=>row.id).Select(row=>row.art));
         }
         bool SameArt(CSteamID room,bool host,string phase,KBatchedAnimController art,Action<string> log)
@@ -166,6 +170,7 @@ namespace Queyang.Integration
             if(photo==null)
             {
                 log(FormattableString.Invariant($"DUAL_BURIED_CAMERA step={step} cell={source} center={cellCenter.x:0.000},{cellCenter.y:0.000} subject={subjectPoint.x:0.000},{subjectPoint.y:0.000} stableFrames={centeredFrames}"));
+                if(step=="after") log("DUAL_BURIED_BATCHES "+batchEvidence);
                 string dir=Path.GetDirectoryName(Environment.GetEnvironmentVariable("QY_SMOKE_REPORT"));
                 photo=new FixtureFrame(Path.Combine(dir,"buried-"+(host?"host":"guest")+"-"+step+".png"));
                 photo.Capture();return false;

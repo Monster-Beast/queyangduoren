@@ -87,6 +87,10 @@ namespace Queyang.Integration
                         if (raw!=null) line.Append(" raw").Append(name).Append("=").Append(ColorUtility.ToHtmlStringRGBA(Pixel(raw,x,y)));
                     }
                 }
+                var light=LightBuffer.Instance;
+                var bound=light?.Material?.GetTexture("_PropertyWorldLight");
+                if(bound!=null) line.Append(" materialWorldLight=").Append(ColorUtility.ToHtmlStringRGBA(Pixel(bound,x,y)));
+                if(light?.Texture!=null) line.Append(" renderedLight=").Append(ColorUtility.ToHtmlStringRGBA(PixelAt(light.Texture,uv)));
                 line.Append(" rawFlow=").Append(Raw("externalFlowTex",cell,8)).Append(" rawMatter=").Append(Raw("externalMaterialDataTex",cell,4));
                 log(line.ToString());
             }

@@ -310,6 +310,10 @@ try {
                 if (!(Test-Path $file) -or (Get-Item $file).Length -lt 45) { throw "Missing buried-item screenshot $role $step." }
             }
         }
+        foreach ($step in 'before','after') {
+            $a=$drivers.host;$b=$drivers.guest
+            & (Join-Path $PSScriptRoot 'compare-buried.ps1') -HostPng (Get-Physical $a (Join-Path $a.base "buried-host-$step.png")) -GuestPng (Get-Physical $b (Join-Path $b.base "buried-guest-$step.png"))
+        }
     }
     if ($CheckFallingOre) {
         foreach ($role in $roles) {
