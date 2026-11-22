@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Globalization;
 using System.Linq;
 using HarmonyLib;
 using Queyang.Game;
@@ -14,7 +15,7 @@ namespace Queyang.Integration
         int start=-1,stage,tracked=-1,changes,spans;
         static SteamAreaDigRange awaiting;
         int[] cells;
-        float limit,last,min=1,max,nextLog;
+        float limit,min=1,max,nextLog;
         bool issued,heldWork;
         FixtureFrame frame;
         Vector3 oldCamera;
@@ -114,8 +115,7 @@ namespace Queyang.Integration
             }
             if(stage==1)
             {
-                bool peerReady=host && SteamMatchmaking.GetLobbyMemberData(room,peer,"qy_area_bar_ready")=="1";
-                if(host && (tracked<0 || peerReady && changes<2) && SpeedControlScreen.Instance.IsPaused)
+                if(host && tracked<0 && SpeedControlScreen.Instance.IsPaused)
                     SpeedControlScreen.Instance.Unpause(false);
                 if(tracked<0)
                 {
@@ -130,14 +130,47 @@ namespace Queyang.Integration
                     {tracked=-1;return false;}
                 }
                 var working=Reading(tracked,host);
-                if(working!=null && working.gameObject.activeInHierarchy && working.bar.isActiveAndEnabled)
+                bool visible=working!=null && working.gameObject.activeInHierarchy && working.bar.isActiveAndEnabled;
+                float amount=visible?working.PercentFull:0;
+                var culture=CultureInfo.InvariantCulture;
+                if(changes==0 && visible && amount>0 && amount<.85f)
                 {
-                    float amount=working.PercentFull;
-                    if(amount>0 && amount<1 && (changes==0 || amount-last>.015f))
-                    { changes++;last=amount;min=Math.Min(min,amount);max=Math.Max(max,amount); }
+                    if(host)
+                    {
+                        string ready=SteamMatchmaking.GetLobbyMemberData(room,peer,"qy_area_bar_ready");
+                        if(float.TryParse(ready,NumberStyles.Float,culture,out float first) && Math.Abs(first-amount)<.015f)
+                        {
+                            min=amount;changes=1;
+                            SteamMatchmaking.SetLobbyData(room,"qy_area_initial",min.ToString("R",culture));
+                        }
+                    }
+                    else
+                    {
+                        string initial=SteamMatchmaking.GetLobbyData(room,"qy_area_initial");
+                        if(float.TryParse(initial,NumberStyles.Float,culture,out float first))
+                        {min=first;changes=1;}
+                        else SteamMatchmaking.SetLobbyMemberData(room,"qy_area_bar_ready",amount.ToString("R",culture));
+                    }
                 }
-                if(!host && changes>0) SteamMatchmaking.SetLobbyMemberData(room,"qy_area_bar_ready","1");
-                if(host && changes>=2 && !heldWork) {SpeedControlScreen.Instance.Pause(false);heldWork=true;}
+                if(host && changes==1 && !heldWork)
+                {
+                    if(SpeedControlScreen.Instance.IsPaused) SpeedControlScreen.Instance.Unpause(false);
+                    if(visible && amount>=min+.1f && amount<1f)
+                    {
+                        SpeedControlScreen.Instance.Pause(false);heldWork=true;
+                    }
+                }
+                else if(host && heldWork && changes==1 && visible && amount>=min+.1f)
+                {
+                    max=amount;changes=2;
+                    SteamMatchmaking.SetLobbyData(room,"qy_area_high",max.ToString("R",culture));
+                }
+                if(!host && changes==1 && visible)
+                {
+                    string high=SteamMatchmaking.GetLobbyData(room,"qy_area_high");
+                    if(float.TryParse(high,NumberStyles.Float,culture,out float value) && Math.Abs(value-amount)<.015f)
+                    {max=amount;changes=2;}
+                }
                 if(Time.realtimeSinceStartup>=nextLog && changes<2)
                 {
                     nextLog=Time.realtimeSinceStartup+4;
